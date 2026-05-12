@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #1a1a1a;
+  --color-primary-fixed: #ffcc00;
+  --color-primary-fixed-dim: #e6b800;
+  --color-primary-container: #ffcc00;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #1a1a1a;
+
+  --color-secondary: #e63b2e;
+  --color-secondary-fixed: #ffdad6;
+  --color-secondary-fixed-dim: #ffb3ab;
+  --color-secondary-container: #ffdad6;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #1a1a1a;
+
+  --color-tertiary: #0055ff;
+  --color-tertiary-fixed: #d6e3ff;
+  --color-tertiary-fixed-dim: #a8c6ff;
+  --color-tertiary-container: #d6e3ff;
+  --color-on-tertiary: #ffffff;
+  --color-on-tertiary-container: #1a1a1a;
+
+  --color-error: #cc0000;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
+  --color-on-error-container: #93000a;
+
+  --color-background: #f5f0e8;
+  --color-on-background: #1a1a1a;
+
+  --color-surface: #f5f0e8;
+  --color-on-surface: #1a1a1a;
+  --color-surface-variant: #e8e3da;
+  --color-on-surface-variant: #4a4a4a;
+  --color-surface-container: #eee9e0;
+  --color-surface-container-high: #e8e3da;
+  --color-surface-container-low: #f2ede5;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-highest: #e2ddd4;
+  --color-surface-dim: #d6d1c9;
+  --color-surface-bright: #faf7f2;
+  --color-surface-tint: #1a1a1a;
+
+  --color-outline: #1a1a1a;
+  --color-outline-variant: #d0cbc3;
+  --color-inverse-surface: #1a1a1a;
+  --color-inverse-on-surface: #f5f0e8;
+  --color-inverse-primary: #f5f0e8;
+
+  --font-headline: var(--font-space-grotesk), sans-serif;
+  --font-body: var(--font-inter), sans-serif;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-background);
+  font-family: var(--font-body);
+}
+
+.neo-shadow {
+    box-shadow: 4px 4px 0px 0px var(--color-primary);
+}
+.neo-shadow-lg {
+    box-shadow: 6px 6px 0px 0px var(--color-primary);
+}
+.neo-border {
+    border: 3px solid var(--color-primary);
+}
+
+.custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: var(--color-background); border-left: 2px solid var(--color-primary); }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--color-primary); }
+.custom-scrollbar::-webkit-scrollbar-corner { background: var(--color-background); }
+
+.material-symbols-outlined {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
