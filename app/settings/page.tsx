@@ -148,6 +148,184 @@ export default function SettingsPage() {
 
           <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
 
+          {/* Agents */}
+          <div className="flex flex-col gap-6">
+            <div className="border-b-4 border-primary pb-4 mb-4 flex justify-between items-end">
+              <div>
+                <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Agent Roster</h2>
+                <p className="font-body text-on-surface-variant mt-2">Manage permanent and active temporary subagents.</p>
+              </div>
+              <button className="px-4 py-2 bg-background neo-border font-bold uppercase text-sm hover:bg-surface transition-colors flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm">add</span> Add Agent
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Supr */}
+              <div className="neo-border bg-surface p-5 flex flex-col gap-4 border-l-8 border-l-tertiary">
+                <div className="flex items-center gap-4 border-b border-outline-variant pb-4">
+                  <div className="w-12 h-12 bg-tertiary text-on-tertiary neo-border flex items-center justify-center">
+                    <span className="material-symbols-outlined text-2xl">psychology</span>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-headline font-bold uppercase text-lg">Supr</h3>
+                    <p className="font-body text-xs text-on-surface-variant uppercase">Orchestrator</p>
+                  </div>
+                  <span className="bg-secondary text-on-error px-2 py-1 text-xs font-bold uppercase border-2 border-primary">Root</span>
+                </div>
+                <p className="font-body text-sm text-on-surface-variant flex-1">Central router for all mission activity. Subagents communicate only through this agent.</p>
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-xs font-bold uppercase text-tertiary flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-tertiary animate-pulse"></span> Permanent</span>
+                  <button className="text-xs font-bold uppercase border-b-2 border-primary hover:text-tertiary transition-colors">Configure</button>
+                </div>
+              </div>
+
+              {/* Research Agent */}
+              <div className="neo-border bg-surface p-5 flex flex-col gap-4 border-l-8 border-l-primary">
+                <div className="flex items-center gap-4 border-b border-outline-variant pb-4">
+                  <div className="w-12 h-12 bg-primary-container text-on-primary-container neo-border flex items-center justify-center">
+                    <span className="material-symbols-outlined text-2xl">travel_explore</span>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-headline font-bold uppercase text-lg">Research Agent</h3>
+                    <p className="font-body text-xs text-on-surface-variant uppercase">Discovery</p>
+                  </div>
+                  <span className="bg-surface-container-high px-2 py-1 text-xs font-bold uppercase border-2 border-primary">Draft</span>
+                </div>
+                <p className="font-body text-sm text-on-surface-variant flex-1">Gathers, reads, compares, and summarizes information from files or web.</p>
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-xs font-bold uppercase text-primary flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary"></span> Permanent</span>
+                  <button className="text-xs font-bold uppercase border-b-2 border-primary hover:text-primary transition-colors">Configure</button>
+                </div>
+              </div>
+
+              {/* Code Agent */}
+              <div className="neo-border bg-surface p-5 flex flex-col gap-4 border-l-8 border-l-primary">
+                <div className="flex items-center gap-4 border-b border-outline-variant pb-4">
+                  <div className="w-12 h-12 bg-primary-container text-on-primary-container neo-border flex items-center justify-center">
+                    <span className="material-symbols-outlined text-2xl">code</span>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-headline font-bold uppercase text-lg">Code Agent</h3>
+                    <p className="font-body text-xs text-on-surface-variant uppercase">Implementation</p>
+                  </div>
+                  <span className="bg-primary text-on-primary px-2 py-1 text-xs font-bold uppercase border-2 border-primary">Execute</span>
+                </div>
+                <p className="font-body text-sm text-on-surface-variant flex-1">Works inside the code workspace to edit files, run tests, and report failures.</p>
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-xs font-bold uppercase text-primary flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary"></span> Permanent</span>
+                  <button className="text-xs font-bold uppercase border-b-2 border-primary hover:text-primary transition-colors">Configure</button>
+                </div>
+              </div>
+
+              {/* QA Agent */}
+              <div className="neo-border bg-surface p-5 flex flex-col gap-4 border-l-8 border-l-primary">
+                <div className="flex items-center gap-4 border-b border-outline-variant pb-4">
+                  <div className="w-12 h-12 bg-primary-container text-on-primary-container neo-border flex items-center justify-center">
+                    <span className="material-symbols-outlined text-2xl">fact_check</span>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-headline font-bold uppercase text-lg">QA / Critic</h3>
+                    <p className="font-body text-xs text-on-surface-variant uppercase">Quality Control</p>
+                  </div>
+                  <span className="bg-surface-container-high px-2 py-1 text-xs font-bold uppercase border-2 border-primary">Observe</span>
+                </div>
+                <p className="font-body text-sm text-on-surface-variant flex-1">Reviews outputs against standards. Checks evidence, completeness, and tests.</p>
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-xs font-bold uppercase text-primary flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary"></span> Permanent</span>
+                  <button className="text-xs font-bold uppercase border-b-2 border-primary hover:text-primary transition-colors">Configure</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
+          {/* Memory Banks */}
+          <div className="flex flex-col gap-6">
+            <div className="border-b-4 border-primary pb-4 mb-4 flex justify-between items-end">
+              <div>
+                <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Memory Banks</h2>
+                <p className="font-body text-on-surface-variant mt-2">Manage learned context across different retention layers.</p>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* User Memory */}
+              <div className="neo-border bg-surface flex flex-col h-full relative group">
+                <div className="p-4 border-b-4 border-primary bg-primary-container text-on-primary-container flex justify-between items-center">
+                  <h3 className="font-headline font-bold uppercase text-lg flex items-center gap-2">
+                    <span className="material-symbols-outlined">person</span> User Memory
+                  </h3>
+                  <span className="bg-background px-2 py-1 text-[10px] font-bold uppercase border-2 border-primary">Persistent</span>
+                </div>
+                <div className="p-4 flex-1 flex flex-col gap-3 font-body text-sm bg-background">
+                  <p className="text-on-surface-variant text-xs uppercase font-bold tracking-wider mb-2">Learned Preferences</p>
+                  <div className="p-2 border-l-4 border-secondary bg-surface">
+                    <strong>Role:</strong> Technical Lead / Executive
+                  </div>
+                  <div className="p-2 border-l-4 border-secondary bg-surface">
+                    <strong>Tone:</strong> Direct, concise, analytical
+                  </div>
+                  <div className="p-2 border-l-4 border-secondary bg-surface">
+                    <strong>Constraint:</strong> Prefers PR reviews over auto-commits
+                  </div>
+                </div>
+                <button className="p-3 border-t-4 border-primary font-bold uppercase text-xs hover:bg-primary hover:text-on-primary transition-colors flex justify-center items-center gap-2">
+                   <span className="material-symbols-outlined text-[16px]">edit</span> Edit Facts
+                </button>
+              </div>
+
+              {/* Workspace Memory */}
+              <div className="neo-border bg-surface flex flex-col h-full relative group">
+                <div className="p-4 border-b-4 border-primary bg-tertiary-container text-on-tertiary-container flex justify-between items-center">
+                  <h3 className="font-headline font-bold uppercase text-lg flex items-center gap-2">
+                    <span className="material-symbols-outlined">folder_special</span> Workspace
+                  </h3>
+                  <span className="bg-background px-2 py-1 text-[10px] font-bold uppercase border-2 border-primary">Persistent</span>
+                </div>
+                <div className="p-4 flex-1 flex flex-col gap-3 font-body text-sm bg-background">
+                  <p className="text-on-surface-variant text-xs uppercase font-bold tracking-wider mb-2">Project Context</p>
+                  <div className="p-2 border-l-4 border-tertiary bg-surface">
+                    <strong>Stack:</strong> Next.js, Tailwind, Python ADK
+                  </div>
+                  <div className="p-2 border-l-4 border-tertiary bg-surface">
+                    <strong>Design:</strong> Neo-brutalist (heavy borders)
+                  </div>
+                  <div className="p-2 border-l-4 border-tertiary bg-surface">
+                    <strong>Architecture:</strong> Client-side rendering for command channel
+                  </div>
+                </div>
+                <button className="p-3 border-t-4 border-primary font-bold uppercase text-xs hover:bg-primary hover:text-on-primary transition-colors flex justify-center items-center gap-2">
+                   <span className="material-symbols-outlined text-[16px]">upload_file</span> Ingest Docs
+                </button>
+              </div>
+
+              {/* Mission Memory */}
+              <div className="neo-border bg-surface flex flex-col h-full relative group">
+                <div className="p-4 border-b-4 border-primary bg-surface-variant flex justify-between items-center">
+                  <h3 className="font-headline font-bold uppercase text-lg flex items-center gap-2">
+                    <span className="material-symbols-outlined">radar</span> Mission
+                  </h3>
+                  <span className="bg-error text-on-error px-2 py-1 text-[10px] font-bold uppercase border-2 border-primary">Ephemeral</span>
+                </div>
+                <div className="p-4 flex-1 flex flex-col gap-3 font-body text-sm bg-background">
+                  <p className="text-on-surface-variant text-xs uppercase font-bold tracking-wider mb-2">Active Context: BuildSignal</p>
+                  <div className="p-2 border-l-4 border-outline-variant bg-surface font-mono text-xs overflow-hidden break-all text-primary">
+                    <span className="block mb-1 opacity-50">// Short-term cache</span>
+                    "found 3 stale github issues relating to export latency... user wants to prioritize cognitive debt resolution... current focus is Context Scan phase..."
+                  </div>
+                </div>
+                <button className="p-3 border-t-4 border-primary font-bold uppercase text-xs text-error hover:bg-error hover:text-on-error transition-colors flex justify-center items-center gap-2">
+                   <span className="material-symbols-outlined text-[16px]">delete</span> Purge Cache
+                </button>
+              </div>
+
+            </div>
+          </div>
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
           {/* Standards */}
           <div className="flex flex-col gap-6">
             <div className="border-b-4 border-primary pb-4 mb-4">

@@ -1,0 +1,50 @@
+{
+  "missions": [
+    {
+      "id": "m1",
+      "name": "BuildSignal",
+      "objective": "Q3 Roadmap Planning",
+      "status": "Active",
+      "readinessScore": 87,
+      "phases": [
+        { "id": "1", "name": "Intake", "status": "Done" },
+        { "id": "2", "name": "Signal Ingest", "status": "Done" },
+        { "id": "3", "name": "Pain Clustering", "status": "Done" },
+        { "id": "4", "name": "Context Scan", "status": "Active" },
+        { "id": "5", "name": "Prioritize", "status": "Gate_Pending" },
+        { "id": "6", "name": "Spec Gen", "status": "Pending" },
+        { "id": "7", "name": "QA Gate", "status": "Pending" }
+      ],
+      "tasks": [
+        { "id": "t1", "title": "Analyze competitor telemetry", "description": "Extracted signals from 3 major competitors indicating vulnerability in Q3 metrics.", "agentName": "Research Agent", "agentIcon": "travel_explore", "status": "Done" },
+        { "id": "t2", "title": "Cross-reference feature usage", "description": "Scanning internal logs to match competitor feature gaps with our high-usage modules.", "agentName": "Supr", "agentIcon": "psychology", "status": "Active" }
+      ],
+      "messages": [
+        { "id": 1, "sender": "Supr", "text": "Mission BuildSignal initialized. Target data ingested.", "isUser": false },
+        { "id": 2, "sender": "You", "text": "Proceed to context scan.", "isUser": true },
+        { "id": 3, "sender": "Supr", "text": "Context scan running. Waiting on approval gate for prioritization.", "isUser": false },
+        { 
+          "id": 4, 
+          "sender": "Supr", 
+          "text": "", 
+          "isUser": false,
+          "approvalRequest": {
+            "id": "gate-1",
+            "requestingAgent": "Supr",
+            "action": "Expand scope to include abandoned GitHub issues",
+            "riskLevel": "Medium",
+            "permission": "Observe + Draft",
+            "reason": "Pain clustering revealed correlations with stale issues.",
+            "suprRecommendation": "Approve to improve context."
+          }
+        }
+      ]
+    }
+  ],
+  "agents": [
+    { "id": "a1", "name": "Supr", "role": "Orchestrator", "icon": "psychology", "isActive": true, "permissionTier": "Root", "isPermanent": true, "description": "Central router for all mission activity. Subagents communicate only through this agent." },
+    { "id": "a2", "name": "Research Agent", "role": "Discovery", "icon": "travel_explore", "isActive": false, "permissionTier": "Draft", "isPermanent": true, "description": "Gathers, reads, compares, and summarizes information from files or web." },
+    { "id": "a3", "name": "Code Agent", "role": "Implementation", "icon": "code", "isActive": false, "permissionTier": "Execute", "isPermanent": true, "description": "Works inside the code workspace to edit files, run tests, and report failures." },
+    { "id": "a4", "name": "QA / Critic", "role": "Quality Control", "icon": "fact_check", "isActive": false, "permissionTier": "Observe", "isPermanent": true, "description": "Reviews outputs against standards. Checks evidence, completeness, and tests." }
+  ]
+}
