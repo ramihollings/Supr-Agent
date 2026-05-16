@@ -2,65 +2,48 @@
 
 import { TopNav } from '@/components/TopNav';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { InlineApproval, ApprovalRequest } from '@/components/InlineApproval';
 import { Glidepath, Phase } from '@/components/Glidepath';
 import { TaskBoard, Task } from '@/components/TaskBoard';
 import { AgentTeamSidebar } from '@/components/AgentTeamSidebar';
 import { AgentInfo } from '@/components/AgentCard';
-
-type Message = {
-  id: number;
-  sender: string;
-  text: string;
-  isUser: boolean;
-  approvalRequest?: ApprovalRequest;
-};
+import { fetchMissionState, fetchAgentsState } from '@/app/actions';
+import { Message } from '@/types';
 
 export default function MissionControlPage() {
   const [command, setCommand] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    { id: 1, sender: 'Supr', text: 'Mission BuildSignal initialized. Target data ingested.', isUser: false },
-    { id: 2, sender: 'You', text: 'Proceed to context scan.', isUser: true },
-    { id: 3, sender: 'Supr', text: 'Context scan running. Waiting on approval gate for prioritization.', isUser: false },
-    { 
-      id: 4, 
-      sender: 'Supr', 
-      text: '', 
-      isUser: false,
-      approvalRequest: {
-        id: 'gate-1',
-        requestingAgent: 'Supr',
-        action: 'Expand scope to include abandoned GitHub issues',
-        riskLevel: 'Medium',
-        permission: 'Observe + Draft',
-        reason: 'Pain clustering revealed correlations with stale issues.',
-        suprRecommendation: 'Approve to improve context.'
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [phases, setPhases] = useState<Phase[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [readinessScore, setReadinessScore] = useState(0);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [mission, agentData] = await Promise.all([
+          fetchMissionState(),
+          fetchAgentsState()
+        ]);
+        
+        if (mission) {
+          setMessages(mission.messages || []);
+          setPhases(mission.phases || []);
+          setTasks(mission.tasks || []);
+          setReadinessScore(mission.readinessScore || 0);
+        }
+        
+        if (agentData) {
+          setAgents(agentData);
+        }
+      } catch (err) {
+        console.error("Failed to load initial DB state", err);
       }
     }
-  ]);
-
-  const [phases, setPhases] = useState<Phase[]>([
-    { id: '1', name: 'Intake', status: 'Done' },
-    { id: '2', name: 'Signal Ingest', status: 'Done' },
-    { id: '3', name: 'Pain Clustering', status: 'Done' },
-    { id: '4', name: 'Context Scan', status: 'Active' },
-    { id: '5', name: 'Prioritize', status: 'Gate_Pending' },
-    { id: '6', name: 'Spec Gen', status: 'Pending' },
-    { id: '7', name: 'QA Gate', status: 'Pending' },
-  ]);
-
-  const [tasks, setTasks] = useState<Task[]>([
-    { id: 't1', title: 'Analyze competitor telemetry', description: 'Extracted signals from 3 major competitors indicating vulnerability in Q3 metrics.', agentName: 'Research Agent', agentIcon: 'travel_explore', status: 'Done' },
-    { id: 't2', title: 'Cross-reference feature usage', description: 'Scanning internal logs to match competitor feature gaps with our high-usage modules.', agentName: 'Supr', agentIcon: 'psychology', status: 'Active' }
-  ]);
-
-  const [agents, setAgents] = useState<AgentInfo[]>([
-    { id: 'a1', name: 'Supr', role: 'Orchestrator', icon: 'psychology', isActive: true, permissionTier: 'Root' },
-    { id: 'a2', name: 'Research Agent', role: 'Discovery', icon: 'travel_explore', isActive: false, permissionTier: 'Draft' },
-    { id: 'a3', name: 'Spec Agent', role: 'Planner', icon: 'edit_document', isActive: false, permissionTier: 'Edit' }
-  ]);
+    loadData();
+  }, []);
 
   const handleApprovalDecision = (id: string, decision: 'approve' | 'reject' | 'revise') => {
     setMessages(prev => [...prev, { id: Date.now(), sender: 'You', text: `Approval Gate ${decision}d.`, isUser: true }]);
@@ -189,7 +172,7 @@ export default function MissionControlPage() {
         {/* Center Column: Glidepath & Board */}
         <section className="flex-1 flex flex-col overflow-y-auto custom-scrollbar p-6 lg:p-8 gap-8">
           {/* Glidepath */}
-          <Glidepath phases={phases} readinessScore={87} />
+          <Glidepath phases={phases} readinessScore={readinessScore} />
 
           {/* Task Board */}
           <TaskBoard tasks={tasks} />

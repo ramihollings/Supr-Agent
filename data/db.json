@@ -38,13 +38,40 @@
             "suprRecommendation": "Approve to improve context."
           }
         }
+      ],
+      "artifacts": [
+        {
+          "id": "art-1",
+          "filename": "technical_spec.md",
+          "type": "markdown",
+          "content": "# Technical Spec\n\n## Overview\nThis document outlines the proposed resolution for the export latency issue."
+        },
+        {
+          "id": "art-2",
+          "filename": "telemetry_script.py",
+          "type": "code",
+          "content": "import json\nimport time\n\ndef track_export_latency():\n    start = time.time()\n    # Simulate export\n    time.sleep(1.5)\n    return time.time() - start\n\nprint(track_export_latency())"
+        }
+      ],
+      "activityLog": [
+        { "id": "ev1", "eventType": "supr_decision", "actor": "Supr", "actorIcon": "psychology", "summary": "Mission classified as BuildSignal.", "detail": "User supplied customer feedback and asked what to build next. Supr selected BuildSignal workflow.", "timestamp": "09:00 AM" },
+        { "id": "ev2", "eventType": "agent_action", "actor": "Signal Agent", "actorIcon": "sensors", "summary": "Created temporary Signal Agent.", "detail": "Supr spun up a temporary agent for feedback clustering. Permission: Observe + Draft. Expires on mission completion.", "timestamp": "09:05 AM" },
+        { "id": "ev3", "eventType": "task_complete", "actor": "Signal Agent", "actorIcon": "sensors", "summary": "Signal Agent clustered feedback.", "detail": "Found 3 distinct pain groups from 50 support tickets.", "timestamp": "09:15 AM" },
+        { "id": "ev4", "eventType": "task_complete", "actor": "Research Agent", "actorIcon": "travel_explore", "summary": "Research Agent completed context scan.", "detail": "Analyzed competitor telemetry. Extracted signals from 3 major competitors.", "timestamp": "09:42 AM" },
+        { "id": "ev5", "eventType": "approval", "actor": "User", "actorIcon": "account_circle", "summary": "User approved scope expansion.", "detail": "Research Agent authorized to read abandoned_github_issues.csv.", "timestamp": "10:45 AM" },
+        { "id": "ev6", "eventType": "failure", "actor": "QA / Critic", "actorIcon": "fact_check", "summary": "Spec Agent produced invalid Brief.", "detail": "Reason: Missing test cases. Supr issued revised guidance and incremented retry count.", "timestamp": "10:22 AM" },
+        { "id": "ev7", "eventType": "supr_decision", "actor": "Supr", "actorIcon": "psychology", "summary": "Sent revised guidance to Spec Agent.", "detail": "Failure type: Quality Failure. Supr updated task guidance: include at least 3 test cases covering edge cases.", "timestamp": "10:25 AM" }
+      ],
+      "failures": [
+        { "id": "f1", "taskId": "t-spec-brief", "agentName": "Spec Agent", "failureType": "Quality Failure", "attemptNumber": 1, "summary": "Build Brief missing test cases.", "suprGuidance": "Include at least 3 test cases covering edge cases and data validation.", "resolved": true }
       ]
     }
   ],
   "agents": [
-    { "id": "a1", "name": "Supr", "role": "Orchestrator", "icon": "psychology", "isActive": true, "permissionTier": "Root", "isPermanent": true, "description": "Central router for all mission activity. Subagents communicate only through this agent." },
-    { "id": "a2", "name": "Research Agent", "role": "Discovery", "icon": "travel_explore", "isActive": false, "permissionTier": "Draft", "isPermanent": true, "description": "Gathers, reads, compares, and summarizes information from files or web." },
-    { "id": "a3", "name": "Code Agent", "role": "Implementation", "icon": "code", "isActive": false, "permissionTier": "Execute", "isPermanent": true, "description": "Works inside the code workspace to edit files, run tests, and report failures." },
-    { "id": "a4", "name": "QA / Critic", "role": "Quality Control", "icon": "fact_check", "isActive": false, "permissionTier": "Observe", "isPermanent": true, "description": "Reviews outputs against standards. Checks evidence, completeness, and tests." }
+    { "id": "a1", "name": "Supr", "role": "Root Orchestrator", "icon": "psychology", "isActive": true, "permissionTier": "Root", "isPermanent": true, "description": "Central router for all mission activity. Subagents communicate only through this agent.", "isSupervisor": true },
+    { "id": "a2", "name": "Research Agent", "role": "Discovery", "icon": "travel_explore", "isActive": false, "permissionTier": "Draft", "isPermanent": true, "description": "Gathers, reads, compares, and summarizes information from files or web.", "reportsTo": "a1" },
+    { "id": "a3", "name": "Code Agent", "role": "Implementation", "icon": "code", "isActive": false, "permissionTier": "Execute", "isPermanent": true, "description": "Works inside the code workspace to edit files, run tests, and report failures.", "reportsTo": "a5" },
+    { "id": "a4", "name": "QA / Critic", "role": "Quality Control", "icon": "fact_check", "isActive": false, "permissionTier": "Observe", "isPermanent": true, "description": "Reviews outputs against standards. Checks evidence, completeness, and tests.", "reportsTo": "a5" },
+    { "id": "a5", "name": "Sub-Supr (Frontend)", "role": "Delegated Orchestrator", "icon": "account_tree", "isActive": true, "permissionTier": "Execute", "isPermanent": false, "description": "Manages a specialized sub-team to execute frontend-specific tasks.", "isSupervisor": true, "reportsTo": "a1" }
   ]
 }

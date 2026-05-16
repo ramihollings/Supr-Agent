@@ -57,6 +57,18 @@ export function Sidebar() {
             </Link>
           </li>
           <li>
+            <Link href="/research" className="flex items-center gap-3 px-4 py-3 text-primary bg-transparent hover:bg-surface-container font-body font-bold uppercase text-sm hover:text-primary transition-all active:translate-x-0.5 active:translate-y-0.5 border-2 border-transparent">
+              <span className="material-symbols-outlined">travel_explore</span>
+              <span>Research</span>
+            </Link>
+          </li>
+          <li>
+            <Link href="/mission-packet" className="flex items-center gap-3 px-4 py-3 text-primary bg-transparent hover:bg-surface-container font-body font-bold uppercase text-sm hover:text-primary transition-all active:translate-x-0.5 active:translate-y-0.5 border-2 border-transparent">
+              <span className="material-symbols-outlined">inventory_2</span>
+              <span>Mission Packet</span>
+            </Link>
+          </li>
+          <li>
             <Link href="/settings" className="flex items-center gap-3 px-4 py-3 text-primary bg-transparent hover:bg-surface-container font-body font-bold uppercase text-sm hover:text-primary transition-all active:translate-x-0.5 active:translate-y-0.5 border-2 border-transparent">
               <span className="material-symbols-outlined">settings</span>
               <span>Settings</span>

@@ -25,6 +25,8 @@ export interface Agent {
   permissionTier: string;
   isPermanent: boolean;
   description: string;
+  isSupervisor?: boolean;
+  reportsTo?: string;
 }
 
 export interface ApprovalRequest {
@@ -45,6 +47,34 @@ export interface Message {
   approvalRequest?: ApprovalRequest;
 }
 
+export interface Artifact {
+  id: string;
+  filename: string;
+  type: 'code' | 'markdown' | 'data';
+  content: string;
+}
+
+export interface ActivityEvent {
+  id: string;
+  eventType: 'approval' | 'failure' | 'task_complete' | 'agent_action' | 'supr_decision' | 'permission';
+  actor: string;
+  actorIcon: string;
+  summary: string;
+  detail: string;
+  timestamp: string;
+}
+
+export interface FailureEvent {
+  id: string;
+  taskId: string;
+  agentName: string;
+  failureType: string;
+  attemptNumber: number;
+  summary: string;
+  suprGuidance: string;
+  resolved: boolean;
+}
+
 export interface Mission {
   id: string;
   name: string;
@@ -54,6 +84,9 @@ export interface Mission {
   phases: Phase[];
   tasks: Task[];
   messages: Message[];
+  artifacts?: Artifact[];
+  activityLog?: ActivityEvent[];
+  failures?: FailureEvent[];
 }
 
 export interface DatabaseSchema {
