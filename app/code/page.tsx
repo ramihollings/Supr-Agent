@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { fetchMissionState, logActivityAction, recordFailureAction, updateTaskStatusAction } from '@/app/actions';
+import { Mission } from '@/types';
 
 type TerminalLine = {
   id: number;
@@ -17,6 +19,20 @@ export default function CodePage() {
   const [activeFile, setActiveFile] = useState('feedback_clusters.py');
   const [codeHasFix, setCodeHasFix] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [mission, setMission] = useState<Mission | null>(null);
+
+  useEffect(() => {
+    async function init() {
+      const activeMission = await fetchMissionState();
+      if (activeMission) {
+        setMission(activeMission);
+        // Sync retry count from mission failures if any
+        const codeFailures = activeMission.failures?.filter(f => f.agentName === 'Code Agent');
+        if (codeFailures) setRetryCount(codeFailures.length);
+      }
+    }
+    init();
+  }, []);
 
   const handleRunTest = async () => {
     if (isRunning) return;
@@ -40,6 +56,24 @@ export default function CodePage() {
       ]);
       setTriageState('failed');
       setRetryCount(prev => prev + 1);
+
+      if (mission) {
+        await recordFailureAction(mission.id, {
+          taskId: 't2', // Simulated active task
+          agentName: 'Code Agent',
+          failureType: 'AssertionError',
+          attemptNumber: retryCount + 1,
+          summary: "AssertionError: assert 'cluster' in Index",
+          suprGuidance: ""
+        });
+        await logActivityAction(mission.id, {
+          eventType: 'failure',
+          actor: 'Code Agent',
+          actorIcon: 'code',
+          summary: 'Test suite failed in Code Workspace',
+          detail: 'AssertionError: assert "cluster" in Index. Supr attention required.'
+        });
+      }
     } else {
       // SUCCESS path
       setTerminalLines(prev => [
@@ -49,6 +83,17 @@ export default function CodePage() {
         { id: Date.now() + 3, type: 'success', content: '1 passed in 0.38s' },
       ]);
       setTriageState('passed');
+
+      if (mission) {
+        await updateTaskStatusAction(mission.id, 't2', 'Done');
+        await logActivityAction(mission.id, {
+          eventType: 'task_complete',
+          actor: 'Code Agent',
+          actorIcon: 'code',
+          summary: 'Task complete: Cross-reference feature usage',
+          detail: 'All tests passed after ' + (retryCount + 1) + ' attempts.'
+        });
+      }
     }
     setIsRunning(false);
   };
@@ -70,6 +115,16 @@ export default function CodePage() {
       { id: Date.now() + 1, type: 'supr', content: '[SUPR] Guidance: Add fallback for missing columns in analyze_feedback().' },
       { id: Date.now() + 2, type: 'supr', content: '[SUPR] Sending revised guidance to Code Agent. Retry authorized.' },
     ]);
+
+    if (mission) {
+      await logActivityAction(mission.id, {
+        eventType: 'supr_decision',
+        actor: 'Supr',
+        actorIcon: 'psychology',
+        summary: 'Sent revised guidance to Code Agent',
+        detail: 'Failure type: Context Failure. Supr updated task guidance: add fallback for missing columns.'
+      });
+    }
 
     setTriageState('retrying');
   };

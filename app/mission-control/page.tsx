@@ -8,13 +8,14 @@ import { Glidepath, Phase } from '@/components/Glidepath';
 import { TaskBoard, Task } from '@/components/TaskBoard';
 import { AgentTeamSidebar } from '@/components/AgentTeamSidebar';
 import { AgentInfo } from '@/components/AgentCard';
-import { fetchMissionState, fetchAgentsState } from '@/app/actions';
-import { Message } from '@/types';
+import { fetchMissionState, fetchAgentsState, logActivityAction, updateTaskStatusAction } from '@/app/actions';
+import { Message, Mission } from '@/types';
 
 export default function MissionControlPage() {
   const [command, setCommand] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [missionId, setMissionId] = useState<string>('m1');
   const [phases, setPhases] = useState<Phase[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -29,7 +30,24 @@ export default function MissionControlPage() {
         ]);
         
         if (mission) {
-          setMessages(mission.messages || []);
+          setMissionId(mission.id);
+          
+          // Combine messages and failures for the command channel
+          const combinedMessages = [...(mission.messages || [])];
+          if (mission.failures) {
+            mission.failures.forEach(f => {
+              if (!f.resolved) {
+                combinedMessages.push({
+                  id: Number(f.id.replace('f-', '')),
+                  sender: 'Supr',
+                  text: `[FAILURE] Agent ${f.agentName} failed task ${f.taskId}: ${f.summary}. Guidance required.`,
+                  isUser: false
+                });
+              }
+            });
+          }
+          
+          setMessages(combinedMessages.sort((a, b) => a.id - b.id));
           setPhases(mission.phases || []);
           setTasks(mission.tasks || []);
           setReadinessScore(mission.readinessScore || 0);
@@ -57,6 +75,16 @@ export default function MissionControlPage() {
       setTasks(prev => prev.map(t => t.id === 't2' ? { ...t, status: 'Done' } : t));
       setTasks(prev => [...prev, { id: 't3', title: 'Generate Build Brief', description: 'Drafting spec based on approved priorities.', agentName: 'Spec Agent', agentIcon: 'edit_document', status: 'Active' }]);
       setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'Supr', text: 'Gate approved. Proceeding to prioritization and spec generation.', isUser: false }]);
+      
+      // Persist to DB
+      logActivityAction(missionId, {
+        eventType: 'approval',
+        actor: 'User',
+        actorIcon: 'account_circle',
+        summary: `User approved gate: ${id}`,
+        detail: `Permission Observe + Draft granted for scope expansion.`
+      });
+      updateTaskStatusAction(missionId, 't2', 'Done');
     }
   };
 
