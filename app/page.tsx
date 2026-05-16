@@ -1,9 +1,20 @@
+"use client";
+
 import { TopNav } from '@/components/TopNav';
 import Link from 'next/link';
+import { useState } from 'react';
+import { MissionWizard } from '@/components/MissionWizard';
 
 export default function WorkspacePage() {
+  const [showWizard, setShowWizard] = useState(false);
+
+  const handleNewMission = () => {
+    setShowWizard(true);
+  };
+
   return (
-    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container">
+    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container relative">
+      {showWizard && <MissionWizard onClose={() => setShowWizard(false)} />}
       <TopNav title="Workspace Overview" />
       
       <div className="p-6 lg:p-8 flex-1 overflow-y-auto space-y-8 max-w-7xl mx-auto w-full">
@@ -13,9 +24,14 @@ export default function WorkspacePage() {
             <h1 className="font-headline text-4xl md:text-5xl font-black uppercase tracking-tighter text-primary">Workspace</h1>
             <p className="font-body text-lg font-bold mt-2 text-on-surface-variant border-l-4 border-tertiary pl-3">Active projects, artifacts, and general supervisor state.</p>
           </div>
-          <button className="bg-primary text-on-primary neo-border neo-shadow font-headline font-bold uppercase py-3 px-6 hover:bg-primary-fixed hover:text-primary transition-all active:translate-x-1 active:translate-y-1">
-            <span className="flex items-center gap-2"><span className="material-symbols-outlined">add</span> New Mission</span>
-          </button>
+          <div className="relative">
+            <button 
+              onClick={handleNewMission}
+              className="bg-primary text-on-primary neo-border neo-shadow font-headline font-bold uppercase py-3 px-6 hover:bg-primary-fixed hover:text-primary transition-all active:translate-x-1 active:translate-y-1"
+            >
+              <span className="flex items-center gap-2"><span className="material-symbols-outlined">add</span> New Mission</span>
+            </button>
+          </div>
         </header>
 
         {/* Active Missions */}
@@ -44,13 +60,16 @@ export default function WorkspacePage() {
               </div>
             </div>
 
-            <div className="bg-surface-variant neo-border p-6 shadow-sm opacity-80 border-dashed">
+            <button 
+              onClick={handleNewMission}
+              className="bg-surface-variant neo-border p-6 shadow-sm opacity-80 border-dashed hover:bg-surface-container hover:opacity-100 transition-all text-left"
+            >
                <div className="flex items-center justify-center h-full min-h-[160px] text-on-surface-variant">
                   <p className="font-headline font-bold uppercase text-sm flex items-center gap-2">
                     <span className="material-symbols-outlined">add_circle</span> Assign New Mission
                   </p>
                </div>
-            </div>
+            </button>
           </div>
         </section>
 
@@ -71,7 +90,7 @@ export default function WorkspacePage() {
                 </div>
              </Link>
              
-             <div className="bg-background neo-border p-5 hover:bg-surface transition-colors hover:neo-shadow-lg flex flex-col gap-4">
+             <Link href="/research" className="bg-background neo-border p-5 hover:bg-surface transition-colors hover:neo-shadow-lg flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                   <span className="material-symbols-outlined text-tertiary text-3xl">dataset</span>
                   <span className="text-xs font-bold uppercase text-on-surface-variant">2h ago</span>
@@ -80,9 +99,9 @@ export default function WorkspacePage() {
                   <h3 className="font-headline font-bold uppercase">Competitor Telemetry JSON</h3>
                   <p className="font-body text-xs mt-1 text-on-surface-variant">Extracted from 50 competitors.</p>
                 </div>
-             </div>
+             </Link>
 
-             <div className="bg-background neo-border p-5 hover:bg-surface transition-colors hover:neo-shadow-lg flex flex-col gap-4">
+             <Link href="/code" className="bg-background neo-border p-5 hover:bg-surface transition-colors hover:neo-shadow-lg flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                   <span className="material-symbols-outlined text-primary-fixed-dim text-3xl">description</span>
                   <span className="text-xs font-bold uppercase text-on-surface-variant">1d ago</span>
@@ -91,7 +110,7 @@ export default function WorkspacePage() {
                   <h3 className="font-headline font-bold uppercase">Feature Spec Draft V1</h3>
                   <p className="font-body text-xs mt-1 text-on-surface-variant">Pending QA Agent review.</p>
                 </div>
-             </div>
+             </Link>
           </div>
         </section>
 

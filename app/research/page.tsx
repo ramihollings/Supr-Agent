@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { fetchMissionState, addArtifactAction, addMemoryItemAction, logActivityAction } from '@/app/actions';
+import { Mission } from '@/types';
 
 type SearchLogEntry = {
   id: number;
@@ -17,6 +19,15 @@ export default function ResearchPage() {
   const [searchLog, setSearchLog] = useState<SearchLogEntry[]>([]);
   const [extractedData, setExtractedData] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [mission, setMission] = useState<Mission | null>(null);
+
+  useEffect(() => {
+    async function init() {
+      const activeMission = await fetchMissionState();
+      if (activeMission) setMission(activeMission);
+    }
+    init();
+  }, []);
 
   const handleStartResearch = async () => {
     if (isRunning || !searchQuery.trim()) return;
@@ -61,6 +72,33 @@ export default function ResearchPage() {
       ...prev,
       { id: Date.now(), type: 'supr', content: `[RESEARCH AGENT] Extracted ${findings.length} findings. Returning to Supr.` },
     ]);
+
+    if (mission) {
+      // Save findings as a markdown artifact
+      await addArtifactAction(mission.id, {
+        filename: `research_${searchQuery.replace(/\s+/g, '_')}.md`,
+        type: 'markdown',
+        content: `# Research Findings: ${searchQuery}\n\n${findings.map(f => `- ${f}`).join('\n')}`
+      });
+
+      // Save high-importance findings to Memory Items
+      for (const finding of findings) {
+        await addMemoryItemAction(mission.id, {
+          key: 'research_finding',
+          value: finding,
+          importance: 'High'
+        });
+      }
+
+      await logActivityAction(mission.id, {
+        eventType: 'agent_action',
+        actor: 'Research Agent',
+        actorIcon: 'travel_explore',
+        summary: `Completed research for: ${searchQuery}`,
+        detail: `Extracted ${findings.length} key findings and added them to mission memory.`
+      });
+    }
+
     setBrowseState('done');
     setIsRunning(false);
   };

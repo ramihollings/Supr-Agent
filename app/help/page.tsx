@@ -1,10 +1,26 @@
+"use client";
+
 import { TopNav } from '@/components/TopNav';
+import { useState } from 'react';
 
 export default function HelpPage() {
+  const [showToast, setShowToast] = useState(false);
+
+  const handleSubmitTicket = () => {
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 2500);
+  };
+
   return (
-    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
+    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Documentation & Help" />
       
+      {showToast && (
+        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
+          Ticket submitted to Human Engineering ✓
+        </div>
+      )}
+
       <main className="flex-1 overflow-y-auto p-4 md:p-8 max-w-4xl mx-auto w-full">
         <header className="mb-12 border-b-4 border-primary pb-6">
           <h1 className="font-headline text-4xl md:text-5xl font-black uppercase tracking-tighter text-primary">Supr Manual</h1>
@@ -29,7 +45,10 @@ export default function HelpPage() {
               <span className="material-symbols-outlined">support_agent</span> Contacting Support
             </h2>
             <p className="font-body text-sm mb-4">If the Supr instance enters a Crash Loop or fails to parse a valid Mission Packet, please escalate to Human Engineering.</p>
-            <button className="bg-primary text-on-primary neo-border py-2 px-6 font-headline font-bold uppercase hover:bg-tertiary transition-colors">
+            <button 
+              onClick={handleSubmitTicket}
+              className="bg-primary text-on-primary neo-border py-2 px-6 font-headline font-bold uppercase hover:bg-tertiary transition-colors shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] active:translate-x-1 active:translate-y-1 active:shadow-none"
+            >
               Submit Ticket
             </button>
           </article>

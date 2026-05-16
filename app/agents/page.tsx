@@ -1,17 +1,38 @@
+"use client";
+
 import { TopNav } from '@/components/TopNav';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 export default function AgentsPage() {
+  const router = useRouter();
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2500);
+  };
+
   return (
-    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
+    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Agent Team Manager" />
       
+      {toastMessage && (
+        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
+          {toastMessage}
+        </div>
+      )}
+
       <main className="flex-1 p-6 md:p-12 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6 border-b-4 border-primary pb-6">
           <div>
             <h1 className="font-headline text-5xl md:text-7xl font-black uppercase tracking-tighter text-primary">Team Roster</h1>
             <p className="font-body text-lg font-bold mt-2 text-on-surface-variant max-w-2xl border-l-4 border-secondary pl-4">Manage autonomous and temporary agents. Allocate permissions, monitor statuses, and instantiate new operational units.</p>
           </div>
-          <button className="bg-primary text-on-primary neo-border font-headline font-bold uppercase text-xl py-4 px-8 hover:bg-background hover:text-primary neo-shadow transition-all active:translate-x-1 active:translate-y-1 flex items-center gap-3 shrink-0">
+          <button 
+            onClick={() => showToast("Opening Agent Foundry...")}
+            className="bg-primary text-on-primary neo-border font-headline font-bold uppercase text-xl py-4 px-8 hover:bg-background hover:text-primary neo-shadow transition-all active:translate-x-1 active:translate-y-1 flex items-center gap-3 shrink-0"
+          >
             <span className="material-symbols-outlined">add_circle</span>
             Create New Agent
           </button>
@@ -51,10 +72,16 @@ export default function AgentsPage() {
                 </div>
               </div>
               <div className="border-t-4 border-primary flex">
-                <button className="flex-1 py-3 font-headline font-bold uppercase border-r-4 border-primary hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => router.push('/settings')}
+                  className="flex-1 py-3 font-headline font-bold uppercase border-r-4 border-primary hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2"
+                >
                   <span className="material-symbols-outlined">settings</span> Configure
                 </button>
-                <button className="flex-1 py-3 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => router.push('/activity')}
+                  className="flex-1 py-3 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2"
+                >
                   <span className="material-symbols-outlined">history</span> Logs
                 </button>
               </div>
@@ -87,7 +114,10 @@ export default function AgentsPage() {
                 </div>
               </div>
               <div className="border-t-4 border-primary flex">
-                <button className="flex-1 py-3 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => showToast("Opening Research config...")}
+                  className="flex-1 py-3 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2"
+                >
                   <span className="material-symbols-outlined">settings</span> Configure
                 </button>
               </div>
@@ -121,7 +151,10 @@ export default function AgentsPage() {
                 </div>
               </div>
               <div className="border-t-4 border-primary flex">
-                <button className="flex-1 py-3 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => showToast("Opening Code config...")}
+                  className="flex-1 py-3 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2"
+                >
                   <span className="material-symbols-outlined">settings</span> Configure
                 </button>
               </div>
@@ -169,7 +202,10 @@ export default function AgentsPage() {
                 </div>
               </div>
               <div className="border-t-4 border-primary flex">
-                <button className="flex-1 py-3 font-headline font-bold uppercase border-r-4 border-primary hover:bg-secondary hover:text-on-error transition-colors flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => showToast("Sending termination signal...")}
+                  className="flex-1 py-3 font-headline font-bold uppercase border-r-4 border-primary hover:bg-secondary hover:text-on-error transition-colors flex items-center justify-center gap-2"
+                >
                   <span className="material-symbols-outlined">delete</span> Terminate Early
                 </button>
               </div>

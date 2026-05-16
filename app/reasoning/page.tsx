@@ -1,9 +1,36 @@
+"use client";
+
 import { TopNav } from '@/components/TopNav';
+import { useState, useEffect } from 'react';
+import { Mission, MemoryItem } from '@/types';
+import { getActiveMissionAction } from '@/app/actions';
 
 export default function ReasoningPage() {
+  const [mission, setMission] = useState<Mission | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const loadData = async () => {
+    setIsRefreshing(true);
+    const data = await getActiveMissionAction('m1');
+    setMission(data);
+    setTimeout(() => setIsRefreshing(false), 800);
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
-      <TopNav title="Reasoning & Memory Core" />
+      <TopNav title="Reasoning & Memory Core">
+         <button 
+          onClick={loadData}
+          className={`bg-background neo-border px-4 py-2 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-all active:translate-x-1 active:translate-y-1 flex items-center gap-2 ${isRefreshing ? 'animate-pulse' : ''}`}
+         >
+           <span className={`material-symbols-outlined text-[18px] ${isRefreshing ? 'animate-spin' : ''}`}>refresh</span>
+           {isRefreshing ? 'Syncing...' : 'Sync Memory'}
+         </button>
+      </TopNav>
       
       <main className="flex-1 overflow-y-auto p-4 md:p-8 max-w-7xl mx-auto w-full flex flex-col md:flex-row gap-8">
         
@@ -20,14 +47,21 @@ export default function ReasoningPage() {
             </div>
             <p className="font-body text-xs text-on-surface-variant">Active path dependencies and findings.</p>
             <div className="mt-2 space-y-2">
-               <div className="bg-surface-container p-2 border border-outline-variant font-mono text-[10px] break-all">
-                  KEY: pain_cluster_1<br/>
-                  VAL: JSON export latency causing churn.
-               </div>
-               <div className="bg-surface-container p-2 border border-outline-variant font-mono text-[10px] break-all">
-                  KEY: spec_status<br/>
-                  VAL: V2 passing QA gate.
-               </div>
+               {mission?.memoryItems && mission.memoryItems.length > 0 ? (
+                 mission.memoryItems.map((item: MemoryItem) => (
+                   <div key={item.id} className="bg-surface-container p-2 border border-outline-variant font-mono text-[10px] break-all group relative">
+                      <span className="text-secondary font-bold uppercase block mb-1">{item.key}</span>
+                      {item.value}
+                      <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="material-symbols-outlined text-[12px] cursor-pointer hover:text-primary">delete</span>
+                      </div>
+                   </div>
+                 ))
+               ) : (
+                 <div className="bg-surface-container p-4 border border-outline-variant font-body text-xs italic text-on-surface-variant text-center">
+                    No active mission memory detected.
+                 </div>
+               )}
             </div>
           </div>
 
@@ -37,6 +71,11 @@ export default function ReasoningPage() {
               <span className="material-symbols-outlined text-sm">folder_shared</span>
             </div>
             <p className="font-body text-xs text-on-surface-variant">Cross-mission standards.</p>
+            <div className="mt-2 p-2 bg-surface-container-low border border-outline-variant font-mono text-[10px] text-on-surface-variant">
+               SYSTEM_ROLE: Supervisor<br/>
+               OUTPUT_FORMAT: Neo-Brutalist<br/>
+               VERIFICATION: Multi-Agent
+            </div>
           </div>
         </section>
 
@@ -47,7 +86,6 @@ export default function ReasoningPage() {
           </header>
 
           <div className="space-y-6">
-            
             <article className="bg-background neo-border p-6 shadow-[6px_6px_0px_0px_rgba(0,85,255,1)] border-tertiary">
               <div className="flex justify-between mb-4 pb-2 border-b-2 border-outline-variant">
                 <span className="font-headline font-bold uppercase text-sm text-tertiary flex items-center gap-2">
@@ -73,10 +111,8 @@ export default function ReasoningPage() {
                 <p className="font-body text-sm italic text-on-surface-variant">"Operational standards require all drafts to include acceptance criteria and test cases. The submitted brief lacked both. Re-prompting Code Agent with standard reinforcement."</p>
               </div>
             </article>
-
           </div>
         </section>
-
       </main>
     </div>
   );

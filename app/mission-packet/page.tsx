@@ -91,7 +91,8 @@ export default function MissionPacketPage() {
           <div className="md:col-span-2 bg-surface-container p-8 neo-border neo-shadow-lg">
             <h3 className="font-headline text-2xl font-bold uppercase border-b-2 border-primary pb-4 mb-4">Mission Summary</h3>
             <p className="font-body text-lg text-primary leading-relaxed">
-              The objective of this mission was to aggregate and analyze customer feedback from Q2 to identify critical friction points and generate actionable technical recommendations for the Q3 roadmap. The analysis focused on user onboarding flow drop-offs and data export latency.
+              {mission.artifacts?.find(a => a.filename.includes('research'))?.content.split('\n')[2] || 
+               `The objective of this mission was to ${mission.objective.toLowerCase()}. The analysis focused on key technical blockers and customer friction points identified during the execution phase.`}
             </p>
           </div>
           <div className="bg-primary-container p-8 neo-border neo-shadow-lg flex flex-col items-center justify-center text-center">
@@ -99,23 +100,34 @@ export default function MissionPacketPage() {
             <div className="relative w-32 h-32 flex items-center justify-center rounded-full border-8 border-primary bg-background">
               <span className="font-headline text-4xl font-black text-primary">{mission.readinessScore}%</span>
             </div>
-            <p className="font-body text-sm font-bold mt-4 uppercase tracking-widest text-primary">High Confidence</p>
+            <p className="font-body text-sm font-bold mt-4 uppercase tracking-widest text-primary">
+              {mission.readinessScore > 80 ? 'High Confidence' : mission.readinessScore > 50 ? 'Medium Confidence' : 'In Progress'}
+            </p>
           </div>
         </section>
 
-        {/* Example addition for more realist content based on blueprint */}
+        {/* Dynamic Findings Section */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="bg-surface p-8 neo-border">
             <h3 className="font-headline text-xl font-bold uppercase border-b-2 border-primary pb-2 mb-4">Priority Findings</h3>
             <ul className="space-y-4 font-body">
-              <li className="flex items-start gap-2 border-l-4 border-tertiary pl-4">
-                <span className="font-bold">#1: Export Latency</span>
-                <span className="block text-sm text-on-surface-variant">42% of churned users in Q2 cited slow JSON export.</span>
-              </li>
-              <li className="flex items-start gap-2 border-l-4 border-secondary pl-4">
-                <span className="font-bold">#2: Cognitive Debt</span>
-                <span className="block text-sm text-on-surface-variant">Stale documentation in `/api/export` causing failed integrations.</span>
-              </li>
+              {mission.memoryItems?.filter(m => m.key === 'research_finding').map((m, i) => (
+                <li key={m.id} className={`flex flex-col gap-1 border-l-4 ${i % 2 === 0 ? 'border-tertiary' : 'border-secondary'} pl-4`}>
+                  <span className="font-bold uppercase text-xs">Finding #{i + 1}</span>
+                  <span className="text-sm text-on-surface-variant">{m.value}</span>
+                </li>
+              )) || (
+                <>
+                  <li className="flex items-start gap-2 border-l-4 border-tertiary pl-4">
+                    <span className="font-bold">#1: Export Latency</span>
+                    <span className="block text-sm text-on-surface-variant">42% of churned users in Q2 cited slow JSON export.</span>
+                  </li>
+                  <li className="flex items-start gap-2 border-l-4 border-secondary pl-4">
+                    <span className="font-bold">#2: Cognitive Debt</span>
+                    <span className="block text-sm text-on-surface-variant">Stale documentation in `/api/export` causing failed integrations.</span>
+                  </li>
+                </>
+              )}
             </ul>
           </div>
 

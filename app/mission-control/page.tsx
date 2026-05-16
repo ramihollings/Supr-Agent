@@ -13,54 +13,67 @@ import { Message, Mission } from '@/types';
 
 export default function MissionControlPage() {
   const [command, setCommand] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [missionId, setMissionId] = useState<string>('m1');
+  const [mission, setMission] = useState<Mission | null>(null);
   const [phases, setPhases] = useState<Phase[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [readinessScore, setReadinessScore] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2500);
+  };
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [mission, agentData] = await Promise.all([
-          fetchMissionState(),
-          fetchAgentsState()
-        ]);
-        
-        if (mission) {
-          setMissionId(mission.id);
-          
-          // Combine messages and failures for the command channel
-          const combinedMessages = [...(mission.messages || [])];
-          if (mission.failures) {
-            mission.failures.forEach(f => {
-              if (!f.resolved) {
-                combinedMessages.push({
-                  id: Number(f.id.replace('f-', '')),
-                  sender: 'Supr',
-                  text: `[FAILURE] Agent ${f.agentName} failed task ${f.taskId}: ${f.summary}. Guidance required.`,
-                  isUser: false
-                });
-              }
-            });
-          }
-          
-          setMessages(combinedMessages.sort((a, b) => a.id - b.id));
-          setPhases(mission.phases || []);
-          setTasks(mission.tasks || []);
-          setReadinessScore(mission.readinessScore || 0);
-        }
-        
-        if (agentData) {
-          setAgents(agentData);
-        }
-      } catch (err) {
-        console.error("Failed to load initial DB state", err);
-      }
+    // Initial agents load (less frequent)
+    async function loadAgents() {
+      const agentData = await fetchAgentsState();
+      if (agentData) setAgents(agentData);
     }
-    loadData();
+    loadAgents();
+
+    // Mission stream for real-time updates
+    const eventSource = new EventSource('/api/mission/stream');
+    
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data) as Mission;
+      if (data) {
+        setMissionId(data.id);
+        setMission(data);
+        
+        const combinedMessages = [...(data.messages || [])];
+        if (data.failures) {
+          data.failures.forEach(f => {
+            if (!f.resolved) {
+              combinedMessages.push({
+                id: Number(f.id.replace('f-', '') || Date.now()),
+                sender: 'Supr',
+                text: `[FAILURE] Agent ${f.agentName} failed task ${f.taskId}: ${f.summary}. Guidance required.`,
+                isUser: false
+              });
+            }
+          });
+        }
+        
+        setMessages(combinedMessages.sort((a, b) => a.id - b.id));
+        setPhases(data.phases || []);
+        setTasks(data.tasks || []);
+        setReadinessScore(data.readinessScore || 0);
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      console.error('SSE Error:', err);
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, []);
 
   const handleApprovalDecision = (id: string, decision: 'approve' | 'reject' | 'revise') => {
@@ -134,9 +147,15 @@ export default function MissionControlPage() {
   };
 
   return (
-    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
+    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Mission Control" />
       
+      {toastMessage && (
+        <div className="fixed bottom-24 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
+          {toastMessage}
+        </div>
+      )}
+
       <div className="flex-1 flex overflow-hidden">
         {/* Left Column: Command Channel */}
         <section className="w-80 border-r-4 border-primary bg-background hidden lg:flex flex-col">
@@ -209,9 +228,10 @@ export default function MissionControlPage() {
         {/* Right Column: Reasoning / Agents */}
         <AgentTeamSidebar 
           agents={agents}
-          reasoningText='Context Scan prioritized because "Pain Clustering" revealed anomalous spikes in user complaints regarding competitor data export features.'
-          gateRequiredText='Prioritization phase requires human approval.'
-          onReviewGate={() => console.log('Reviewing Gate...')}
+          reasoningText={mission?.objective ? `Objective: ${mission.objective}` : 'Context Scan prioritized because "Pain Clustering" revealed anomalous spikes in user complaints regarding competitor data export features.'}
+          gateRequiredText={phases.some(p => p.status === 'Gate_Pending') ? 'Prioritization phase requires human approval.' : undefined}
+          onReviewGate={() => showToast("Reviewing active gate in Command Channel...")}
+          subMissionIds={mission?.subMissionIds}
         />
       </div>
     </div>

@@ -1,31 +1,153 @@
 "use server"
 
-import { getActiveMission, getAgents } from '@/lib/db';
-import { Mission, Agent } from '@/types';
+import { 
+  getActiveMission, 
+  getAgents, 
+  addActivityLog, 
+  recordFailure, 
+  resolveFailure, 
+  updateTaskStatus, 
+  addArtifact, 
+  addMemoryItem,
+  getDb,
+  saveDb
+} from '@/lib/db';
+import { 
+  ActivityEvent, 
+  FailureEvent, 
+  TaskStatus, 
+  Artifact, 
+  MemoryItem, 
+  Mission, 
+  Agent 
+} from '@/types';
+import { 
+  ActivityEventSchema, 
+  FailureEventSchema, 
+  ArtifactSchema, 
+  MemoryItemSchema, 
+  TaskStatusSchema,
+  MissionSchema 
+} from '@/lib/validations';
+import { z } from 'zod';
+
+// Helper for error handling in production
+function handleActionError(error: unknown) {
+  console.error('[Action Error]:', error);
+  if (error instanceof z.ZodError) {
+    throw new Error(`Validation failed: ${error.errors.map(e => e.message).join(', ')}`);
+  }
+  throw new Error('An unexpected error occurred. Please try again.');
+}
 
 export async function fetchMissionState(): Promise<Mission | undefined> {
-  return await getActiveMission();
+  try {
+    return await getActiveMission();
+  } catch (error) {
+    handleActionError(error);
+  }
 }
 
 export async function fetchAgentsState(): Promise<Agent[]> {
-  return await getAgents();
+  try {
+    return await getAgents();
+  } catch (error) {
+    handleActionError(error);
+  }
 }
 
-import { addActivityLog, recordFailure, resolveFailure, updateTaskStatus } from '@/lib/db';
-import { ActivityEvent, FailureEvent, TaskStatus } from '@/types';
-
 export async function logActivityAction(missionId: string, event: Omit<ActivityEvent, 'id' | 'timestamp'>) {
-  await addActivityLog(missionId, event);
+  try {
+    // Partial validation for Omit types
+    const schema = ActivityEventSchema.omit({ id: true, timestamp: true });
+    schema.parse(event);
+    await addActivityLog(missionId, event);
+  } catch (error) {
+    handleActionError(error);
+  }
 }
 
 export async function recordFailureAction(missionId: string, failure: Omit<FailureEvent, 'id' | 'resolved'>) {
-  await recordFailure(missionId, failure);
+  try {
+    const schema = FailureEventSchema.omit({ id: true, resolved: true });
+    schema.parse(failure);
+    await recordFailure(missionId, failure);
+  } catch (error) {
+    handleActionError(error);
+  }
 }
 
 export async function resolveFailureAction(missionId: string, failureId: string, guidance: string) {
-  await resolveFailure(missionId, failureId, guidance);
+  try {
+    z.string().parse(missionId);
+    z.string().parse(failureId);
+    z.string().parse(guidance);
+    await resolveFailure(missionId, failureId, guidance);
+  } catch (error) {
+    handleActionError(error);
+  }
 }
 
 export async function updateTaskStatusAction(missionId: string, taskId: string, status: TaskStatus) {
-  await updateTaskStatus(missionId, taskId, status);
+  try {
+    z.string().parse(missionId);
+    z.string().parse(taskId);
+    TaskStatusSchema.parse(status);
+    await updateTaskStatus(missionId, taskId, status);
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function addArtifactAction(missionId: string, artifact: Omit<Artifact, 'id'>) {
+  try {
+    const schema = ArtifactSchema.omit({ id: true });
+    schema.parse(artifact);
+    await addArtifact(missionId, artifact);
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function addMemoryItemAction(missionId: string, item: Omit<MemoryItem, 'id'>) {
+  try {
+    const schema = MemoryItemSchema.omit({ id: true });
+    schema.parse(item);
+    await addMemoryItem(missionId, item);
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function createMissionAction(missionData: Omit<Mission, 'id'>) {
+  try {
+    const schema = MissionSchema.omit({ id: true });
+    schema.parse(missionData);
+    
+    const db = await getDb();
+    const newMission: Mission = {
+      ...missionData,
+      id: `m-${Date.now()}`
+    };
+    
+    // Set all other missions to inactive if this one is active
+    if (newMission.status === 'Active') {
+      db.missions.forEach(m => m.status = 'Done');
+    }
+    
+    db.missions.push(newMission);
+    await saveDb(db);
+    return newMission;
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function getActiveMissionAction(id: string): Promise<Mission | undefined> {
+  try {
+    const db = await getDb();
+    return db.missions.find(m => m.id === id);
+  } catch (error) {
+    handleActionError(error);
+  }
 }

@@ -75,8 +75,17 @@ export interface FailureEvent {
   resolved: boolean;
 }
 
+export interface MemoryItem {
+  id: string;
+  key: string;
+  value: string;
+  importance: 'Low' | 'Medium' | 'High';
+}
+
 export interface Mission {
   id: string;
+  parentId?: string;
+  subMissionIds?: string[];
   name: string;
   objective: string;
   status: 'Active' | 'Done' | 'Failed';
@@ -87,6 +96,7 @@ export interface Mission {
   artifacts?: Artifact[];
   activityLog?: ActivityEvent[];
   failures?: FailureEvent[];
+  memoryItems?: MemoryItem[];
 }
 
 export interface DatabaseSchema {

@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { DatabaseSchema, Mission, Agent } from '@/types';
+import { DatabaseSchema, Mission, Agent, TaskStatus, ActivityEvent, FailureEvent, Artifact, MemoryItem } from '@/types';
+import { DatabaseSchemaSchema } from './validations';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
 
@@ -17,8 +18,17 @@ async function ensureDbExists() {
 
 export async function getDb(): Promise<DatabaseSchema> {
   await ensureDbExists();
-  const data = await fs.readFile(DB_PATH, 'utf-8');
-  return JSON.parse(data) as DatabaseSchema;
+  try {
+    const data = await fs.readFile(DB_PATH, 'utf-8');
+    const parsed = JSON.parse(data);
+    const validated = DatabaseSchemaSchema.parse(parsed);
+    return validated as DatabaseSchema;
+  } catch (error) {
+    console.error('Database validation failed:', error);
+    // If it's a parse error or validation error, we might want to backup and reset in production
+    // For now, re-throw to be caught by the caller
+    throw new Error('Database integrity compromised. Validation failed.');
+  }
 }
 
 export async function saveDb(data: DatabaseSchema): Promise<void> {
@@ -90,6 +100,34 @@ export async function updateTaskStatus(missionId: string, taskId: string, status
   if (task) {
     task.status = status;
   }
+
+  await saveDb(db);
+}
+
+export async function addArtifact(missionId: string, artifact: Omit<Artifact, 'id'>): Promise<void> {
+  const db = await getDb();
+  const mission = db.missions.find(m => m.id === missionId);
+  if (!mission) return;
+
+  if (!mission.artifacts) mission.artifacts = [];
+  mission.artifacts.push({
+    ...artifact,
+    id: `art-${Date.now()}`
+  });
+
+  await saveDb(db);
+}
+
+export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'id'>): Promise<void> {
+  const db = await getDb();
+  const mission = db.missions.find(m => m.id === missionId);
+  if (!mission) return;
+
+  if (!mission.memoryItems) mission.memoryItems = [];
+  mission.memoryItems.push({
+    ...item,
+    id: `mem-${Date.now()}`
+  });
 
   await saveDb(db);
 }

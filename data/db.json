@@ -2,9 +2,12 @@
   "missions": [
     {
       "id": "m1",
+      "subMissionIds": [
+        "m1-child"
+      ],
       "name": "BuildSignal",
       "objective": "Q3 Roadmap Planning",
-      "status": "Active",
+      "status": "Done",
       "readinessScore": 87,
       "phases": [
         {
@@ -175,39 +178,39 @@
           "timestamp": "10:25 AM"
         },
         {
+          "id": "ev-1778902375231",
           "eventType": "failure",
           "actor": "Code Agent",
           "actorIcon": "code",
           "summary": "Test suite failed in Code Workspace",
           "detail": "AssertionError: assert \"cluster\" in Index. Supr attention required.",
-          "id": "ev-1778902375231",
           "timestamp": "11:32 PM"
         },
         {
-          "eventType": "failure",
-          "actor": "Code Agent",
-          "actorIcon": "code",
-          "summary": "Test suite failed in Code Workspace",
-          "detail": "AssertionError: assert \"cluster\" in Index. Supr attention required.",
           "id": "ev-1778902395417",
-          "timestamp": "11:33 PM"
-        },
-        {
           "eventType": "failure",
           "actor": "Code Agent",
           "actorIcon": "code",
           "summary": "Test suite failed in Code Workspace",
           "detail": "AssertionError: assert \"cluster\" in Index. Supr attention required.",
-          "id": "ev-1778902399537",
           "timestamp": "11:33 PM"
         },
         {
+          "id": "ev-1778902399537",
+          "eventType": "failure",
+          "actor": "Code Agent",
+          "actorIcon": "code",
+          "summary": "Test suite failed in Code Workspace",
+          "detail": "AssertionError: assert \"cluster\" in Index. Supr attention required.",
+          "timestamp": "11:33 PM"
+        },
+        {
+          "id": "ev-1778902403511",
           "eventType": "supr_decision",
           "actor": "Supr",
           "actorIcon": "psychology",
           "summary": "Sent revised guidance to Code Agent",
           "detail": "Failure type: Context Failure. Supr updated task guidance: add fallback for missing columns.",
-          "id": "ev-1778902403511",
           "timestamp": "11:33 PM"
         }
       ],
@@ -223,36 +226,86 @@
           "resolved": true
         },
         {
+          "id": "f-1778902375024",
           "taskId": "t2",
           "agentName": "Code Agent",
           "failureType": "AssertionError",
           "attemptNumber": 1,
           "summary": "AssertionError: assert 'cluster' in Index",
           "suprGuidance": "",
-          "id": "f-1778902375024",
           "resolved": false
         },
         {
+          "id": "f-1778902395232",
           "taskId": "t2",
           "agentName": "Code Agent",
           "failureType": "AssertionError",
           "attemptNumber": 2,
           "summary": "AssertionError: assert 'cluster' in Index",
           "suprGuidance": "",
-          "id": "f-1778902395232",
           "resolved": false
         },
         {
+          "id": "f-1778902399373",
           "taskId": "t2",
           "agentName": "Code Agent",
           "failureType": "AssertionError",
           "attemptNumber": 3,
           "summary": "AssertionError: assert 'cluster' in Index",
           "suprGuidance": "",
-          "id": "f-1778902399373",
           "resolved": false
         }
       ]
+    },
+    {
+      "name": "FINAL_PROD_TEST",
+      "objective": "Final verification of production architect flow",
+      "status": "Active",
+      "phases": [
+        {
+          "id": "p1",
+          "name": "Context Scan",
+          "status": "Active"
+        },
+        {
+          "id": "p2",
+          "name": "Research & Extraction",
+          "status": "Pending"
+        },
+        {
+          "id": "p3",
+          "name": "Implementation",
+          "status": "Pending"
+        },
+        {
+          "id": "p4",
+          "name": "QA & Delivery",
+          "status": "Pending"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "t1",
+          "title": "Initialize Workspace",
+          "description": "Analyze objective: Final verification of production architect flow",
+          "agentName": "Supr",
+          "agentIcon": "psychology",
+          "status": "Active"
+        }
+      ],
+      "readinessScore": 0,
+      "messages": [
+        {
+          "id": 1778905494208,
+          "sender": "Supr",
+          "text": "Mission FINAL_PROD_TEST initialized. Glidepath locked.",
+          "isUser": false
+        }
+      ],
+      "activityLog": [],
+      "failures": [],
+      "memoryItems": [],
+      "id": "m-1778905494386"
     }
   ],
   "agents": [

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { spawn } from 'child_process';
+import { orchestrateMission } from '@/lib/orchestrator';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,9 +11,8 @@ export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     
     const stream = new ReadableStream({
-      start(controller) {
+      async start(controller) {
         // Initialize the Supr agent using local Google ADK CLI via uvx
-        // We instruct it to use the supr.md brain and expect structured JSON back.
         const agentProcess = spawn('uvx', [
           'google-agents', 
           'run', 
@@ -25,58 +25,45 @@ export async function POST(req: NextRequest) {
           shell: process.platform === 'win32'
         });
 
-        // Helper to safely send JSON lines to the client
         const sendJSON = (obj: any) => {
           controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
         };
 
-        // Fallback simulated response if ADK is not found or fails
         let hasOutput = false;
 
         agentProcess.stdout.on('data', (data) => {
           hasOutput = true;
           const text = data.toString();
-          
-          // Attempt to parse line by line to stream raw ADK output
           const lines = text.split('\n').filter((l: string) => l.trim() !== '');
           for (const line of lines) {
             try {
-              // If it's already JSON, pipe it through
               JSON.parse(line);
               controller.enqueue(encoder.encode(line + '\n'));
             } catch {
-              // If it's raw text, wrap it
               sendJSON({ type: 'message', content: line });
             }
           }
         });
 
-        agentProcess.stderr.on('data', (data) => {
-          console.error(`Agent Process Log: ${data.toString()}`);
-        });
-
-        agentProcess.on('close', (code) => {
-          // If the process closed without output (e.g. uvx not installed), send a simulated fallback
+        agentProcess.on('close', async (code) => {
           if (!hasOutput || code !== 0) {
-            sendJSON({ 
-              type: 'message', 
-              content: 'Supr: Reaching out via the CLI failed or returned no response. Ensure `google-adk` is installed. Fallback mode activated. Processing command: "' + prompt + '"' 
-            });
+            // Use the Autonomous Orchestrator for the fallback path
+            const response = await orchestrateMission('m1', prompt);
+            sendJSON({ type: 'message', content: response });
             
-            // Send a simulated activity event
             setTimeout(() => {
               sendJSON({
                 type: 'activity',
                 event: {
                   id: Date.now().toString(),
                   agentName: 'Supr',
-                  action: 'Processed command locally',
+                  action: 'Orchestrated next mission step',
                   status: 'Success',
                   timestamp: new Date().toLocaleTimeString()
                 }
               });
               controller.close();
-            }, 1000);
+            }, 500);
           } else {
             controller.close();
           }

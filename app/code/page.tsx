@@ -20,6 +20,12 @@ export default function CodePage() {
   const [codeHasFix, setCodeHasFix] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [mission, setMission] = useState<Mission | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2500);
+  };
 
   useEffect(() => {
     async function init() {
@@ -140,7 +146,12 @@ export default function CodePage() {
   };
 
   return (
-    <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden bg-surface-container">
+    <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden bg-surface-container relative">
+      {toastMessage && (
+        <div className="fixed bottom-12 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
+          {toastMessage}
+        </div>
+      )}
       {/* Workspace Header */}
       <header className="flex-none h-16 border-b-4 border-primary bg-background flex justify-between items-center px-4 lg:px-6">
         <div className="flex items-center space-x-4">
@@ -373,6 +384,7 @@ export default function CodePage() {
                         className="flex-1 bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1"
                       >Apply Fix</button>
                       <button
+                        onClick={() => showToast("Escalating to human engineering...")}
                         className="flex-1 bg-background text-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-surface-variant active:translate-x-1 active:translate-y-1"
                       >Escalate</button>
                     </div>
