@@ -8,6 +8,7 @@ import {
   resolveFailure, 
   updateTaskStatus, 
   addArtifact, 
+  updateArtifact,
   addMemoryItem,
   getDb,
   saveDb,
@@ -121,6 +122,17 @@ export async function addArtifactAction(missionId: string, artifact: Omit<Artifa
     const schema = ArtifactSchema.omit({ id: true });
     schema.parse(artifact);
     await addArtifact(missionId, artifact);
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function updateArtifactAction(missionId: string, filename: string, content: string) {
+  try {
+    z.string().parse(missionId);
+    z.string().parse(filename);
+    z.string().parse(content);
+    await updateArtifact(missionId, filename, content);
   } catch (error) {
     handleActionError(error);
   }

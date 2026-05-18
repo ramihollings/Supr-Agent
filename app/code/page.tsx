@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { fetchMissionState, logActivityAction, recordFailureAction, updateTaskStatusAction } from '@/app/actions';
-import { Mission } from '@/types';
+import { fetchMissionState, logActivityAction, recordFailureAction, updateTaskStatusAction, addArtifactAction, updateArtifactAction } from '@/app/actions';
+import { Mission, Artifact } from '@/types';
 
 type TerminalLine = {
   id: number;
@@ -17,21 +17,51 @@ export default function CodePage() {
   const [retryCount, setRetryCount] = useState(0);
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([]);
   const [activeFile, setActiveFile] = useState('feedback_clusters.py');
-  const [codeHasFix, setCodeHasFix] = useState(false);
+  
+  // Dynamic SQLite backed file contents
+  const [files, setFiles] = useState<Record<string, string>>({
+    'main.py': `# Core Orchestrator entry point\nimport src.feedback_clusters as fc\n\ndef run_pipeline():\n    print("Starting Cognitive Pipeline...")\n    fc.analyze_feedback("mock_tickets.json")\n\nif __name__ == "__main__":\n    run_pipeline()`,
+    'feedback_clusters.py': `# Cognitive Debt Detection Script\n# Author: Supr CodeBot\nimport pandas as pd\nimport numpy as np\nfrom sklearn.cluster import KMeans\n\ndef analyze_feedback(data_path: str):\n    """\n    Analyzes ticket feedback to identify clusters.\n    """\n    try:\n        df = pd.read_json(data_path)\n    except Exception as e:\n        print(f"Error: {e}")\n        raise e\n\n    vectors = np.stack(df['embedding'].values)\n    kmeans = KMeans(n_clusters=5, random_state=42)\n    df['cluster'] = kmeans.fit_predict(vectors)\n    return df\n\ndef generate_report(clustered_df):\n    pass # TODO: Implement report generation`,
+    'validation.py': `# Pytest Verification Suite\n# Author: QA Sentinel\nimport pytest\nfrom src.feedback_clusters import analyze_feedback\n\ndef test_analyze_feedback():\n    # Active mock verification\n    result = analyze_feedback("mock_tickets.json")\n    assert 'cluster' in result.columns`
+  });
+
+  const [activeResearch, setActiveResearch] = useState<Artifact | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [mission, setMission] = useState<Mission | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'editing'>('saved');
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
   };
 
+  // Load and seed dynamic artifacts in SQLite database
   useEffect(() => {
     async function init() {
       const activeMission = await fetchMissionState();
       if (activeMission) {
         setMission(activeMission);
+        
+        // Seed default code files in SQLite if not present
+        const dbFiles = ['main.py', 'feedback_clusters.py', 'validation.py'];
+        let updatedFiles = { ...files };
+        
+        for (const fname of dbFiles) {
+          const existing = activeMission.artifacts?.find(a => a.filename === fname);
+          if (existing) {
+            updatedFiles[fname] = existing.content;
+          } else {
+            // Seed to database
+            await addArtifactAction(activeMission.id, {
+              filename: fname,
+              type: 'code',
+              content: files[fname]
+            });
+          }
+        }
+        setFiles(updatedFiles);
+
         // Sync retry count from mission failures if any
         const codeFailures = activeMission.failures?.filter(f => f.agentName === 'Code Agent');
         if (codeFailures) setRetryCount(codeFailures.length);
@@ -40,18 +70,45 @@ export default function CodePage() {
     init();
   }, []);
 
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setSaveStatus('editing');
+    setFiles(prev => ({
+      ...prev,
+      [activeFile]: e.target.value
+    }));
+  };
+
+  const handleSaveFile = async () => {
+    if (!mission) return;
+    try {
+      await updateArtifactAction(mission.id, activeFile, files[activeFile]);
+      setSaveStatus('saved');
+      showToast(`${activeFile} saved to sandbox container! ✓`);
+      
+      setTerminalLogsAction(`[Sandbox Storage] Synchronized ${activeFile} with gVisor workspace.`);
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to save: ${String(err)}`);
+    }
+  };
+
+  const setTerminalLogsAction = (msg: string) => {
+    setTerminalLines(prev => [...prev, { id: Date.now(), type: 'output', content: msg }]);
+  };
+
   const handleRunTest = async () => {
     if (isRunning) return;
     setIsRunning(true);
-
-    // Add the command
     setTerminalLines(prev => [...prev, { id: Date.now(), type: 'command', content: 'pytest tests/validation.py' }]);
 
-    // Simulate processing delay
     await new Promise(r => setTimeout(r, 1200));
 
-    if (!codeHasFix) {
-      // FAILURE path
+    // Dynamic execution logic checks the actual text content of feedback_clusters.py
+    const code = files['feedback_clusters.py'] || '';
+    const hasFix = code.includes('embedding') && (code.includes('not in') || code.includes('not') || code.includes('if'));
+
+    if (!hasFix) {
+      // Test fails
       setTerminalLines(prev => [
         ...prev,
         { id: Date.now() + 1, type: 'output', content: 'collecting tests...' },
@@ -65,7 +122,7 @@ export default function CodePage() {
 
       if (mission) {
         await recordFailureAction(mission.id, {
-          taskId: 't2', // Simulated active task
+          taskId: 't2',
           agentName: 'Code Agent',
           failureType: 'AssertionError',
           attemptNumber: retryCount + 1,
@@ -76,12 +133,12 @@ export default function CodePage() {
           eventType: 'failure',
           actor: 'Code Agent',
           actorIcon: 'code',
-          summary: 'Test suite failed in Code Workspace',
-          detail: 'AssertionError: assert "cluster" in Index. Supr attention required.'
+          summary: 'AssertionError in Code Workspace',
+          detail: 'Tests failed on assert "cluster" in Index. Missing spec context.'
         });
       }
     } else {
-      // SUCCESS path
+      // Test passes
       setTerminalLines(prev => [
         ...prev,
         { id: Date.now() + 1, type: 'output', content: 'collecting tests...' },
@@ -96,8 +153,8 @@ export default function CodePage() {
           eventType: 'task_complete',
           actor: 'Code Agent',
           actorIcon: 'code',
-          summary: 'Task complete: Cross-reference feature usage',
-          detail: 'All tests passed after ' + (retryCount + 1) + ' attempts.'
+          summary: 'Task complete: Resolve Column Assertions',
+          detail: `All tests passed in gVisor sandbox after ${retryCount + 1} iterations.`
         });
       }
     }
@@ -106,44 +163,65 @@ export default function CodePage() {
 
   const handleSuprTriage = async () => {
     setTriageState('triaging');
-
-    // Supr analyzes
     setTerminalLines(prev => [
       ...prev,
-      { id: Date.now(), type: 'supr', content: '[SUPR] Triaging failure... Failure type: Context Failure.' },
+      { id: Date.now(), type: 'supr', content: '[SUPR] Triaging failure... Context scanner active.' },
     ]);
 
     await new Promise(r => setTimeout(r, 1500));
 
-    setTerminalLines(prev => [
-      ...prev,
-      { id: Date.now(), type: 'supr', content: '[SUPR] Root cause: mock_tickets.json missing "embedding" column.' },
-      { id: Date.now() + 1, type: 'supr', content: '[SUPR] Guidance: Add fallback for missing columns in analyze_feedback().' },
-      { id: Date.now() + 2, type: 'supr', content: '[SUPR] Sending revised guidance to Code Agent. Retry authorized.' },
-    ]);
+    // Dynamic guidance adapts depending on whether a research artifact was created by the Research Agent
+    const researchDocs = mission?.artifacts?.filter(a => a.filename.startsWith('research_')) || [];
+    const hasResearch = researchDocs.length > 0;
+
+    if (hasResearch) {
+      const topResearch = researchDocs[0];
+      setTerminalLines(prev => [
+        ...prev,
+        { id: Date.now(), type: 'supr', content: `[SUPR] Found active OSINT specs in Research Library: ${topResearch.filename}` },
+        { id: Date.now() + 1, type: 'supr', content: `[SUPR] Recommended Fix: "embedding" column must default to [0]*128 if missing.` },
+        { id: Date.now() + 2, type: 'supr', content: '[SUPR] Sending guidance payload to Code Agent sandbox. Code updated.' },
+      ]);
+    } else {
+      setTerminalLines(prev => [
+        ...prev,
+        { id: Date.now(), type: 'supr', content: '[SUPR] WARNING: No active research specs compiled in the Research Library.' },
+        { id: Date.now() + 1, type: 'supr', content: '[SUPR] Triaged default guidance: Check for "embedding" schema keys and add a fallback.' },
+      ]);
+    }
 
     if (mission) {
       await logActivityAction(mission.id, {
         eventType: 'supr_decision',
         actor: 'Supr',
         actorIcon: 'psychology',
-        summary: 'Sent revised guidance to Code Agent',
-        detail: 'Failure type: Context Failure. Supr updated task guidance: add fallback for missing columns.'
+        summary: 'Transmitted revised specs to Code Agent',
+        detail: 'Sent guidance for missing columns fallback validation.'
       });
     }
 
     setTriageState('retrying');
   };
 
+  // Simulates Code Agent automatically applying the parsed fix from the research spec
   const handleApplyFix = async () => {
-    setCodeHasFix(true);
-    setTriageState('idle');
+    const fixedCode = `# Cognitive Debt Detection Script\n# Author: Supr CodeBot\nimport pandas as pd\nimport numpy as np\nfrom sklearn.cluster import KMeans\n\ndef analyze_feedback(data_path: str):\n    """\n    Analyzes ticket feedback to identify clusters.\n    """\n    try:\n        df = pd.read_json(data_path)\n        # [FIX] Added validation based on Research Library specs\n        if 'embedding' not in df.columns:\n            df['embedding'] = df.apply(lambda r: [0]*128, axis=1)\n    except Exception as e:\n        print(f"Error: {e}")\n        raise e\n\n    vectors = np.stack(df['embedding'].values)\n    kmeans = KMeans(n_clusters=5, random_state=42)\n    df['cluster'] = kmeans.fit_predict(vectors)\n    return df\n\ndef generate_report(clustered_df):\n    return clustered_df.groupby("cluster").size().to_dict()`;
 
+    setFiles(prev => ({
+      ...prev,
+      'feedback_clusters.py': fixedCode
+    }));
+    setSaveStatus('editing');
+    setTriageState('idle');
+    showToast("Code Agent generated fix using Research specifications!");
+    
     setTerminalLines(prev => [
       ...prev,
-      { id: Date.now(), type: 'supr', content: '[CODE AGENT] Applied fix: added column validation with fallback.' },
+      { id: Date.now(), type: 'supr', content: '[CODE AGENT] Auto-applied research solution into feedback_clusters.py. Click "Run Test" to verify.' },
     ]);
   };
+
+  const researchArtifacts = mission?.artifacts?.filter(a => a.filename.startsWith('research_')) || [];
 
   return (
     <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden bg-surface-container relative">
@@ -152,28 +230,23 @@ export default function CodePage() {
           {toastMessage}
         </div>
       )}
+      
       {/* Workspace Header */}
       <header className="flex-none h-16 border-b-4 border-primary bg-background flex justify-between items-center px-4 lg:px-6">
         <div className="flex items-center space-x-4">
           <span className="material-symbols-outlined text-primary text-2xl">folder_open</span>
-          <h2 className="font-headline font-bold text-lg md:text-xl uppercase tracking-tight">Project: Cognitive_Core</h2>
+          <h2 className="font-headline font-bold text-lg md:text-xl uppercase tracking-tight">Code Workspace Sandbox</h2>
         </div>
         <div className="flex items-center space-x-4">
           <div className="hidden sm:flex items-center space-x-2 bg-surface-container-high px-3 py-1 border-2 border-primary">
             <span className={`w-3 h-3 border border-primary ${triageState === 'passed' ? 'bg-tertiary' : 'bg-primary-fixed animate-pulse'}`}></span>
             <span className="font-body font-bold text-sm uppercase">
-              Agent: Code Agent {triageState === 'passed' ? '✓ Done' : 'Active'}
+              Agent: Code Agent {triageState === 'passed' ? '✓ Passed' : 'Active'}
             </span>
           </div>
-          {retryCount > 0 && (
-            <div className="hidden sm:flex items-center space-x-1 bg-error-container text-on-error-container px-3 py-1 border-2 border-primary">
-              <span className="material-symbols-outlined text-sm">refresh</span>
-              <span className="font-body font-bold text-sm uppercase">Retries: {retryCount}</span>
-            </div>
-          )}
           <button
             onClick={handleRunTest}
-            disabled={isRunning || triageState === 'triaging' || triageState === 'retrying'}
+            disabled={isRunning || triageState === 'triaging'}
             className="bg-primary text-on-primary border-2 border-primary px-4 py-1.5 font-headline font-bold uppercase hover:bg-tertiary hover:text-on-tertiary transition-colors neo-shadow active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50 flex items-center gap-2"
           >
             <span className="material-symbols-outlined text-[18px]">play_arrow</span>
@@ -183,25 +256,26 @@ export default function CodePage() {
       </header>
 
       {/* Split Pane Layout */}
-      <div className="flex-1 flex overflow-hidden w-full">
-        {/* Left Pane: File Tree */}
-        <aside className="w-48 lg:w-64 flex-none border-r-4 border-primary bg-background hidden md:flex flex-col">
-          <div className="p-3 border-b-4 border-primary bg-surface-variant flex justify-between items-center">
+      <div className="flex-1 flex overflow-hidden w-full relative">
+        
+        {/* Left Pane: Explorer & OSINT Spec drawer */}
+        <aside className="w-64 flex-none border-r-4 border-primary bg-background hidden md:flex flex-col">
+          <div className="p-3 border-b-4 border-primary bg-surface-variant flex justify-between items-center shrink-0">
             <span className="font-headline font-bold uppercase text-sm tracking-widest">Explorer</span>
-            <span className="material-symbols-outlined text-sm cursor-pointer hover:text-tertiary">add_box</span>
+            <span className="material-symbols-outlined text-sm">add_box</span>
           </div>
+          
           <div className="flex-1 overflow-y-auto custom-scrollbar p-2 font-body text-sm">
             <ul className="space-y-1">
               <li>
-                <div className="flex items-center gap-2 py-1 px-2 hover:bg-surface-container cursor-pointer font-bold">
-                  <span className="material-symbols-outlined text-[18px]">keyboard_arrow_down</span>
+                <div className="flex items-center gap-2 py-1 px-2 font-bold text-primary">
                   <span className="material-symbols-outlined text-[18px]">folder</span>
                   <span>src</span>
                 </div>
-                <ul className="ml-6 space-y-1 mt-1">
+                <ul className="ml-4 space-y-1">
                   <li>
                     <div
-                      onClick={() => setActiveFile('main.py')}
+                      onClick={() => { setActiveFile('main.py'); setSaveStatus('saved'); }}
                       className={`flex items-center gap-2 py-1 px-2 cursor-pointer border-2 ${activeFile === 'main.py' ? 'bg-primary-container border-primary font-bold shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' : 'border-transparent hover:bg-surface-container text-on-surface-variant'}`}
                     >
                       <span className="material-symbols-outlined text-[18px]">description</span>
@@ -210,7 +284,7 @@ export default function CodePage() {
                   </li>
                   <li>
                     <div
-                      onClick={() => setActiveFile('feedback_clusters.py')}
+                      onClick={() => { setActiveFile('feedback_clusters.py'); setSaveStatus('saved'); }}
                       className={`flex items-center gap-2 py-1 px-2 cursor-pointer border-2 ${activeFile === 'feedback_clusters.py' ? 'bg-primary-container border-primary font-bold shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' : 'border-transparent hover:bg-surface-container text-on-surface-variant'}`}
                     >
                       <span className="material-symbols-outlined text-[18px]">data_object</span>
@@ -219,19 +293,18 @@ export default function CodePage() {
                   </li>
                 </ul>
               </li>
-              <li className="mt-2">
-                <div className="flex items-center gap-2 py-1 px-2 hover:bg-surface-container cursor-pointer font-bold">
-                  <span className="material-symbols-outlined text-[18px]">keyboard_arrow_down</span>
+              <li>
+                <div className="flex items-center gap-2 py-1 px-2 font-bold text-primary mt-2">
                   <span className="material-symbols-outlined text-[18px]">folder</span>
                   <span>tests</span>
                 </div>
-                <ul className="ml-6 space-y-1 mt-1">
+                <ul className="ml-4 space-y-1">
                   <li>
                     <div
-                      onClick={() => setActiveFile('validation.py')}
-                      className={`flex items-center gap-2 py-1 px-2 cursor-pointer border-2 ${activeFile === 'validation.py' ? 'bg-primary-container border-primary font-bold shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' : 'border-transparent hover:bg-surface-container text-error font-bold'}`}
+                      onClick={() => { setActiveFile('validation.py'); setSaveStatus('saved'); }}
+                      className={`flex items-center gap-2 py-1 px-2 cursor-pointer border-2 ${activeFile === 'validation.py' ? 'bg-primary-container border-primary font-bold shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' : 'border-transparent hover:bg-surface-container text-on-surface-variant'}`}
                     >
-                      <span className="material-symbols-outlined text-[18px]">{triageState === 'passed' ? 'check_circle' : 'warning'}</span>
+                      <span className="material-symbols-outlined text-[18px]">check_circle</span>
                       <span>validation.py</span>
                     </div>
                   </li>
@@ -239,105 +312,119 @@ export default function CodePage() {
               </li>
             </ul>
           </div>
-        </aside>
 
-        {/* Middle Pane: Editor */}
-        <div className="flex-1 flex flex-col min-w-0 bg-background relative w-full">
-          <div className="flex border-b-4 border-primary bg-surface-variant h-10 overflow-x-auto custom-scrollbar shrink-0">
-            <div className={`flex items-center space-x-2 px-4 border-r-4 border-primary font-body font-bold text-sm ${activeFile === 'feedback_clusters.py' ? 'bg-background' : 'hover:bg-background cursor-pointer text-on-surface-variant'}`}>
-              <span className={activeFile === 'feedback_clusters.py' ? 'text-tertiary' : ''}>feedback_clusters.py</span>
-              {codeHasFix && <span className="w-2 h-2 rounded-full bg-tertiary"></span>}
+          {/* OSINT Spec Feeds (Bridge to Research Library) */}
+          <div className="h-1/2 border-t-4 border-primary flex flex-col shrink-0">
+            <div className="p-2 border-b-4 border-primary bg-primary text-primary-fixed flex items-center justify-between">
+              <span className="font-headline font-bold uppercase text-xs flex items-center gap-1">
+                <span className="material-symbols-outlined text-sm">travel_explore</span>
+                OSINT Spec Drawer
+              </span>
+              <span className="bg-primary-fixed-dim text-primary-fixed px-1.5 py-0.5 text-[8px] font-bold uppercase neo-border">Live Feed</span>
             </div>
-            <div className={`flex items-center space-x-2 px-4 border-r-4 border-primary font-body text-sm shrink-0 ${activeFile === 'validation.py' ? 'bg-background font-bold' : 'hover:bg-background cursor-pointer text-on-surface-variant'}`}>
-              <span>validation.py</span>
-              <span className={`w-2 h-2 rounded-full ${triageState === 'passed' ? 'bg-tertiary' : 'bg-error'}`}></span>
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2 bg-surface-container-high">
+              {researchArtifacts.length === 0 ? (
+                <div className="text-center p-3 font-body text-xs text-on-surface-variant">
+                  <p className="font-bold text-error uppercase mb-1">No spec detected</p>
+                  <p className="text-[10px]">Execute a search in the Research Library first to feed competitor context to the Code Agent!</p>
+                </div>
+              ) : (
+                researchArtifacts.map(art => (
+                  <div 
+                    key={art.id}
+                    onClick={() => setActiveResearch(art)}
+                    className="p-2 border-2 border-primary bg-background hover:bg-primary-container hover:text-on-primary-container cursor-pointer transition-colors shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] flex items-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-sm text-secondary">file_present</span>
+                    <span className="font-body text-[10px] font-bold uppercase truncate">{art.filename}</span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
+        </aside>
+
+        {/* Middle Pane: Active Sandbox Editor */}
+        <div className="flex-1 flex flex-col min-w-0 bg-background relative w-full border-r-4 border-primary">
+          <div className="flex border-b-4 border-primary bg-surface-variant h-10 overflow-x-auto custom-scrollbar shrink-0">
+            {['main.py', 'feedback_clusters.py', 'validation.py'].map(fname => (
+              <div 
+                key={fname}
+                onClick={() => { setActiveFile(fname); setSaveStatus('saved'); }}
+                className={`flex items-center space-x-2 px-4 border-r-4 border-primary font-body font-bold text-xs shrink-0 cursor-pointer ${activeFile === fname ? 'bg-background text-primary' : 'hover:bg-background text-on-surface-variant'}`}
+              >
+                <span>{fname}</span>
+                {fname === 'feedback_clusters.py' && (files[fname] || '').includes('embedding') && (files[fname] || '').includes('if') && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
+                )}
+              </div>
+            ))}
+          </div>
           
-          <div className="flex-1 overflow-auto custom-scrollbar p-4 font-mono text-sm leading-relaxed whitespace-pre bg-surface-container-lowest w-full">
-            <span className="text-on-surface-variant"># Cognitive Debt Detection Script{'\n'}</span>
-            <span className="text-on-surface-variant"># Author: Supr CodeBot{'\n'}{'\n'}</span>
-            <span className="text-tertiary font-bold">import</span> pandas <span className="text-tertiary font-bold">as</span> pd{'\n'}
-            <span className="text-tertiary font-bold">import</span> numpy <span className="text-tertiary font-bold">as</span> np{'\n'}
-            <span className="text-tertiary font-bold">from</span> sklearn.cluster <span className="text-tertiary font-bold">import</span> KMeans{'\n'}{'\n'}
+          <div className="flex-1 flex flex-col relative overflow-hidden bg-surface-container-lowest">
+            {/* Interactive textarea editor */}
+            <textarea
+              value={files[activeFile] || ''}
+              onChange={handleTextChange}
+              className="flex-1 p-4 font-mono text-xs leading-relaxed bg-surface-container-lowest text-on-surface focus:outline-none resize-none custom-scrollbar w-full"
+              placeholder="# Type code here..."
+            />
             
-            <span className="text-tertiary font-bold">def</span> <span className="text-primary font-bold">analyze_feedback</span>(data_path: str):{'\n'}
-            {'    '}<span className="text-on-surface-variant">{`"""\n    Analyzes ticket feedback to identify clusters.\n    """`}</span>{'\n'}
-
-            {codeHasFix && (
-              <>
-                <span className="bg-tertiary-container text-on-tertiary-container px-1">{'    '}# [FIX] Validate columns before clustering</span>{'\n'}
-                <span className="bg-tertiary-container text-on-tertiary-container px-1">{'    '}df = pd.read_json(data_path)</span>{'\n'}
-                <span className="bg-tertiary-container text-on-tertiary-container px-1">{'    '}if &apos;embedding&apos; not in df.columns:</span>{'\n'}
-                <span className="bg-tertiary-container text-on-tertiary-container px-1">{'        '}df[&apos;embedding&apos;] = df.apply(lambda r: [0]*128, axis=1)</span>{'\n'}
-              </>
-            )}
-            {!codeHasFix && (
-              <>
-                <span className="text-tertiary font-bold">{'    '}try</span>:{'\n'}
-                {'        '}df = pd.read_json(data_path){'\n'}
-              </>
-            )}
-
-            {'        '}vectors = np.stack(df[&apos;embedding&apos;].values){'\n'}
-            {'        '}kmeans = KMeans(n_clusters=5, random_state=42){'\n'}
-            {'        '}df[&apos;cluster&apos;] = kmeans.fit_predict(vectors){'\n'}
-            {'        '}<span className="text-tertiary font-bold">return</span> df{'\n'}
-
-            {!codeHasFix && (
-              <>
-                <span className="text-tertiary font-bold">{'    '}except</span> Exception <span className="text-tertiary font-bold">as</span> e:{'\n'}
-                {'        '}<span className="text-secondary font-bold">print</span>(<span className="text-secondary">f&quot;Error: {'{'}<span>e</span>{'}'}&quot;</span>){'\n'}
-                {'        '}<span className="text-tertiary font-bold">raise</span> e{'\n'}{'\n'}
-              </>
-            )}
-
-            <span className="text-on-surface-variant"># Agent actively writing...{'\n'}</span>
-            <span className="text-tertiary font-bold">def</span> <span className="text-primary font-bold">generate_report</span>(clustered_df):{'\n'}
-            {'    '}<span className={`px-1 font-bold ${codeHasFix ? 'bg-tertiary-container text-on-tertiary-container' : 'bg-primary-fixed text-primary animate-pulse'}`}>
-              {codeHasFix ? 'return clustered_df.groupby("cluster").size().to_dict()' : 'pass # TODO: Implement report generation'}
-            </span>
+            {/* Save Toolbar */}
+            <div className="p-3 border-t-4 border-primary bg-surface-container-high flex justify-between items-center shrink-0">
+              <span className="font-mono text-[10px] text-on-surface-variant flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${saveStatus === 'saved' ? 'bg-tertiary' : 'bg-amber-500 animate-pulse'}`}></span>
+                {saveStatus === 'saved' ? 'Saved to workspace' : 'Unsaved modifications...'}
+              </span>
+              <button
+                onClick={handleSaveFile}
+                className="bg-secondary text-on-secondary border-2 border-primary px-3 py-1 text-xs font-headline font-bold uppercase hover:bg-tertiary hover:text-on-tertiary transition-colors shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5"
+              >
+                Save File to Sandbox
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Right Pane: Terminal & Guidance */}
-        <aside className="w-80 lg:w-96 flex-none border-l-4 border-primary bg-background hidden lg:flex flex-col">
-          <div className="p-3 border-b-4 border-primary bg-surface-variant flex justify-between items-center">
-             <span className="font-headline font-bold uppercase text-sm tracking-widest flex items-center gap-2">
+        <aside className="w-80 lg:w-96 flex-none bg-background hidden lg:flex flex-col">
+          <div className="p-3 border-b-4 border-primary bg-surface-variant flex justify-between items-center shrink-0">
+             <span className="font-headline font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-primary">
                 <span className="material-symbols-outlined text-[18px]">terminal</span>
-                Terminal
+                Sandbox Console
              </span>
              <button
                onClick={() => setTerminalLines([])}
                className="text-xs font-bold uppercase hover:text-error transition-colors"
              >Clear</button>
           </div>
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-surface-tint text-[#f5f0e8] font-mono text-xs leading-loose">
+          
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-black text-green-400 font-mono text-xs leading-loose">
              {terminalLines.length === 0 && (
-               <div className="text-[#f5f0e8]/50">Terminal ready. Click &quot;Run Test&quot; to begin.</div>
+               <div className="text-green-800">gVisor Sandbox terminal ready. Click "Run Test" to trigger validation pytests.</div>
              )}
              {terminalLines.map(line => (
                <div key={line.id} className={`mb-1 ${
-                 line.type === 'command' ? '' :
-                 line.type === 'error' ? 'text-error font-bold' :
-                 line.type === 'success' ? 'text-tertiary font-bold' :
-                 line.type === 'supr' ? 'text-primary-fixed font-bold' :
-                 'text-[#f5f0e8]/80'
+                 line.type === 'command' ? 'text-blue-400 font-bold' :
+                 line.type === 'error' ? 'text-red-500 font-bold' :
+                 line.type === 'success' ? 'text-green-400 font-bold' :
+                 line.type === 'supr' ? 'text-amber-300 font-bold' :
+                 'text-gray-300'
                }`}>
-                 {line.type === 'command' && <span className="text-tertiary font-bold">supr@workspace:~$ </span>}
+                 {line.type === 'command' && <span>➜ supr@gvisor:~$ </span>}
                  {line.content}
                </div>
              ))}
              {isRunning && (
                <div className="flex items-center gap-2 mt-2">
-                 <span className="text-tertiary font-bold">supr@workspace:~$</span>
-                 <span className="w-2 h-4 bg-background animate-pulse"></span>
+                 <span className="text-blue-400 font-bold">➜ supr@gvisor:~$</span>
+                 <span className="w-1.5 h-3 bg-green-400 animate-ping"></span>
                </div>
              )}
           </div>
           
-          {/* Guidance overlay */}
-          <div className="h-1/3 border-t-4 border-primary bg-background flex flex-col">
+          {/* Supr Guidance */}
+          <div className="h-1/3 border-t-4 border-primary bg-background flex flex-col shrink-0">
              <div className="p-2 border-b-4 border-primary bg-primary-fixed flex items-center justify-between">
                 <span className="font-headline font-bold uppercase text-sm flex items-center gap-2 text-primary">
                     <span className="material-symbols-outlined text-[18px]">psychology</span> Supr Guidance
@@ -348,53 +435,47 @@ export default function CodePage() {
                   triageState === 'triaging' ? 'bg-secondary text-on-error animate-pulse' :
                   'bg-background text-primary'
                 }`}>
-                  {triageState === 'idle' ? 'Watching' : triageState === 'failed' ? 'Failure Detected' : triageState === 'triaging' ? 'Triaging...' : triageState === 'retrying' ? 'Fix Ready' : 'Passed ✓'}
+                  {triageState === 'idle' ? 'Watching' : triageState === 'failed' ? 'Failure' : triageState === 'triaging' ? 'Triaging' : triageState === 'retrying' ? 'Ready' : 'Passed'}
                 </span>
              </div>
-             <div className="p-4 flex-1 overflow-y-auto custom-scrollbar text-sm">
+             <div className="p-4 flex-1 overflow-y-auto custom-scrollbar text-xs">
                 {triageState === 'idle' && (
-                  <p className="text-on-surface-variant">Supr is monitoring the Code Agent&apos;s workspace. Click <strong>Run Test</strong> to execute the validation suite.</p>
+                  <p className="text-on-surface-variant leading-relaxed">Supr is monitoring the Code Agent&apos;s sandbox container. Make sure any code changes are saved before clicking <strong>Run Test</strong>.</p>
                 )}
 
                 {triageState === 'failed' && (
                   <>
-                    <p className="font-bold mb-2 text-error">Failure Detected (Attempt {retryCount})</p>
-                    <p className="text-on-surface-variant mb-4">The test failed because <code className="bg-surface-container-high px-1 neo-border">mock_tickets.json</code> is missing the expected <code className="bg-surface-container-high px-1 neo-border">embedding</code> column.</p>
+                    <p className="font-bold mb-2 text-error uppercase">Assertion Error (Iteration {retryCount})</p>
+                    <p className="text-on-surface-variant mb-4 leading-relaxed">The pytest suite failed because `mock_tickets.json` does not contain the `embedding` schema key, causing a pandas Stack failure.</p>
                     <button
                       onClick={handleSuprTriage}
                       className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1"
-                    >Supr: Triage &amp; Send Guidance</button>
+                    >Supr: Triage failure</button>
                   </>
                 )}
 
                 {triageState === 'triaging' && (
                   <div className="flex items-center gap-3">
                     <span className="material-symbols-outlined animate-spin text-primary">sync</span>
-                    <span className="font-bold">Supr is analyzing the failure...</span>
+                    <span className="font-bold">Supr is checking OSINT logs...</span>
                   </div>
                 )}
 
                 {triageState === 'retrying' && (
                   <>
-                    <p className="font-bold mb-2">Revised Guidance Sent</p>
-                    <p className="text-on-surface-variant mb-4">Supr has identified the root cause and sent the Code Agent revised instructions: add a fallback for missing columns.</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleApplyFix}
-                        className="flex-1 bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1"
-                      >Apply Fix</button>
-                      <button
-                        onClick={() => showToast("Escalating to human engineering...")}
-                        className="flex-1 bg-background text-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-surface-variant active:translate-x-1 active:translate-y-1"
-                      >Escalate</button>
-                    </div>
+                    <p className="font-bold mb-2 uppercase">Research Guidance Ready</p>
+                    <p className="text-on-surface-variant mb-4 leading-relaxed">Supr integrated specs from the Research Library and compiled a self-healing solution for the Code Agent.</p>
+                    <button
+                      onClick={handleApplyFix}
+                      className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1"
+                    >Code Agent: Auto-Write Fix</button>
                   </>
                 )}
 
                 {triageState === 'passed' && (
                   <>
-                    <p className="font-bold mb-2 text-tertiary">All Tests Passed ✓</p>
-                    <p className="text-on-surface-variant">Code Agent completed the task after {retryCount} attempt{retryCount > 1 ? 's' : ''}. Supr has validated the output and marked the Code Workspace phase as complete on the Glidepath.</p>
+                    <p className="font-bold mb-2 text-tertiary uppercase">Test Suite Passed ✓</p>
+                    <p className="text-on-surface-variant leading-relaxed">The missing columns issue was successfully resolved using the dynamic fallback fix derived from the competitor specs!</p>
                   </>
                 )}
              </div>
@@ -402,18 +483,39 @@ export default function CodePage() {
         </aside>
       </div>
 
-      <footer className={`flex-none h-8 border-t-4 border-primary flex items-center px-4 justify-between font-mono text-xs ${triageState === 'passed' ? 'bg-tertiary text-on-tertiary' : 'bg-primary text-on-primary'}`}>
+      {/* OSINT Research overlay popup */}
+      {activeResearch && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6 backdrop-blur-sm">
+          <div className="bg-background border-4 border-primary max-w-2xl w-full p-6 neo-shadow relative flex flex-col max-h-[85vh]">
+            <button 
+              onClick={() => setActiveResearch(null)}
+              className="absolute top-4 right-4 text-primary font-bold hover:text-error text-xl font-headline"
+            >✕</button>
+            <h3 className="font-headline text-xl font-black uppercase text-primary border-b-4 border-primary pb-3 mb-4 flex items-center gap-2">
+              <span className="material-symbols-outlined text-secondary">file_present</span>
+              OSINT Spec: {activeResearch.filename}
+            </h3>
+            <div className="flex-1 overflow-y-auto custom-scrollbar font-body text-xs bg-surface-container p-4 neo-border whitespace-pre-wrap leading-relaxed">
+              {activeResearch.content}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button 
+                onClick={() => setActiveResearch(null)}
+                className="bg-primary text-on-primary font-headline font-bold uppercase px-4 py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary"
+              >Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <footer className="flex-none h-8 border-t-4 border-primary flex items-center px-4 justify-between font-mono text-xs bg-primary text-on-primary shrink-0">
          <div className="flex items-center gap-4">
             <span className="flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">{triageState === 'passed' ? 'check_circle' : triageState === 'failed' ? 'error' : 'check_circle'}</span>
-              {triageState === 'passed' ? 'Task Complete' : triageState === 'failed' ? 'Failure Detected' : 'System OK'}
+              <span className="material-symbols-outlined text-[14px]">terminal</span>
+              gVisor Sandbox
             </span>
-            {triageState !== 'passed' && (
-              <span className="flex items-center gap-1 text-primary-fixed">
-                <span className="material-symbols-outlined text-[14px]">sync</span> Code Agent Active
-              </span>
-            )}
          </div>
+         <span className="text-[10px] font-bold uppercase">Sandbox Core V2.4</span>
       </footer>
     </div>
   );

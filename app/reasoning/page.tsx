@@ -86,31 +86,33 @@ export default function ReasoningPage() {
           </header>
 
           <div className="space-y-6">
-            <article className="bg-background neo-border p-6 shadow-[6px_6px_0px_0px_rgba(0,85,255,1)] border-tertiary">
-              <div className="flex justify-between mb-4 pb-2 border-b-2 border-outline-variant">
-                <span className="font-headline font-bold uppercase text-sm text-tertiary flex items-center gap-2">
-                  <span className="material-symbols-outlined shrink-0 text-[18px]">account_tree</span> Planner Delegation
-                </span>
-                <span className="font-mono text-xs font-bold bg-tertiary-container px-2 py-0.5 text-primary">Conf: High</span>
+            {mission?.activityLog && mission.activityLog.filter(e => e.eventType === 'supr_decision' || e.eventType === 'failure').length > 0 ? (
+              mission.activityLog.filter(e => e.eventType === 'supr_decision' || e.eventType === 'failure').map(event => (
+                <article key={event.id} className={`bg-background neo-border p-6 ${event.eventType === 'supr_decision' ? 'shadow-[6px_6px_0px_0px_rgba(0,85,255,1)] border-tertiary' : 'shadow-[6px_6px_0px_0px_rgba(230,59,46,1)] border-secondary'}`}>
+                  <div className="flex justify-between mb-4 pb-2 border-b-2 border-outline-variant">
+                    <span className={`font-headline font-bold uppercase text-sm flex items-center gap-2 ${event.eventType === 'supr_decision' ? 'text-tertiary' : 'text-secondary'}`}>
+                      <span className="material-symbols-outlined shrink-0 text-[18px]">
+                        {event.eventType === 'supr_decision' ? 'account_tree' : 'gavel'}
+                      </span> 
+                      {event.eventType === 'supr_decision' ? 'Supr Delegation' : 'QA Rejection'}
+                    </span>
+                    <span className={`font-mono text-xs font-bold px-2 py-0.5 ${event.eventType === 'supr_decision' ? 'bg-tertiary-container text-primary' : 'bg-error-container text-error border border-error'}`}>
+                      {event.eventType === 'supr_decision' ? 'Conf: High' : 'Blocking'}
+                    </span>
+                  </div>
+                  <p className="font-body text-sm font-bold mb-2">{event.summary}</p>
+                  <div className={`bg-surface-container p-3 border-l-4 ${event.eventType === 'supr_decision' ? 'border-tertiary' : 'border-secondary'}`}>
+                    <p className="font-body text-sm italic text-on-surface-variant">"{event.detail}"</p>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="text-center p-12 bg-surface-container border-4 border-dashed border-outline-variant text-on-surface-variant">
+                <span className="material-symbols-outlined text-5xl mb-4 block opacity-50">account_tree</span>
+                <p className="font-headline font-bold uppercase">No Strategic Decisions Logged</p>
+                <p className="font-body text-sm mt-2">Active mission is pending major operational shifts.</p>
               </div>
-              <p className="font-body text-sm font-bold mb-2">Assigning context scan to Context Agent instead of Research Agent.</p>
-              <div className="bg-surface-container p-3 border-l-4 border-tertiary">
-                <p className="font-body text-sm italic text-on-surface-variant">"Research Agent is occupied with scraping external JSON telemetry. Context Agent has direct access to the GitHub issues cache. Splitting task avoids bottleneck."</p>
-              </div>
-            </article>
-
-            <article className="bg-background neo-border p-6 shadow-[6px_6px_0px_0px_rgba(230,59,46,1)] border-secondary">
-              <div className="flex justify-between mb-4 pb-2 border-b-2 border-outline-variant">
-                <span className="font-headline font-bold uppercase text-sm text-secondary flex items-center gap-2">
-                  <span className="material-symbols-outlined shrink-0 text-[18px]">gavel</span> QA Rejection
-                </span>
-                <span className="font-mono text-xs font-bold bg-error-container px-2 py-0.5 text-error border border-error">Blocking</span>
-              </div>
-              <p className="font-body text-sm font-bold mb-2">Sent Spec Draft V1 back to Code Agent.</p>
-              <div className="bg-surface-container p-3 border-l-4 border-secondary">
-                <p className="font-body text-sm italic text-on-surface-variant">"Operational standards require all drafts to include acceptance criteria and test cases. The submitted brief lacked both. Re-prompting Code Agent with standard reinforcement."</p>
-              </div>
-            </article>
+            )}
           </div>
         </section>
       </main>

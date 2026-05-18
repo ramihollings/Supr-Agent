@@ -203,6 +203,13 @@ export async function addArtifact(missionId: string, artifact: Omit<Artifact, 'i
   stmt.run(`art-${Date.now()}`, missionId, artifact.type, artifact.filename, artifact.content);
 }
 
+export async function updateArtifact(missionId: string, title: string, content: string): Promise<void> {
+  const stmt = db.prepare(`
+    UPDATE Artifacts SET content = ? WHERE mission_id = ? AND title = ?
+  `);
+  stmt.run(content, missionId, title);
+}
+
 export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'id'>): Promise<void> {
   const stmt = db.prepare(`
     INSERT INTO Memory_Items (id, mission_id, type, content, importance)
