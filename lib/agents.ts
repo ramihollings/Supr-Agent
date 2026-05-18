@@ -8,6 +8,8 @@ export interface AgentIdentityProfile {
   type: string;
   systemPrompt: string;
   tools: string[];
+  injectedSkills?: string;
+  memoryContext?: string;
 }
 
 const AGENTS_DIR = path.resolve(process.cwd(), '.agents');
@@ -54,6 +56,9 @@ ${profile.systemPrompt}
 # Operational Constraints
 - Adhere strictly to the Supr Neo-Brutalist communication style.
 - Request approval for actions exceeding your permission tier.
+
+${profile.injectedSkills ? `# Acquired Skills & Rules\n${profile.injectedSkills}\n` : ''}
+${profile.memoryContext ? `# Compressed Memory Context\n<agentmemory>\n${profile.memoryContext}\n</agentmemory>\n` : ''}
 `;
 
   fs.writeFileSync(filePath, markdownContent, 'utf-8');

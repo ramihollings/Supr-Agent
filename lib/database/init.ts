@@ -169,12 +169,98 @@ export function initDatabase() {
     )
   `);
 
+  // 10. Skills Table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS Skills (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      provider TEXT,
+      tools TEXT, -- JSON Array
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 11. Cron_Jobs Table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS Cron_Jobs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      interval TEXT,
+      target_action TEXT,
+      last_run DATETIME,
+      status TEXT, -- Active, Paused
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Seed default Skills if table is empty
+  const skillsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Skills`).get() as { cnt: number };
+  if (skillsCount.cnt === 0) {
+    const insertSkill = db.prepare(`
+      INSERT INTO Skills (id, name, description, provider, tools)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    insertSkill.run(
+      'sk-1',
+      'Toprank SEO',
+      'Optimizes structured markdown deliverables for maximum Google search results positioning.',
+      'Custom API',
+      JSON.stringify(['optimize_metadata', 'keyword_density_audit'])
+    );
+    insertSkill.run(
+      'sk-2',
+      'CloakBrowser Integration',
+      'Stealth crawler enabling play-by-play internet exploration without bot-fingerprint blocks.',
+      'Composio',
+      JSON.stringify(['stealth_scrape', 'javascript_render'])
+    );
+    insertSkill.run(
+      'sk-3',
+      'AST Sandbox Self-Healer',
+      'Diagnoses code compiler failures and performs single-line replacements within docker nodes.',
+      'Anthropic',
+      JSON.stringify(['compile_sandbox', 'fix_syntax_lint'])
+    );
+  }
+
+  // Seed default Cron Jobs if table is empty
+  const cronsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Cron_Jobs`).get() as { cnt: number };
+  if (cronsCount.cnt === 0) {
+    const insertCron = db.prepare(`
+      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertCron.run(
+      'cr-1',
+      'Signal Aggregator Sync',
+      'Every 5 minutes',
+      'Scrape competitor product signals & feature releases via CloakBrowser.',
+      new Date(Date.now() - 3 * 60000).toISOString(),
+      'Active'
+    );
+    insertCron.run(
+      'cr-2',
+      'Workspace Log Sanitizer',
+      'Daily at midnight',
+      'Clean temporary docker assets & compile cache objects inside local sandboxes.',
+      new Date(Date.now() - 14 * 3600000).toISOString(),
+      'Active'
+    );
+    insertCron.run(
+      'cr-3',
+      'Semantic Index Compiler',
+      'Hourly',
+      'Trigger full recursive embedding update for vectorized RRF memory sync.',
+      new Date(Date.now() - 45 * 60000).toISOString(),
+      'Paused'
+    );
+  }
+
   console.log('Database initialization complete.');
 }
 
-// Optionally run initialization when this file is executed directly
-if (require.main === module) {
-  initDatabase();
-}
+// Run database initialization synchronously on import to guarantee all tables exist in SQLite
+initDatabase();
 
 export default db;

@@ -60,18 +60,22 @@ export function MissionWizard({ onClose }: { onClose: () => void }) {
       const fullData = {
         ...data,
         readinessScore: 0,
-        messages: [{ id: Date.now(), sender: 'Supr', text: `Mission ${data.name} initialized. Glidepath locked.`, isUser: false }],
+        messages: [{ id: Date.now(), sender: 'Supr', text: `Project ${data.name} initialized. Roadmap locked.`, isUser: false }],
         tasks: initialTasks,
         activityLog: [],
         failures: [],
         memoryItems: []
       };
 
-      await createMissionAction(fullData as any);
-      router.push('/mission-control');
+      const newProj = await createMissionAction(fullData as any);
+      if (newProj) {
+        router.push(`/mission-control?id=${newProj.id}`);
+      } else {
+        router.push('/mission-control');
+      }
       onClose();
     } catch (error) {
-      console.error('Failed to create mission:', error);
+      console.error('Failed to create project:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -87,7 +91,7 @@ export function MissionWizard({ onClose }: { onClose: () => void }) {
         <header className="p-6 border-b-4 border-primary flex justify-between items-center bg-primary text-on-primary">
           <div className="flex items-center gap-3">
             <Rocket className="w-8 h-8" />
-            <h2 className="font-headline text-2xl font-black uppercase tracking-tight">Mission Architect</h2>
+            <h2 className="font-headline text-2xl font-black uppercase tracking-tight">Project Builder</h2>
           </div>
           <button onClick={onClose} className="hover:rotate-90 transition-transform">
             <X className="w-8 h-8" />
@@ -96,124 +100,124 @@ export function MissionWizard({ onClose }: { onClose: () => void }) {
 
         {/* Steps Indicator */}
         <div className="flex border-b-4 border-primary bg-surface-container">
-          {[
-            { n: 1, label: 'Objective', icon: Rocket },
-            { n: 2, label: 'Phases', icon: ListTodo },
-            { n: 3, label: 'Confirm', icon: CheckCircle2 }
-          ].map((s) => (
-            <div 
-              key={s.n}
-              className={`flex-1 flex items-center justify-center py-3 gap-2 border-r-4 border-primary last:border-r-0 transition-colors ${
-                step === s.n ? 'bg-primary-container text-on-primary-container font-bold' : 'text-on-surface-variant/50'
-              }`}
-            >
-              <s.icon className="w-4 h-4" />
-              <span className="font-headline text-xs uppercase hidden sm:inline">{s.label}</span>
-            </div>
-          ))}
-        </div>
+           {[
+             { n: 1, label: 'Objective', icon: Rocket },
+             { n: 2, label: 'Roadmap', icon: ListTodo },
+             { n: 3, label: 'Review', icon: CheckCircle2 }
+           ].map((s) => (
+             <div 
+               key={s.n}
+               className={`flex-1 flex items-center justify-center py-3 gap-2 border-r-4 border-primary last:border-r-0 transition-colors ${
+                 step === s.n ? 'bg-primary-container text-on-primary-container font-bold' : 'text-on-surface-variant/50'
+               }`}
+             >
+               <s.icon className="w-4 h-4" />
+               <span className="font-headline text-xs uppercase hidden sm:inline">{s.label}</span>
+             </div>
+           ))}
+         </div>
 
-        {/* Form Content */}
-        <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto p-8 space-y-8">
-          
-          {step === 1 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="space-y-2">
-                <label className="font-headline font-bold uppercase text-sm tracking-widest text-primary">Mission Identifier</label>
-                <input 
-                  {...register('name')}
-                  placeholder="e.g. PROJECT_OMEGA"
-                  className="w-full bg-background neo-border p-4 font-headline text-xl focus:ring-0 focus:border-tertiary uppercase"
-                />
-                {errors.name && <p className="text-error font-bold text-xs uppercase">{errors.name.message}</p>}
-              </div>
-              <div className="space-y-2">
-                <label className="font-headline font-bold uppercase text-sm tracking-widest text-primary">Core Objective</label>
-                <textarea 
-                  {...register('objective')}
-                  placeholder="Describe the end goal in detail..."
-                  rows={4}
-                  className="w-full bg-background neo-border p-4 font-body text-lg focus:ring-0 focus:border-tertiary"
-                />
-                {errors.objective && <p className="text-error font-bold text-xs uppercase">{errors.objective.message}</p>}
-              </div>
-            </div>
-          )}
+         {/* Form Content */}
+         <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto p-8 space-y-8">
+           
+           {step === 1 && (
+             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+               <div className="space-y-2">
+                 <label className="font-headline font-bold uppercase text-sm tracking-widest text-primary">Project Name</label>
+                 <input 
+                   {...register('name')}
+                   placeholder="e.g. PROJECT_OMEGA"
+                   className="w-full bg-background neo-border p-4 font-headline text-xl focus:ring-0 focus:border-tertiary uppercase"
+                 />
+                 {errors.name && <p className="text-error font-bold text-xs uppercase">{errors.name.message}</p>}
+               </div>
+               <div className="space-y-2">
+                 <label className="font-headline font-bold uppercase text-sm tracking-widest text-primary">Core Objective</label>
+                 <textarea 
+                   {...register('objective')}
+                   placeholder="Describe the end goal in detail..."
+                   rows={4}
+                   className="w-full bg-background neo-border p-4 font-body text-lg focus:ring-0 focus:border-tertiary"
+                 />
+                 {errors.objective && <p className="text-error font-bold text-xs uppercase">{errors.objective.message}</p>}
+               </div>
+             </div>
+           )}
 
-          {step === 2 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-surface-container p-4 neo-border border-dashed">
-                <p className="font-body text-sm text-on-surface-variant italic">The Glidepath is automatically generated based on the Supr Standard. You can customize phases later in Mission Control.</p>
-              </div>
-              <div className="space-y-4">
-                {watch('phases')?.map((phase, idx) => (
-                  <div key={phase.id || idx} className="flex items-center gap-4 bg-background neo-border p-4">
-                    <div className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xs">{idx + 1}</div>
-                    <input 
-                      {...register(`phases.${idx}.name`)}
-                      className="flex-1 bg-transparent border-none p-0 font-headline font-bold uppercase focus:ring-0"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+           {step === 2 && (
+             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+               <div className="bg-surface-container p-4 neo-border border-dashed">
+                 <p className="font-body text-sm text-on-surface-variant italic">The Roadmap is automatically generated based on the Supr Standard. You can customize phases later in the Workspace.</p>
+               </div>
+               <div className="space-y-4">
+                 {watch('phases')?.map((phase, idx) => (
+                   <div key={phase.id || idx} className="flex items-center gap-4 bg-background neo-border p-4">
+                     <div className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xs">{idx + 1}</div>
+                     <input 
+                       {...register(`phases.${idx}.name`)}
+                       className="flex-1 bg-transparent border-none p-0 font-headline font-bold uppercase focus:ring-0"
+                     />
+                   </div>
+                 ))}
+               </div>
+             </div>
+           )}
 
-          {step === 3 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 text-center">
-              <div className="w-24 h-24 bg-tertiary-container text-tertiary rounded-full mx-auto flex items-center justify-center neo-border">
-                <Rocket className="w-12 h-12" />
-              </div>
-              <div>
-                <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">{watch('name') || 'Unnamed Mission'}</h3>
-                <p className="font-body text-on-surface-variant mt-2 max-w-md mx-auto">{watch('objective') || 'No objective defined yet.'}</p>
-              </div>
-              <div className="bg-surface-container p-6 neo-border text-left">
-                 <h4 className="font-headline font-bold uppercase text-xs mb-4 border-b-2 border-primary pb-1">Operational Parameters</h4>
-                 <ul className="space-y-2 font-body text-sm">
-                    <li className="flex justify-between"><span>Status:</span> <span className="font-bold uppercase text-tertiary">Active Initialization</span></li>
-                    <li className="flex justify-between"><span>Authority:</span> <span className="font-bold uppercase">Supervisor (Supr)</span></li>
-                    <li className="flex justify-between"><span>Governance:</span> <span className="font-bold uppercase">Standard Protocol</span></li>
-                 </ul>
-              </div>
-            </div>
-          )}
+           {step === 3 && (
+             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 text-center">
+               <div className="w-24 h-24 bg-tertiary-container text-tertiary rounded-full mx-auto flex items-center justify-center neo-border">
+                 <Rocket className="w-12 h-12" />
+               </div>
+               <div>
+                 <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">{watch('name') || 'Unnamed Project'}</h3>
+                 <p className="font-body text-on-surface-variant mt-2 max-w-md mx-auto">{watch('objective') || 'No objective defined yet.'}</p>
+               </div>
+               <div className="bg-surface-container p-6 neo-border text-left">
+                  <h4 className="font-headline font-bold uppercase text-xs mb-4 border-b-2 border-primary pb-1">Project Parameters</h4>
+                  <ul className="space-y-2 font-body text-sm">
+                     <li className="flex justify-between"><span>Status:</span> <span className="font-bold uppercase text-tertiary">Active Initialization</span></li>
+                     <li className="flex justify-between"><span>Authority:</span> <span className="font-bold uppercase">Supervisor (Supr)</span></li>
+                     <li className="flex justify-between"><span>Governance:</span> <span className="font-bold uppercase">Standard Protocol</span></li>
+                  </ul>
+               </div>
+             </div>
+           )}
 
-        </form>
+         </form>
 
-        {/* Footer */}
-        <footer className="p-6 border-t-4 border-primary flex justify-between bg-surface">
-          {step > 1 ? (
-            <button 
-              type="button"
-              onClick={prevStep}
-              className="flex items-center gap-2 font-headline font-bold uppercase hover:text-tertiary transition-colors"
-            >
-              <ChevronLeft className="w-5 h-5" /> Back
-            </button>
-          ) : <div />}
+         {/* Footer */}
+         <footer className="p-6 border-t-4 border-primary flex justify-between bg-surface">
+           {step > 1 ? (
+             <button 
+               type="button"
+               onClick={prevStep}
+               className="flex items-center gap-2 font-headline font-bold uppercase hover:text-tertiary transition-colors"
+             >
+               <ChevronLeft className="w-5 h-5" /> Back
+             </button>
+           ) : <div />}
 
-          {step < 3 ? (
-            <button 
-              type="button"
-              onClick={nextStep}
-              disabled={step === 1 && !watch('name')}
-              className="bg-primary text-on-primary neo-border px-8 py-3 font-headline font-bold uppercase hover:bg-tertiary transition-colors neo-shadow disabled:opacity-50 flex items-center gap-2"
-            >
-              Next <ChevronRight className="w-5 h-5" />
-            </button>
-          ) : (
-            <button 
-              type="submit"
-              onClick={handleSubmit(onSubmit)}
-              disabled={isSubmitting}
-              className="bg-tertiary text-on-tertiary neo-border px-10 py-4 font-headline font-black uppercase hover:bg-primary transition-all neo-shadow active:translate-x-1 active:translate-y-1 disabled:opacity-50 flex items-center gap-3"
-            >
-              {isSubmitting ? 'Initializing...' : 'Launch Mission'}
-              <Rocket className="w-6 h-6" />
-            </button>
-          )}
-        </footer>
+           {step < 3 ? (
+             <button 
+               type="button"
+               onClick={nextStep}
+               disabled={step === 1 && !watch('name')}
+               className="bg-primary text-on-primary neo-border px-8 py-3 font-headline font-bold uppercase hover:bg-tertiary transition-colors neo-shadow disabled:opacity-50 flex items-center gap-2"
+             >
+               Next <ChevronRight className="w-5 h-5" />
+             </button>
+           ) : (
+             <button 
+               type="submit"
+               onClick={handleSubmit(onSubmit)}
+               disabled={isSubmitting}
+               className="bg-tertiary text-on-tertiary neo-border px-10 py-4 font-headline font-black uppercase hover:bg-primary transition-all neo-shadow active:translate-x-1 active:translate-y-1 disabled:opacity-50 flex items-center gap-3"
+             >
+               {isSubmitting ? 'Initializing...' : 'Create Project'}
+               <Rocket className="w-6 h-6" />
+             </button>
+           )}
+         </footer>
       </div>
     </div>
   );

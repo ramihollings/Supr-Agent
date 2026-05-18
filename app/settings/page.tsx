@@ -8,10 +8,19 @@ export default function SettingsPage() {
   const [operatingMode, setOperatingMode] = useState('Supervisor');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Channels States
+  const [twitterConnected, setTwitterConnected] = useState(false);
+  const [discordWebhook, setDiscordWebhook] = useState('https://discord.com/api/webhooks/9912389...');
+  const [discordConnected, setDiscordConnected] = useState(true);
+  const [telegramToken, setTelegramToken] = useState('718290382:AAFlk1829aB...');
+  const [telegramChatId, setTelegramChatId] = useState('-100192830182');
+  const [telegramConnected, setTelegramConnected] = useState(true);
+
   const modeRef = useRef<HTMLDivElement>(null);
   const permissionsRef = useRef<HTMLDivElement>(null);
   const memoryRef = useRef<HTMLDivElement>(null);
   const standardsRef = useRef<HTMLDivElement>(null);
+  const channelsRef = useRef<HTMLDivElement>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -43,6 +52,7 @@ export default function SettingsPage() {
               { name: 'Permissions', ref: permissionsRef },
               { name: 'Memory', ref: memoryRef },
               { name: 'Standards', ref: standardsRef },
+              { name: 'Channels & Socials', ref: channelsRef },
             ].map((item) => (
               <button 
                 key={item.name}
@@ -217,6 +227,140 @@ export default function SettingsPage() {
               >
                 Save Configurations
               </button>
+            </div>
+          </div>
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
+          {/* Channels & Socials Section */}
+          <div ref={channelsRef} className="flex flex-col gap-6">
+            <div className="border-b-4 border-primary pb-4 mb-4">
+              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Channels & Socials</h2>
+              <p className="font-body text-on-surface-variant mt-2">Configure notification triggers, social hooks, and chat automation bots.</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6">
+              {/* Telegram Channel Connector */}
+              <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
+                <div className="flex justify-between items-center border-b-2 border-primary pb-3">
+                  <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary">telegram</span> Telegram Chatbot Connection
+                  </h3>
+                  <span className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary ${
+                    telegramConnected ? 'bg-primary text-on-primary' : 'bg-surface-dim text-on-surface-variant'
+                  }`}>
+                    {telegramConnected ? 'Connected ✓' : 'Disconnected'}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                  <div>
+                    <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Bot Token</label>
+                    <input 
+                      type="password" 
+                      value={telegramToken}
+                      onChange={(e) => setTelegramToken(e.target.value)}
+                      className="w-full bg-background neo-border p-3 font-mono text-xs focus:outline-none focus:border-tertiary"
+                      placeholder="e.g. 123456789:ABCdefGhIJK..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Chat ID / Group Channel</label>
+                    <input 
+                      type="text" 
+                      value={telegramChatId}
+                      onChange={(e) => setTelegramChatId(e.target.value)}
+                      className="w-full bg-background neo-border p-3 font-mono text-xs focus:outline-none focus:border-tertiary"
+                      placeholder="e.g. -100123456789"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center mt-4">
+                  <p className="font-body text-xs text-on-surface-variant max-w-md">Provides real-time project logs, approval gate alerts, and command logs straight to your private Telegram channel.</p>
+                  <button 
+                    onClick={() => {
+                      setTelegramConnected(!telegramConnected);
+                      showToast(telegramConnected ? "Telegram disconnected." : "Telegram authenticated successfully! ✓");
+                    }}
+                    className={`px-6 py-2.5 font-headline font-black uppercase text-xs neo-border neo-shadow transition-colors ${
+                      telegramConnected ? 'bg-secondary text-on-error hover:bg-primary hover:text-on-primary' : 'bg-primary text-on-primary hover:bg-tertiary hover:text-on-tertiary'
+                    }`}
+                  >
+                    {telegramConnected ? 'Disconnect' : 'Connect & Authorize'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Twitter/X Connector */}
+              <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
+                <div className="flex justify-between items-center border-b-2 border-primary pb-3">
+                  <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary">share</span> Twitter / X Broadcast Connection
+                  </h3>
+                  <span className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary ${
+                    twitterConnected ? 'bg-primary text-on-primary' : 'bg-surface-dim text-on-surface-variant'
+                  }`}>
+                    {twitterConnected ? 'Connected ✓' : 'Disconnected'}
+                  </span>
+                </div>
+                
+                <div className="flex justify-between items-center">
+                  <p className="font-body text-xs text-on-surface-variant max-w-lg">Allows research and OSINT agents to draft or directly post scheduled social media announcements and trend analysis briefs.</p>
+                  <button 
+                    onClick={() => {
+                      setTwitterConnected(!twitterConnected);
+                      showToast(twitterConnected ? "X/Twitter connection revoked." : "X/Twitter account linked successfully! ✓");
+                    }}
+                    className={`px-6 py-2.5 font-headline font-black uppercase text-xs neo-border neo-shadow transition-colors ${
+                      twitterConnected ? 'bg-secondary text-on-error hover:bg-primary hover:text-on-primary' : 'bg-primary text-on-primary hover:bg-tertiary hover:text-on-tertiary'
+                    }`}
+                  >
+                    {twitterConnected ? 'Revoke Access' : 'Link X/Twitter Account'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Discord Webhook Connector */}
+              <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
+                <div className="flex justify-between items-center border-b-2 border-primary pb-3">
+                  <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary">webhook</span> Discord Webhook Hook
+                  </h3>
+                  <span className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary ${
+                    discordConnected ? 'bg-primary text-on-primary' : 'bg-surface-dim text-on-surface-variant'
+                  }`}>
+                    {discordConnected ? 'Active ✓' : 'Inactive'}
+                  </span>
+                </div>
+                
+                <div>
+                  <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Discord Webhook URL</label>
+                  <input 
+                    type="text" 
+                    value={discordWebhook}
+                    onChange={(e) => setDiscordWebhook(e.target.value)}
+                    className="w-full bg-background neo-border p-3 font-mono text-xs focus:outline-none focus:border-tertiary"
+                    placeholder="https://discord.com/api/webhooks/..."
+                  />
+                </div>
+
+                <div className="flex justify-between items-center mt-2">
+                  <p className="font-body text-xs text-on-surface-variant max-w-lg">Configures immediate ping streams to Discord server channels when agent sandboxes encounter emergency triage freezes or approval locks.</p>
+                  <button 
+                    onClick={() => {
+                      setDiscordConnected(!discordConnected);
+                      showToast(discordConnected ? "Discord webhook deactivated." : "Discord webhook activated! ✓");
+                    }}
+                    className={`px-6 py-2.5 font-headline font-black uppercase text-xs neo-border neo-shadow transition-colors ${
+                      discordConnected ? 'bg-secondary text-on-error hover:bg-primary hover:text-on-primary' : 'bg-primary text-on-primary hover:bg-tertiary hover:text-on-tertiary'
+                    }`}
+                  >
+                    {discordConnected ? 'Deactivate Webhook' : 'Activate Webhook'}
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
 

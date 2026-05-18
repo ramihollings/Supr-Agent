@@ -40,8 +40,20 @@ export function TaskBoard({ tasks }: Props) {
               )}
             </div>
             <p className="font-body text-sm mb-4 text-on-surface-variant min-h-[40px]">{task.description}</p>
-            <div className={`flex items-center gap-2 text-xs font-bold font-headline uppercase ${isActive ? 'text-tertiary' : 'text-on-surface-variant'}`}>
-              <span className="material-symbols-outlined text-base">{task.agentIcon}</span> {task.agentName}
+            <div className="flex items-center justify-between mt-4 pt-3 border-t border-outline-variant">
+              <div className={`flex items-center gap-2 text-xs font-bold font-headline uppercase px-3 py-1.5 border-2 bg-surface-container ${
+                isActive 
+                  ? 'text-tertiary border-tertiary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' 
+                  : isDone 
+                  ? 'text-primary border-primary bg-surface' 
+                  : 'text-on-surface-variant border-outline-variant'
+              }`}>
+                <span className="material-symbols-outlined text-sm">{task.agentIcon || 'smart_toy'}</span>
+                <span>Assigned: {task.agentName}</span>
+              </div>
+              <span className="text-[10px] font-mono font-bold uppercase text-on-surface-variant bg-surface-container px-2 py-0.5 border border-outline-variant">
+                ID: {task.id}
+              </span>
             </div>
           </div>
         );

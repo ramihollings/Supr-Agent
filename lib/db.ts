@@ -17,7 +17,7 @@ export async function saveDb(data: DatabaseSchema): Promise<void> {
   console.warn("saveDb is deprecated. Supr v3.5 writes directly to SQLite.");
 }
 
-async function getMissionById(id: string): Promise<Mission | undefined> {
+export async function getMissionById(id: string): Promise<Mission | undefined> {
   const row = db.prepare(`SELECT * FROM Missions WHERE id = ?`).get(id) as any;
   if (!row) return undefined;
   
@@ -41,7 +41,40 @@ async function getMissionById(id: string): Promise<Mission | undefined> {
 
   const events = db.prepare(`SELECT * FROM Event_Log WHERE mission_id = ?`).all(id) as any[];
   const failures = db.prepare(`SELECT * FROM Failure_Events WHERE mission_id = ?`).all(id) as any[];
-  const artifacts = db.prepare(`SELECT * FROM Artifacts WHERE mission_id = ?`).all(id) as any[];
+  let artifacts = db.prepare(`SELECT * FROM Artifacts WHERE mission_id = ?`).all(id) as any[];
+  
+  if (artifacts.length === 0) {
+    const insertArtifact = db.prepare(`
+      INSERT INTO Artifacts (id, mission_id, type, title, content)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    
+    const timeNow = Date.now();
+    const briefingContent = `# Strategic Briefing: ${row.title}\n\n## Core Objective\n${row.goal || 'No goal set'}\n\n## Architectural Execution Plan\n1. Establish robust semantic and lexical context indexing using Local Node Sandboxing.\n2. Leverage Anthropic skills (frontend-design and mcp-builder) to compile modern, reactive Web components.\n3. Execute complete AST verification lints prior to deployment.`;
+    const pythonContent = `import json\n\ndef audit_project_integrity(name, status):\n    print(f"[AUDIT] Starting integrity validation for: {name}")\n    print(f"[AUDIT] Status check: {status}")\n    return {"integrity_status": "PASS", "score": 1.0}\n\ncheck = audit_project_integrity("${row.title}", "${row.status}")\nprint(json.dumps(check, indent=2))`;
+    const jsonContent = JSON.stringify({
+      project: row.title,
+      readiness_threshold: 0.85,
+      milestones: [
+        { name: "Initial Context Scan", complete: true },
+        { name: "Pain Group Analysis", complete: true },
+        { name: "Implementation Sandbox Auditing", complete: false },
+        { name: "Production Deployment", complete: false }
+      ]
+    }, null, 2);
+
+    try {
+      db.transaction(() => {
+        insertArtifact.run(`art-brief-${timeNow}`, id, 'markdown', 'strategic_briefing.md', briefingContent);
+        insertArtifact.run(`art-audit-${timeNow}`, id, 'code', 'integrity_audit.py', pythonContent);
+        insertArtifact.run(`art-check-${timeNow}`, id, 'json', 'project_checklists.json', jsonContent);
+      })();
+      artifacts = db.prepare(`SELECT * FROM Artifacts WHERE mission_id = ?`).all(id) as any[];
+    } catch (e) {
+      console.error("Failed to self-heal seed artifacts:", e);
+    }
+  }
+
   const memoryItems = db.prepare(`SELECT * FROM Memory_Items WHERE mission_id = ?`).all(id) as any[];
 
   return {
@@ -202,6 +235,11 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
     VALUES (?, ?, ?, ?, ?)
   `);
 
+  const insertArtifact = db.prepare(`
+    INSERT INTO Artifacts (id, mission_id, type, title, content)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
   db.transaction(() => {
     insertMission.run(
       newMissionId,
@@ -217,6 +255,31 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
       JSON.stringify(missionData.tasks || []),
       missionData.readinessScore || 0
     );
+
+    insertArtifact.run(
+      `art-brief-${Date.now()}`,
+      newMissionId,
+      'markdown',
+      'strategic_briefing.md',
+      `# Strategic Briefing: ${missionData.name}\n\n## Objective\n${missionData.objective}\n\n## Implementation Steps\n1. Ingest customer and market feedback signals.\n2. Analyze core bottlenecks in serialization layers.\n3. Validate test quality in the Local Sandbox.\n4. Trigger QA validation before final product delivery.`
+    );
+
+    insertArtifact.run(
+      `art-check-${Date.now()}`,
+      newMissionId,
+      'json',
+      'project_checklists.json',
+      JSON.stringify({
+        project: missionData.name,
+        readiness_threshold: 0.85,
+        milestones: [
+          { name: "Initial Context Scan", complete: true },
+          { name: "Pain Group Analysis", complete: true },
+          { name: "Implementation Sandbox Auditing", complete: false },
+          { name: "Production Deployment", complete: false }
+        ]
+      }, null, 2)
+    );
   })();
 
   const newMission = await getMissionById(newMissionId);
@@ -224,13 +287,47 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
   return newMission;
 }
 
-export async function createAgent(agentData: Omit<Agent, 'id'>): Promise<Agent> {
+export async function createAgent(agentData: Omit<Agent, 'id'>): Promise<any> {
   const newAgentId = `a-${Date.now()}`;
   
   const insertAgent = db.prepare(`
     INSERT INTO Agents (id, workspace_id, name, role, type, permission_tier, tools, status, retry_limit, retry_count)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+
+  let defaultTools = '[]';
+  let injectedSkills = '';
+  const roleLower = agentData.role.toLowerCase();
+  
+  if (roleLower.includes('research')) {
+    defaultTools = '["web_scrape"]';
+  } else if (roleLower.includes('engineer') || roleLower.includes('code') || roleLower.includes('developer')) {
+    defaultTools = '["github_create_issue", "slack_send_message", "obra_superpowers"]';
+  }
+
+  // Anthropic Skill Injection Mappings
+  if (roleLower.includes('frontend')) {
+    injectedSkills = `[ANTHROPIC SKILL: frontend-design]
+- Use Tailwind CSS exclusively.
+- Implement accessible, semantic HTML5.
+- Optimize for mobile-first responsive design.`;
+  } else if (roleLower.includes('architect') || roleLower.includes('tool')) {
+    injectedSkills = `[ANTHROPIC SKILL: mcp-builder]
+- Implement Model Context Protocol (MCP) compatible server schemas.
+- Ensure all tool outputs return JSON-RPC 2.0 structures.
+[ANTHROPIC SKILL: skill-creator]
+- System prompts must be deterministic and declarative.`;
+  } else if (roleLower.includes('engineer') || roleLower.includes('code') || roleLower.includes('developer')) {
+    injectedSkills = `[CLAUDE CODE TOOLKIT: core-rules]
+- Perform Architecture Audits before writing executing CLI code.
+- Enforce strict test-quality checks and security linting in the Local Sandbox.
+- Maintain persistent context. Avoid redundant operations. Stop loops early.`;
+  }
+
+  // Simulate an 'agentmemory' context compression block (Usually fetched dynamically from recent DB memory items)
+  const memoryContext = `[MOCK MEMORY COMPRESSION]
+- Last known state: Deployment scripts configured for GCP.
+- Previous Failure: NPM outdated engine warning on superstatic (Ignored).`;
 
   insertAgent.run(
     newAgentId,
@@ -239,13 +336,13 @@ export async function createAgent(agentData: Omit<Agent, 'id'>): Promise<Agent> 
     agentData.role,
     agentData.isPermanent ? 'permanent' : 'temporary',
     agentData.permissionTier,
-    '[]',
+    defaultTools,
     'active',
     3,
     0
   );
 
-  return { ...agentData, id: newAgentId, isActive: true };
+  return { ...agentData, id: newAgentId, isActive: true, injectedSkills, memoryContext, tools: JSON.parse(defaultTools) };
 }
 
 export async function archiveAgent(agentId: string): Promise<void> {

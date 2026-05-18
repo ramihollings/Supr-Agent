@@ -54,6 +54,16 @@ export async function fetchMissionState(): Promise<Mission | undefined> {
   }
 }
 
+export async function fetchMissionsAction(): Promise<Mission[]> {
+  try {
+    const data = await getDb();
+    return data.missions;
+  } catch (error) {
+    handleActionError(error);
+    return [];
+  }
+}
+
 export async function fetchAgentsState(): Promise<Agent[]> {
   try {
     return await getAgents();
@@ -190,5 +200,90 @@ export async function extendAgentAction(agentId: string) {
     await extendAgent(agentId);
   } catch (error) {
     handleActionError(error);
+  }
+}
+
+// ----------------------------------------------------
+// ENTERPRISE SKILLS & CRON AUTOMATION ACTIONS
+// ----------------------------------------------------
+import db from '@/lib/database/init';
+
+export async function fetchSkillsState() {
+  try {
+    const rows = db.prepare(`SELECT * FROM Skills ORDER BY created_at DESC`).all() as any[];
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      provider: r.provider,
+      tools: JSON.parse(r.tools || '[]')
+    }));
+  } catch (error) {
+    console.error("Failed to fetch skills:", error);
+    return [];
+  }
+}
+
+export async function createSkillAction(skill: { name: string, description: string, provider: string, tools: string[] }) {
+  try {
+    const id = `sk-${Date.now()}`;
+    const stmt = db.prepare(`
+      INSERT INTO Skills (id, name, description, provider, tools)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    stmt.run(id, skill.name, skill.description, skill.provider, JSON.stringify(skill.tools));
+    return { success: true, id };
+  } catch (error) {
+    console.error("Failed to create skill:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function deleteSkillAction(id: string) {
+  try {
+    db.prepare(`DELETE FROM Skills WHERE id = ?`).run(id);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete skill:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function fetchCronJobsState() {
+  try {
+    const rows = db.prepare(`SELECT * FROM Cron_Jobs ORDER BY created_at DESC`).all() as any[];
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      interval: r.interval,
+      targetAction: r.target_action,
+      lastRun: r.last_run,
+      status: r.status
+    }));
+  } catch (error) {
+    console.error("Failed to fetch cron jobs:", error);
+    return [];
+  }
+}
+
+export async function toggleCronJobAction(id: string, currentStatus: string) {
+  try {
+    const newStatus = currentStatus === 'Active' ? 'Paused' : 'Active';
+    db.prepare(`UPDATE Cron_Jobs SET status = ? WHERE id = ?`).run(newStatus, id);
+    return { success: true, newStatus };
+  } catch (error) {
+    console.error("Failed to toggle cron job:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function triggerCronJobAction(id: string) {
+  try {
+    const timeNow = new Date().toISOString();
+    db.prepare(`UPDATE Cron_Jobs SET last_run = ? WHERE id = ?`).run(timeNow, id);
+    return { success: true, lastRun: timeNow };
+  } catch (error) {
+    console.error("Failed to trigger cron job:", error);
+    return { success: false, error: String(error) };
   }
 }

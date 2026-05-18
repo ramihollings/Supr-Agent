@@ -4,8 +4,40 @@ import { useState } from 'react';
 import { createAgentAction } from '@/app/actions';
 import { Agent } from '@/types';
 
+const exampleTemplates = [
+  {
+    name: 'StrategicPlanner',
+    role: 'Product Roadmap Strategist',
+    type: 'permanent',
+    permissionTier: 'Edit',
+    systemPrompt: 'You are the Strategic Planner agent for the Supr orchestration platform. Your core directive is to analyze high-level project goals, synthesize them into precise sequential phases, and outline strict operational constraints. You excel at translating ambiguous client requirements into clean, structured roadmap specifications.'
+  },
+  {
+    name: 'StealthCrawler',
+    role: 'OSINT & Market Signal Harvester',
+    type: 'temporary',
+    permissionTier: 'External_Act',
+    systemPrompt: 'You are the Stealth Crawler agent for the Supr orchestration platform. Your core directive is to leverage CloakBrowser scraping technologies to harvest raw competitor data, target market signals, and customer feedback. Always bypass fingerprinting and follow privacy-respecting gathering standards.'
+  },
+  {
+    name: 'QualitySentinel',
+    role: 'Code Sandbox Quality & AST Auditor',
+    type: 'temporary',
+    permissionTier: 'Execute',
+    systemPrompt: 'You are the Quality Sentinel agent for the Supr orchestration platform. Your core directive is to run complete AST sanity and lint checks on code deliverables in the local sandbox. You isolate and resolve performance blocks, package conflicts, and typescript error exceptions before marking tasks as approved.'
+  },
+  {
+    name: 'ComposioConnector',
+    role: 'API Integration Specialist',
+    type: 'permanent',
+    permissionTier: 'Root',
+    systemPrompt: 'You are the Composio Connector agent. Your core directive is to map out third-party REST, GraphQL, and webhook API schemas to streamline workspace operations. You specialize in building robust skill triggers and automating repetitive back-office actions.'
+  }
+];
+
 export function AgentWizard({ onClose, onAgentCreated }: { onClose: () => void, onAgentCreated: () => void }) {
   const [step, setStep] = useState(1);
+  const [selectedTemplateIndex, setSelectedTemplateIndex] = useState<number | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     role: '',
@@ -14,6 +46,18 @@ export function AgentWizard({ onClose, onAgentCreated }: { onClose: () => void, 
     systemPrompt: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSelectTemplate = (index: number) => {
+    const t = exampleTemplates[index];
+    setSelectedTemplateIndex(index);
+    setFormData({
+      name: t.name,
+      role: t.role,
+      type: t.type,
+      permissionTier: t.permissionTier,
+      systemPrompt: t.systemPrompt
+    });
+  };
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -34,9 +78,9 @@ export function AgentWizard({ onClose, onAgentCreated }: { onClose: () => void, 
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-surface-container w-full max-w-2xl neo-border shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] flex flex-col">
+      <div className="bg-surface-container w-full max-w-2xl neo-border shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="bg-primary p-4 border-b-4 border-primary flex justify-between items-center">
+        <div className="bg-primary p-4 border-b-4 border-primary flex justify-between items-center shrink-0">
           <h2 className="font-headline font-black uppercase text-2xl text-primary-fixed tracking-tight flex items-center gap-2">
             <span className="material-symbols-outlined">precision_manufacturing</span>
             Agent Foundry
@@ -47,15 +91,49 @@ export function AgentWizard({ onClose, onAgentCreated }: { onClose: () => void, 
         </div>
 
         {/* Content */}
-        <div className="p-8 flex-1 overflow-y-auto">
+        <div className="p-8 flex-1 overflow-y-auto custom-scrollbar">
           {step === 1 && (
             <div className="space-y-6">
+              {/* Preset Template Selector */}
+              <div>
+                <label className="block font-headline font-bold uppercase text-primary mb-3 text-sm flex items-center gap-2">
+                  <span className="material-symbols-outlined text-sm">stars</span> Quick Sub-Agent Template Selection
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  {exampleTemplates.map((t, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleSelectTemplate(idx)}
+                      className={`p-4 text-left border-2 flex flex-col gap-1 transition-all ${
+                        selectedTemplateIndex === idx 
+                          ? 'bg-primary-container text-on-primary-container border-primary shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]' 
+                          : 'bg-background text-primary border-primary hover:bg-surface-container'
+                      }`}
+                    >
+                      <h4 className="font-headline font-black text-sm uppercase tracking-tight flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-xs">smart_toy</span> {t.name}
+                      </h4>
+                      <p className="font-body text-[10px] font-bold uppercase text-on-surface-variant">{t.role}</p>
+                      <div className="flex gap-1.5 mt-2 text-[9px] font-bold uppercase">
+                        <span className="bg-primary text-on-primary px-1.5 py-0.5">{t.permissionTier}</span>
+                        <span className="bg-surface-dim border border-primary px-1.5 py-0.5">{t.type}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="w-full h-2 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
               <div>
                 <label className="block font-headline font-bold uppercase text-primary mb-2 text-sm">Agent Designation</label>
                 <input 
                   type="text" 
                   value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
+                  onChange={e => {
+                    setSelectedTemplateIndex(null);
+                    setFormData({...formData, name: e.target.value});
+                  }}
                   className="w-full bg-background neo-border p-3 font-body focus:outline-none focus:border-tertiary"
                   placeholder="e.g., CodeBot, SecurityScanner"
                   autoFocus
@@ -67,7 +145,10 @@ export function AgentWizard({ onClose, onAgentCreated }: { onClose: () => void, 
                 <input 
                   type="text" 
                   value={formData.role}
-                  onChange={e => setFormData({...formData, role: e.target.value})}
+                  onChange={e => {
+                    setSelectedTemplateIndex(null);
+                    setFormData({...formData, role: e.target.value});
+                  }}
                   className="w-full bg-background neo-border p-3 font-body focus:outline-none focus:border-tertiary"
                   placeholder="e.g., Full-Stack Engineer, OSINT Gatherer"
                 />
@@ -77,13 +158,19 @@ export function AgentWizard({ onClose, onAgentCreated }: { onClose: () => void, 
                 <label className="block font-headline font-bold uppercase text-primary mb-2 text-sm">Unit Type</label>
                 <div className="grid grid-cols-2 gap-4">
                   <button 
-                    onClick={() => setFormData({...formData, type: 'temporary'})}
+                    onClick={() => {
+                      setSelectedTemplateIndex(null);
+                      setFormData({...formData, type: 'temporary'});
+                    }}
                     className={`p-4 font-headline font-bold uppercase border-2 text-sm transition-all ${formData.type === 'temporary' ? 'bg-primary text-on-primary border-primary shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]' : 'bg-background text-primary border-primary hover:bg-surface-variant'}`}
                   >
                     Temporary
                   </button>
                   <button 
-                    onClick={() => setFormData({...formData, type: 'permanent'})}
+                    onClick={() => {
+                      setSelectedTemplateIndex(null);
+                      setFormData({...formData, type: 'permanent'});
+                    }}
                     className={`p-4 font-headline font-bold uppercase border-2 text-sm transition-all ${formData.type === 'permanent' ? 'bg-primary text-on-primary border-primary shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]' : 'bg-background text-primary border-primary hover:bg-surface-variant'}`}
                   >
                     Permanent

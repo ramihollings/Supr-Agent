@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
-import { getActiveMission } from '@/lib/db';
+import { getActiveMission, getMissionById } from '@/lib/db';
 import { Mission } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const encoder = new TextEncoder();
+  const projectId = req.nextUrl.searchParams.get('id');
   let lastMissionHash = '';
 
   const stream = new ReadableStream({
@@ -14,8 +15,15 @@ export async function GET(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
+      const fetchProject = async (): Promise<Mission | undefined> => {
+        if (projectId) {
+          return await getMissionById(projectId);
+        }
+        return await getActiveMission();
+      };
+
       // Initial send
-      const initialMission = await getActiveMission();
+      const initialMission = await fetchProject();
       if (initialMission) {
         lastMissionHash = JSON.stringify(initialMission);
         send(initialMission);
@@ -23,7 +31,7 @@ export async function GET(req: NextRequest) {
 
       const interval = setInterval(async () => {
         try {
-          const mission = await getActiveMission();
+          const mission = await fetchProject();
           if (!mission) return;
 
           const currentHash = JSON.stringify(mission);
