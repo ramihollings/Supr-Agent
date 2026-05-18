@@ -68,11 +68,10 @@ export default function SettingsPage() {
               </button>
             ))}
             <button 
-              onClick={() => showToast("Workflows coming soon!")}
+              onClick={() => scrollToSection('Channels & Socials', channelsRef)}
               className="font-body font-bold uppercase text-sm p-4 bg-surface text-primary neo-border hover:bg-surface-container transition-colors flex justify-between items-center group relative"
             >
               Workflows
-              <div className="absolute right-12 top-1/2 -translate-y-1/2 w-3 h-3 bg-secondary rounded-full border border-primary"></div>
               <span className="material-symbols-outlined group-hover:translate-x-1 transition-transform">chevron_right</span>
             </button>
           </nav>

@@ -299,3 +299,40 @@ export async function triggerCronJobAction(id: string) {
     return { success: false, error: String(error) };
   }
 }
+
+export async function createCronJobAction(data: { name: string; interval: string; targetAction: string }) {
+  try {
+    const id = `cr-${Date.now()}`;
+    db.prepare(`
+      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
+      VALUES (?, ?, ?, ?, NULL, 'Active')
+    `).run(id, data.name, data.interval, data.targetAction);
+    return { success: true, id };
+  } catch (error) {
+    console.error("Failed to create cron job:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function updateCronJobAction(id: string, data: { name: string; interval: string; targetAction: string }) {
+  try {
+    db.prepare(`
+      UPDATE Cron_Jobs SET name = ?, interval = ?, target_action = ? WHERE id = ?
+    `).run(data.name, data.interval, data.targetAction, id);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to update cron job:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function deleteCronJobAction(id: string) {
+  try {
+    db.prepare(`DELETE FROM Cron_Jobs WHERE id = ?`).run(id);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete cron job:", error);
+    return { success: false, error: String(error) };
+  }
+}
+

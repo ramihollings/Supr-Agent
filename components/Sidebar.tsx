@@ -8,9 +8,9 @@ import { MissionWizard } from './MissionWizard';
 
 const navItems = [
   { href: '/', icon: 'dashboard', label: 'Dashboard' },
-  { href: '/mission-control', icon: 'insights', label: 'Roadmap' },
+  { href: '/mission-control', icon: 'insights', label: 'Control Center' },
   { href: '/activity', icon: 'history', label: 'Updates' },
-  { href: '/agents', icon: 'smart_toy', label: 'Team' },
+  { href: '/agents', icon: 'smart_toy', label: 'Task Force' },
   { href: '/reasoning', icon: 'psychology', label: 'Strategic Plan' },
   { href: '/skills', icon: 'construction', label: 'Skills' },
   { href: '/cron-jobs', icon: 'schedule', label: 'Cron Jobs' },

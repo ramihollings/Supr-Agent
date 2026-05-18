@@ -295,11 +295,11 @@ export function SteerableCanvas({ onNodeSteered, onNodeRollback, onCheckpointAdd
                 </div>
               )}
 
-              {/* Steering Brake: PAUSE & INTERCEPT active nodes */}
+              {/* Interactive Override: PAUSE & INTERCEPT active nodes */}
               {(activeNode.status === 'IN_PROGRESS' || activeNode.status === 'FAILED_RETRYING') && (
                 <div className="bg-background border-2 border-primary p-3 space-y-2.5 mt-4">
                   <h5 className="font-headline font-bold text-[10px] uppercase text-primary flex items-center gap-1">
-                    <span className="material-symbols-outlined text-xs">pan_tool</span> AG-UI Steering Brake
+                    <span className="material-symbols-outlined text-xs">pan_tool</span> AG-UI Interactive Override
                   </h5>
                   <p className="text-[10px] text-on-surface-variant leading-relaxed">Pauses live execution threads and allows injecting manual directions directly into agent prompt buffers.</p>
                   
@@ -318,7 +318,7 @@ export function SteerableCanvas({ onNodeSteered, onNodeRollback, onCheckpointAdd
                       isPaused ? 'bg-primary text-on-primary hover:bg-tertiary' : 'bg-secondary text-on-secondary hover:bg-primary'
                     }`}
                   >
-                    {isPaused ? 'Inject & Resume Worker' : 'Pause & Intercept Loop'}
+                    {isPaused ? 'Inject & Resume Worker' : 'Pause & Manual Intercept'}
                   </button>
                 </div>
               )}

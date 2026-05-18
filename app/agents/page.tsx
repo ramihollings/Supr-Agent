@@ -49,7 +49,7 @@ export default function AgentsPage() {
       <main className="flex-1 p-6 md:p-12 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-6 border-b-4 border-primary pb-6">
           <div>
-            <h1 className="font-headline text-5xl md:text-7xl font-black uppercase tracking-tighter text-primary">Team Roster</h1>
+            <h1 className="font-headline text-5xl md:text-7xl font-black uppercase tracking-tighter text-primary">Task Force Roster</h1>
             <p className="font-body text-lg font-bold mt-2 text-on-surface-variant max-w-2xl border-l-4 border-secondary pl-4">Manage autonomous and temporary agents. Allocate permissions, monitor statuses, and instantiate new operational units.</p>
           </div>
           <button 
@@ -69,7 +69,7 @@ export default function AgentsPage() {
               viewMode === 'active' ? 'bg-primary text-on-primary' : 'bg-surface hover:bg-primary-container'
             }`}
           >
-            Active Squad
+            Active Task Force
           </button>
           <button 
             onClick={() => setViewMode('archived')}
@@ -78,7 +78,7 @@ export default function AgentsPage() {
             }`}
           >
             <span className="material-symbols-outlined">inventory_2</span>
-            Agent Archive
+            Onboarding Registry
           </button>
         </div>
 
@@ -182,7 +182,7 @@ export default function AgentsPage() {
         ) : (
           <section>
             <div className="flex items-center gap-4 mb-8">
-              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter text-on-surface-variant">Deactivated & Archived</h2>
+              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter text-on-surface-variant">Evaluation Sandbox</h2>
               <div className="h-1 flex-1 bg-outline-variant"></div>
             </div>
             
@@ -230,8 +230,8 @@ export default function AgentsPage() {
               {archivedAgents.length === 0 && (
                 <div className="col-span-full flex flex-col items-center justify-center p-12 text-on-surface-variant text-center bg-surface-container border-4 border-dashed border-outline-variant">
                   <span className="material-symbols-outlined text-6xl mb-4 text-outline">inventory_2</span>
-                  <h3 className="font-headline font-bold uppercase text-xl">Archive Empty</h3>
-                  <p className="font-body text-sm mt-2 max-w-sm">When temporary agents are deactivated from the active squad, they will be stored securely here.</p>
+                  <h3 className="font-headline font-bold uppercase text-xl">Sandbox Empty</h3>
+                  <p className="font-body text-sm mt-2 max-w-sm">When external agents are added under a zero-trust model, they must be audited in the evaluation sandbox before deployment.</p>
                 </div>
               )}
             </div>

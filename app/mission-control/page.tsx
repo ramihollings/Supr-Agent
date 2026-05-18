@@ -352,7 +352,7 @@ export default function MissionControlPage() {
               <div className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-4 flex flex-col relative overflow-hidden">
                 <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
                   <h4 className="font-headline text-lg font-black uppercase tracking-tight text-secondary flex items-center gap-1.5">
-                    <span className="material-symbols-outlined">design_services</span> Artifact Studio Studio
+                    <span className="material-symbols-outlined">design_services</span> Artifact Studio
                   </h4>
                   <span className="bg-secondary-container text-on-secondary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Live Preview</span>
                 </div>

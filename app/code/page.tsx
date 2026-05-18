@@ -435,7 +435,7 @@ export default function CodePage() {
                   triageState === 'triaging' ? 'bg-secondary text-on-error animate-pulse' :
                   'bg-background text-primary'
                 }`}>
-                  {triageState === 'idle' ? 'Watching' : triageState === 'failed' ? 'Failure' : triageState === 'triaging' ? 'Triaging' : triageState === 'retrying' ? 'Ready' : 'Passed'}
+                  {triageState === 'idle' ? 'Watching' : triageState === 'failed' ? 'Failure' : triageState === 'triaging' ? 'Diagnostics' : triageState === 'retrying' ? 'Ready' : 'Passed'}
                 </span>
              </div>
              <div className="p-4 flex-1 overflow-y-auto custom-scrollbar text-xs">
@@ -450,7 +450,7 @@ export default function CodePage() {
                     <button
                       onClick={handleSuprTriage}
                       className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1"
-                    >Supr: Triage failure</button>
+                    >Diagnostics Console: Run Analysis</button>
                   </>
                 )}
 

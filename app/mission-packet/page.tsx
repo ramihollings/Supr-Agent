@@ -185,10 +185,15 @@ export default function MissionPacketPage() {
           <div className="bg-surface-tint text-background p-8 neo-border">
             <h3 className="font-headline text-xl font-bold uppercase border-b-2 border-background pb-2 mb-4">Integrity Validation Audit</h3>
             <div className="font-mono text-sm space-y-2 text-[#eee9e0]">
-              <p>[SUCCESS] Sandbox security standards validated.</p>
-              <p>[SUCCESS] Anthropic MCP schemas successfully generated.</p>
-              <p>[SUCCESS] Code audit lints completed with zero alerts.</p>
-              <p className="mt-4 pt-4 border-t border-[#eee9e0]/30 font-bold">READY FOR STRATEGIC HANDOFF</p>
+              <p>[{(mission.artifacts?.length ?? 0) > 0 ? 'SUCCESS' : 'PENDING'}] Artifact generation: {mission.artifacts?.length ?? 0} deliverable(s) produced.</p>
+              <p>[{(mission.failures?.filter(f => !f.resolved).length ?? 0) === 0 ? 'SUCCESS' : 'WARNING'}] Open failures: {mission.failures?.filter(f => !f.resolved).length ?? 0} unresolved issue(s).</p>
+              <p>[{(mission.readinessScore ?? 0) >= 50 ? 'SUCCESS' : 'PENDING'}] Readiness threshold: {mission.readinessScore ?? 0}% (target: 50%).</p>
+              <p>[{(mission.memoryItems?.length ?? 0) > 0 ? 'SUCCESS' : 'PENDING'}] Memory context: {mission.memoryItems?.length ?? 0} item(s) indexed.</p>
+              <p className="mt-4 pt-4 border-t border-[#eee9e0]/30 font-bold">
+                {(mission.readinessScore ?? 0) >= 80 ? 'READY FOR STRATEGIC HANDOFF' :
+                 (mission.readinessScore ?? 0) >= 50 ? 'APPROACHING DELIVERY THRESHOLD' :
+                 'DRAFT IN PROGRESS — ADDITIONAL WORK REQUIRED'}
+              </p>
             </div>
           </div>
         </section>
