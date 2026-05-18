@@ -258,9 +258,11 @@
       ]
     },
     {
+      "id": "m-1778905494386",
       "name": "FINAL_PROD_TEST",
       "objective": "Final verification of production architect flow",
-      "status": "Active",
+      "status": "Done",
+      "readinessScore": 0,
       "phases": [
         {
           "id": "p1",
@@ -293,7 +295,6 @@
           "status": "Active"
         }
       ],
-      "readinessScore": 0,
       "messages": [
         {
           "id": 1778905494208,
@@ -304,8 +305,94 @@
       ],
       "activityLog": [],
       "failures": [],
-      "memoryItems": [],
-      "id": "m-1778905494386"
+      "memoryItems": []
+    },
+    {
+      "id": "m-1778966082307",
+      "name": "weather planning",
+      "objective": "plan me the weather for dallas texas for hte next 3 months",
+      "status": "Active",
+      "readinessScore": 0,
+      "phases": [
+        {
+          "id": "p1",
+          "name": "Context Scan",
+          "status": "Active"
+        },
+        {
+          "id": "p2",
+          "name": "Research & Extraction",
+          "status": "Pending"
+        },
+        {
+          "id": "p3",
+          "name": "Implementation",
+          "status": "Pending"
+        },
+        {
+          "id": "p4",
+          "name": "QA & Delivery",
+          "status": "Pending"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "t1",
+          "title": "Initialize Workspace",
+          "description": "Analyze objective: plan me the weather for dallas texas for hte next 3 months",
+          "agentName": "Supr",
+          "agentIcon": "psychology",
+          "status": "Active"
+        }
+      ],
+      "messages": [
+        {
+          "id": 1778966082242,
+          "sender": "Supr",
+          "text": "Mission weather planning initialized. Glidepath locked.",
+          "isUser": false
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "art-1778966435472",
+          "filename": "research_test_research.md",
+          "type": "markdown",
+          "content": "# Research Findings: test research\n\n- Export latency averages 4.2s for JSON payloads > 50MB\n- Bottleneck identified in serialization layer, not network I/O\n- Recommended fix: streaming JSON encoder (est. 60% improvement)"
+        }
+      ],
+      "activityLog": [
+        {
+          "eventType": "agent_action",
+          "actor": "Research Agent",
+          "actorIcon": "travel_explore",
+          "summary": "Completed research for: test research",
+          "detail": "Extracted 3 key findings and added them to mission memory.",
+          "id": "ev-1778966435715",
+          "timestamp": "05:20 PM"
+        }
+      ],
+      "failures": [],
+      "memoryItems": [
+        {
+          "id": "mem-1778966435526",
+          "key": "research_finding",
+          "value": "Export latency averages 4.2s for JSON payloads > 50MB",
+          "importance": "High"
+        },
+        {
+          "id": "mem-1778966435600",
+          "key": "research_finding",
+          "value": "Bottleneck identified in serialization layer, not network I/O",
+          "importance": "High"
+        },
+        {
+          "id": "mem-1778966435638",
+          "key": "research_finding",
+          "value": "Recommended fix: streaming JSON encoder (est. 60% improvement)",
+          "importance": "High"
+        }
+      ]
     }
   ],
   "agents": [
