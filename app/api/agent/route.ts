@@ -1,79 +1,98 @@
 import { NextRequest } from 'next/server';
-import { spawn } from 'child_process';
-import { orchestrateMission } from '@/lib/orchestrator';
+import { GeminiProvider } from '@/lib/providers/model';
+import { PermissionEngine } from '@/lib/services/governance';
+import { addActivityLog, getActiveMission } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
     const { prompt } = await req.json();
-
     const encoder = new TextEncoder();
     
     const stream = new ReadableStream({
       async start(controller) {
-        // Initialize the Supr agent using local Google ADK CLI via uvx
-        const agentProcess = spawn('uvx', [
-          'google-agents', 
-          'run', 
-          '.agents/supr.md', 
-          '--prompt', 
-          prompt,
-          '--json'
-        ], {
-          cwd: process.cwd(),
-          shell: process.platform === 'win32'
-        });
-
         const sendJSON = (obj: any) => {
           controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
         };
 
-        let hasOutput = false;
+        try {
+          const mission = await getActiveMission();
+          
+          // 1. Governance Interception Check
+          // (Simulated based on keywords for demo. In production, this runs against structured tool calls from the LLM)
+          const lowerPrompt = prompt.toLowerCase();
+          if (lowerPrompt.includes('deploy') || lowerPrompt.includes('delete') || lowerPrompt.includes('drop')) {
+            const decision = PermissionEngine.evaluateAction(
+              { id: 'a1', name: 'Supr', permissionTier: 'Execute', isPermanent: true },
+              { name: 'Production Modification', requiredTier: 'Root', riskLevel: 'Critical' }
+            );
 
-        agentProcess.stdout.on('data', (data) => {
-          hasOutput = true;
-          const text = data.toString();
-          const lines = text.split('\n').filter((l: string) => l.trim() !== '');
-          for (const line of lines) {
-            try {
-              JSON.parse(line);
-              controller.enqueue(encoder.encode(line + '\n'));
-            } catch {
-              sendJSON({ type: 'message', content: line });
-            }
-          }
-        });
-
-        agentProcess.on('close', async (code) => {
-          if (!hasOutput || code !== 0) {
-            // Use the Autonomous Orchestrator for the fallback path
-            const response = await orchestrateMission('m1', prompt);
-            sendJSON({ type: 'message', content: response });
-            
-            setTimeout(() => {
+            if (decision.status === 'RequiresApproval') {
               sendJSON({
-                type: 'activity',
-                event: {
-                  id: Date.now().toString(),
-                  agentName: 'Supr',
-                  action: 'Orchestrated next mission step',
-                  status: 'Success',
-                  timestamp: new Date().toLocaleTimeString()
+                type: 'message',
+                approvalRequest: {
+                  id: `gate-${Date.now()}`,
+                  requestingAgent: 'Supr',
+                  action: 'Production Modification',
+                  riskLevel: 'Critical',
+                  permission: 'Root',
+                  reason: decision.reason,
+                  suprRecommendation: 'High-risk action intercepted. Human verification required before proceeding.'
                 }
               });
+              
+              if (mission) {
+                await addActivityLog(mission.id, {
+                  eventType: 'approval',
+                  actor: 'Supr',
+                  actorIcon: 'psychology',
+                  summary: 'Requested Root approval for critical action.',
+                  detail: decision.reason
+                });
+              }
+              
               controller.close();
-            }, 500);
-          } else {
-            controller.close();
+              return;
+            }
           }
-        });
+
+          // 2. LLM Generation
+          try {
+            const provider = new GeminiProvider();
+            const systemContext = mission ? `Active Mission: ${mission.name}. Objective: ${mission.objective}` : 'No active mission.';
+            
+            const responseText = await provider.generateContent(prompt, {
+              systemInstruction: `You are Supr, the lead orchestrator AI. Respond concisely. Be direct and analytical. Use a neo-brutalist, pragmatic tone. ${systemContext}`
+            });
+
+            sendJSON({ type: 'message', content: responseText });
+          } catch (llmError: any) {
+            console.error("Gemini Generation Error:", llmError);
+            // Fallback for missing API Key or other LLM errors during demo
+            sendJSON({ 
+              type: 'message', 
+              content: `[FALLBACK MODE] I acknowledge your command: "${prompt}". Please configure GEMINI_API_KEY to enable live model generation. Error: ${llmError.message}` 
+            });
+          }
+          
+          // 3. Persist Activity
+          if (mission) {
+            await addActivityLog(mission.id, {
+              eventType: 'supr_decision',
+              actor: 'Supr',
+              actorIcon: 'psychology',
+              summary: 'Responded to command channel.',
+              detail: prompt.substring(0, 100)
+            });
+          }
+
+        } catch (err: any) {
+           console.error("API Pipeline Error:", err);
+           sendJSON({ type: 'message', content: `[SYSTEM ERROR] Pipeline failed: ${err.message}` });
+        }
         
-        agentProcess.on('error', (err) => {
-            console.error('Failed to spawn agent process:', err);
-            sendJSON({ type: 'message', content: 'Supr: Failed to execute backend process. Check terminal logs.' });
-            controller.close();
-        });
+        controller.close();
       }
     });
 
@@ -86,7 +105,7 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('API Error:', error);
-    return new Response(JSON.stringify({ error: 'Failed to initialize agent' }), { status: 500 });
+    console.error('Outer API Error:', error);
+    return new Response(JSON.stringify({ error: 'Failed to process request' }), { status: 500 });
   }
 }

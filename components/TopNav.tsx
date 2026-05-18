@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -64,7 +65,10 @@ export function TopNav({ title = "Mission Control", children }: { title?: string
 
       {/* Mobile TopNav */}
       <nav className="lg:hidden flex justify-between items-center w-full px-4 py-4 border-b-4 border-primary sticky top-0 bg-background z-50">
-        <Link href="/" className="font-headline text-2xl font-black uppercase tracking-tighter text-primary">Supr</Link>
+        <Link href="/" className="font-headline text-2xl font-black uppercase tracking-tighter text-primary flex items-center gap-2">
+          <Image src="/supr_logo.svg" alt="Supr Logo" width={28} height={28} />
+          Supr
+        </Link>
         <div className="flex items-center gap-2 text-primary">
           <Link href="/settings" className="p-2 border-2 border-transparent hover:bg-primary hover:text-on-primary transition-colors active:translate-x-1 active:translate-y-1">
             <span className="material-symbols-outlined">settings</span>

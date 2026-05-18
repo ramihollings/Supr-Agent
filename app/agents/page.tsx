@@ -2,11 +2,25 @@
 
 import { TopNav } from '@/components/TopNav';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { AgentWizard } from '@/components/AgentWizard';
+import { fetchAgentsState, deleteAgentAction } from '@/app/actions';
+import { Agent } from '@/types';
 
 export default function AgentsPage() {
   const router = useRouter();
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showWizard, setShowWizard] = useState(false);
+  const [agents, setAgents] = useState<Agent[]>([]);
+
+  const loadAgents = async () => {
+    const data = await fetchAgentsState();
+    if (data) setAgents(data);
+  };
+
+  useEffect(() => {
+    loadAgents();
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -30,7 +44,7 @@ export default function AgentsPage() {
             <p className="font-body text-lg font-bold mt-2 text-on-surface-variant max-w-2xl border-l-4 border-secondary pl-4">Manage autonomous and temporary agents. Allocate permissions, monitor statuses, and instantiate new operational units.</p>
           </div>
           <button 
-            onClick={() => showToast("Opening Agent Foundry...")}
+            onClick={() => setShowWizard(true)}
             className="bg-primary text-on-primary neo-border font-headline font-bold uppercase text-xl py-4 px-8 hover:bg-background hover:text-primary neo-shadow transition-all active:translate-x-1 active:translate-y-1 flex items-center gap-3 shrink-0"
           >
             <span className="material-symbols-outlined">add_circle</span>
@@ -169,50 +183,60 @@ export default function AgentsPage() {
             <div className="h-1 flex-1 bg-secondary border-t-2 border-b-2 border-primary border-dashed"></div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-            {/* Temporary Agent Card: Signal Agent */}
-            <article className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(230,59,46,1)] flex flex-col relative overflow-hidden">
-              <div className="absolute top-0 right-0 bg-secondary text-on-error font-headline font-bold uppercase text-xs px-4 py-1 border-l-4 border-b-4 border-primary z-10">
-                Expiring in 2 Days
-              </div>
-              <div className="border-b-4 border-primary p-4 pt-8 bg-surface-variant flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <span className="material-symbols-outlined text-3xl text-secondary font-black">sensors</span>
-                  <h3 className="font-headline text-2xl font-black uppercase tracking-tight text-primary">Signal Agent</h3>
+            {agents.filter(a => !a.isPermanent).map(agent => (
+              <article key={agent.id} className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(230,59,46,1)] flex flex-col relative overflow-hidden">
+                <div className="absolute top-0 right-0 bg-secondary text-on-error font-headline font-bold uppercase text-xs px-4 py-1 border-l-4 border-b-4 border-primary z-10">
+                  Expiring Soon
                 </div>
-                <span className="bg-primary text-primary-fixed px-3 py-1 font-body text-xs font-bold uppercase neo-border">Active</span>
-              </div>
-              <div className="p-6 flex-1 flex flex-col gap-6">
-                <div>
-                  <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-1">Created For</p>
-                  <p className="font-headline text-lg font-bold uppercase text-primary border-l-4 border-secondary pl-3">Mission: BuildSignal</p>
+                <div className="border-b-4 border-primary p-4 pt-8 bg-surface-variant flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-3xl text-secondary font-black">sensors</span>
+                    <h3 className="font-headline text-2xl font-black uppercase tracking-tight text-primary">{agent.name}</h3>
+                  </div>
+                  <span className="bg-primary text-primary-fixed px-3 py-1 font-body text-xs font-bold uppercase neo-border">Active</span>
                 </div>
-                <div>
-                  <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-1">Role</p>
-                  <p className="font-headline text-xl font-bold uppercase text-primary border-l-4 border-primary pl-3">Specialized Scraper</p>
-                </div>
-                <div>
-                  <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-2">Permission Tier</p>
-                  <div className="flex gap-2 font-headline text-sm font-bold uppercase">
-                    <span className="bg-primary text-on-primary px-2 py-1">Observe</span>
+                <div className="p-6 flex-1 flex flex-col gap-6">
+                  <div>
+                    <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-1">Role</p>
+                    <p className="font-headline text-xl font-bold uppercase text-primary border-l-4 border-primary pl-3">{agent.role}</p>
+                  </div>
+                  <div>
+                    <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-2">Permission Tier</p>
+                    <div className="flex gap-2 font-headline text-sm font-bold uppercase">
+                      <span className="bg-primary text-on-primary px-2 py-1">{agent.permissionTier}</span>
+                    </div>
                   </div>
                 </div>
-                <div className="mt-auto">
-                  <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-2 border-b-2 border-primary pb-1">Last Reasoning</p>
-                  <p className="font-body text-sm font-medium italic text-primary bg-surface-container p-3 border-l-4 border-secondary">"Extracting targeted JSON endpoints from designated sources. 45% complete."</p>
+                <div className="border-t-4 border-primary flex">
+                  <button 
+                    onClick={async () => {
+                      showToast(`Terminating ${agent.name}...`);
+                      await deleteAgentAction(agent.id, agent.name);
+                      loadAgents();
+                    }}
+                    className="flex-1 py-3 font-headline font-bold uppercase border-r-4 border-primary hover:bg-secondary hover:text-on-error transition-colors flex items-center justify-center gap-2"
+                  >
+                    <span className="material-symbols-outlined">delete</span> Terminate Early
+                  </button>
                 </div>
-              </div>
-              <div className="border-t-4 border-primary flex">
-                <button 
-                  onClick={() => showToast("Sending termination signal...")}
-                  className="flex-1 py-3 font-headline font-bold uppercase border-r-4 border-primary hover:bg-secondary hover:text-on-error transition-colors flex items-center justify-center gap-2"
-                >
-                  <span className="material-symbols-outlined">delete</span> Terminate Early
-                </button>
-              </div>
-            </article>
+              </article>
+            ))}
+            {agents.filter(a => !a.isPermanent).length === 0 && (
+              <p className="font-body text-sm font-bold text-on-surface-variant italic">No temporary units currently deployed.</p>
+            )}
           </div>
         </section>
       </main>
+
+      {showWizard && (
+        <AgentWizard 
+          onClose={() => setShowWizard(false)} 
+          onAgentCreated={() => {
+            showToast("Agent Profile Synthesized.");
+            loadAgents();
+          }} 
+        />
+      )}
     </div>
   );
 }

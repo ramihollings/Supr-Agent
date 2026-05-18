@@ -18,7 +18,7 @@ export default function SettingsPage() {
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  const scrollToSection = (section: string, ref: React.RefObject<HTMLDivElement>) => {
+  const scrollToSection = (section: string, ref: React.RefObject<HTMLDivElement | null>) => {
     setActiveSection(section);
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };

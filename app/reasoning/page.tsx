@@ -12,7 +12,7 @@ export default function ReasoningPage() {
   const loadData = async () => {
     setIsRefreshing(true);
     const data = await getActiveMissionAction('m1');
-    setMission(data);
+    setMission(data || null);
     setTimeout(() => setIsRefreshing(false), 800);
   };
 

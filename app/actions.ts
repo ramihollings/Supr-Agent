@@ -10,8 +10,14 @@ import {
   addArtifact, 
   addMemoryItem,
   getDb,
-  saveDb
+  saveDb,
+  createMission,
+  createAgent,
+  archiveAgent,
+  deleteAgent,
+  extendAgent
 } from '@/lib/db';
+import { writeIdentityProfile, deleteIdentityProfile } from '@/lib/agents';
 import { 
   ActivityEvent, 
   FailureEvent, 
@@ -35,7 +41,7 @@ import { z } from 'zod';
 function handleActionError(error: unknown) {
   console.error('[Action Error]:', error);
   if (error instanceof z.ZodError) {
-    throw new Error(`Validation failed: ${error.errors.map(e => e.message).join(', ')}`);
+    throw new Error(`Validation failed: ${(error as any).errors.map((e: any) => e.message).join(', ')}`);
   }
   throw new Error('An unexpected error occurred. Please try again.');
 }
@@ -53,6 +59,7 @@ export async function fetchAgentsState(): Promise<Agent[]> {
     return await getAgents();
   } catch (error) {
     handleActionError(error);
+    return []; // Fallback for TS
   }
 }
 
@@ -124,20 +131,7 @@ export async function createMissionAction(missionData: Omit<Mission, 'id'>) {
     const schema = MissionSchema.omit({ id: true });
     schema.parse(missionData);
     
-    const db = await getDb();
-    const newMission: Mission = {
-      ...missionData,
-      id: `m-${Date.now()}`
-    };
-    
-    // Set all other missions to inactive if this one is active
-    if (newMission.status === 'Active') {
-      db.missions.forEach(m => m.status = 'Done');
-    }
-    
-    db.missions.push(newMission);
-    await saveDb(db);
-    return newMission;
+    return await createMission(missionData);
   } catch (error) {
     handleActionError(error);
   }
@@ -147,6 +141,53 @@ export async function getActiveMissionAction(id: string): Promise<Mission | unde
   try {
     const db = await getDb();
     return db.missions.find(m => m.id === id);
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function createAgentAction(agentData: Omit<Agent, 'id'>, systemPrompt: string) {
+  try {
+    // 1. Write the Identity .md file
+    writeIdentityProfile({
+      name: agentData.name,
+      role: agentData.role,
+      permissionTier: agentData.permissionTier,
+      type: agentData.isPermanent ? 'permanent' : 'temporary',
+      systemPrompt: systemPrompt,
+      tools: []
+    });
+
+    // 2. Persist to SQLite
+    return await createAgent(agentData);
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function archiveAgentAction(agentId: string) {
+  try {
+    await archiveAgent(agentId);
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function deleteAgentAction(agentId: string, agentName: string) {
+  try {
+    // 1. Remove physical .md file
+    deleteIdentityProfile(agentName);
+    
+    // 2. Remove from SQLite
+    await deleteAgent(agentId);
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function extendAgentAction(agentId: string) {
+  try {
+    await extendAgent(agentId);
   } catch (error) {
     handleActionError(error);
   }

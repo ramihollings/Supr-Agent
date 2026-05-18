@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { MissionWizard } from './MissionWizard';
@@ -38,7 +39,8 @@ export function Sidebar() {
       {showWizard && <MissionWizard onClose={() => setShowWizard(false)} />}
       <nav className="hidden md:flex flex-col fixed left-0 top-0 h-full w-64 border-r-4 border-primary z-40 bg-background shadow-[6px_6px_0px_0px_rgba(26,26,26,1)]">
         <div className="p-6 border-b-4 border-primary">
-          <Link href="/" className="font-headline text-3xl font-black text-primary uppercase tracking-tighter hover:text-tertiary transition-colors">
+          <Link href="/" className="font-headline text-3xl font-black text-primary uppercase tracking-tighter hover:text-tertiary transition-colors flex items-center gap-2">
+            <Image src="/supr_logo.svg" alt="Supr Logo" width={36} height={36} className="shrink-0" />
             Supr
           </Link>
         </div>

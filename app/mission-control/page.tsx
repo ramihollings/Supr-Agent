@@ -156,8 +156,9 @@ export default function MissionControlPage() {
         </div>
       )}
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Column: Command Channel */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left Column: Command Channel */}
         <section className="w-80 border-r-4 border-primary bg-background hidden lg:flex flex-col">
           <div className="p-4 border-b-4 border-primary bg-primary text-primary-fixed">
             <h2 className="font-headline font-black uppercase text-xl tracking-tight">Command Channel</h2>
@@ -233,6 +234,52 @@ export default function MissionControlPage() {
           onReviewGate={() => showToast("Reviewing active gate in Command Channel...")}
           subMissionIds={mission?.subMissionIds}
         />
+        </div>
+
+        {/* Lower Area: Code Workspace & Artifact Studio */}
+        <section className="h-64 border-t-4 border-primary bg-background hidden lg:flex">
+          {/* Code Workspace */}
+          <div className="w-1/2 border-r-4 border-primary p-4 flex flex-col">
+             <div className="flex justify-between items-center mb-2">
+               <h2 className="font-headline font-black uppercase text-lg tracking-tight text-primary flex items-center gap-2">
+                 <span className="material-symbols-outlined">terminal</span> Code Workspace
+               </h2>
+               <span className="bg-primary-container text-on-primary-container px-2 py-1 text-[10px] font-bold uppercase neo-border">Sandboxed</span>
+             </div>
+             <div className="flex-1 bg-surface-container-high p-4 font-mono text-xs text-on-surface neo-border overflow-y-auto custom-scrollbar">
+                <p className="text-tertiary">➜ /workspace/sandbox</p>
+                <p>{'>'} Initializing secure gVisor container...</p>
+                <p>{'>'} Mounting project volumes...</p>
+                <p>{'>'} Code Agent standing by for execution commands.</p>
+             </div>
+          </div>
+          {/* Artifact Studio */}
+          <div className="w-1/2 p-4 flex flex-col">
+             <div className="flex justify-between items-center mb-2">
+               <h2 className="font-headline font-black uppercase text-lg tracking-tight text-secondary flex items-center gap-2">
+                 <span className="material-symbols-outlined">design_services</span> Artifact Studio
+               </h2>
+               <span className="bg-secondary-container text-on-secondary-container px-2 py-1 text-[10px] font-bold uppercase neo-border">Preview</span>
+             </div>
+             <div className="flex-1 border-2 border-dashed border-secondary p-4 flex items-center justify-center bg-surface-container overflow-y-auto">
+                {mission?.artifacts && mission.artifacts.length > 0 ? (
+                  <div className="w-full h-full flex flex-col items-start gap-2">
+                     <p className="font-bold text-sm text-secondary mb-2 bg-secondary-container text-on-secondary-container px-2 py-1 neo-border">
+                       {mission.artifacts[mission.artifacts.length - 1].filename}
+                     </p>
+                     <div className="w-full text-[10px] font-mono text-on-surface whitespace-pre-wrap p-2 border-l-2 border-secondary bg-background">
+                       {mission.artifacts[mission.artifacts.length - 1].content.substring(0, 300)}...
+                     </div>
+                  </div>
+                ) : (
+                  <p className="font-body text-sm text-on-surface-variant text-center flex flex-col items-center gap-2">
+                    <span className="material-symbols-outlined text-4xl text-secondary opacity-50">note_stack</span>
+                    Select an artifact from the timeline or issue a generation command to preview here.
+                  </p>
+                )}
+             </div>
+          </div>
+        </section>
       </div>
     </div>
   );
