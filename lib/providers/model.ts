@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import db from '@/lib/database/init';
 
 export interface ModelOptions {
   model?: string;
@@ -64,15 +65,6 @@ export class GeminiProvider extends ModelProvider {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OpenAI-Compatible Provider
-//
-// Works with ANY OpenAI-compatible API endpoint, including:
-//   • OpenAI         (BACKUP_LLM_BASE_URL = https://api.openai.com/v1)
-//   • Groq           (BACKUP_LLM_BASE_URL = https://api.groq.com/openai/v1)
-//   • Together AI    (BACKUP_LLM_BASE_URL = https://api.together.xyz/v1)
-//   • Ollama (local) (BACKUP_LLM_BASE_URL = http://localhost:11434/v1)
-//   • Anthropic      (BACKUP_LLM_BASE_URL = https://api.anthropic.com/v1) *
-//   • Azure OpenAI   (BACKUP_LLM_BASE_URL = https://<resource>.openai.azure.com/openai/deployments/<model>)
-//   * Anthropic requires the openai-compat adapter to be enabled
 // ─────────────────────────────────────────────────────────────────────────────
 export class OpenAICompatibleProvider extends ModelProvider {
   readonly name: string;
@@ -174,9 +166,6 @@ export class OpenAICompatibleProvider extends ModelProvider {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fallback Provider
-//
-// Wraps a primary + backup provider. If the primary throws any error,
-// it transparently retries with the backup and logs which was used.
 // ─────────────────────────────────────────────────────────────────────────────
 export class FallbackProvider extends ModelProvider {
   readonly name: string;
@@ -210,87 +199,96 @@ export class FallbackProvider extends ModelProvider {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ModelRouter — named provider registry (unchanged API, extended capability)
-// ─────────────────────────────────────────────────────────────────────────────
-export class ModelRouter {
-  private providers: Record<string, ModelProvider> = {};
-
-  registerProvider(name: string, provider: ModelProvider) {
-    this.providers[name] = provider;
-  }
-
-  getProvider(name: string): ModelProvider {
-    const provider = this.providers[name];
-    if (!provider) throw new Error(`ModelProvider '${name}' not found.`);
-    return provider;
-  }
-
-  async generate(providerName: string, prompt: string, options?: ModelOptions): Promise<string> {
-    return this.getProvider(providerName).generateContent(prompt, options);
+// Helper to query SQLite settings synchronously
+function getSetting(key: string): string | null {
+  try {
+    const row = db.prepare('SELECT value FROM Settings WHERE key = ?').get(key) as { value: string } | undefined;
+    return row ? row.value : null;
+  } catch (err) {
+    console.error(`[model.ts] Failed to query setting ${key}:`, err);
+    return null;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// getActiveProvider()
+// getActiveProvider(agentRole)
 //
-// Singleton factory. Returns the best available provider based on env vars.
-//
-//  Priority order:
-//    1. MiniMax M2.7 (MINIMAX_API_KEY)       ← primary if set
-//    2. Gemini        (GEMINI_API_KEY)        ← primary if MiniMax not set
-//    3. Backup LLM    (BACKUP_LLM_API_KEY)    ← auto-fallback for either above
-//
-//  If MiniMax + Gemini + Backup → MiniMax → Gemini → Backup chain
-//  If MiniMax + Backup           → FallbackProvider(MiniMax, Backup)
-//  If Gemini + Backup            → FallbackProvider(Gemini, Backup)
-//  If only MiniMax               → MiniMaxProvider (OpenAI-compat)
-//  If only Gemini                → GeminiProvider
-//  If only Backup                → OpenAICompatibleProvider
-//  If none                       → GeminiProvider (fails at call time)
+// Singleton/factory. Dynamically returns the provider configured for the
+// requested agent role, checking SQLite overrides first, then falling back to
+// global SQLite keys, and finally process.env.
 // ─────────────────────────────────────────────────────────────────────────────
-export function getActiveProvider(): ModelProvider {
-  const minimaxKey = process.env.MINIMAX_API_KEY;
-  const geminiKey  = process.env.GEMINI_API_KEY;
-  const backupKey  = process.env.BACKUP_LLM_API_KEY;
-  const backupUrl  = process.env.BACKUP_LLM_BASE_URL || 'https://api.openai.com/v1';
-  const backupModel = process.env.BACKUP_LLM_MODEL   || 'gpt-4o-mini';
-  const backupName  = process.env.BACKUP_LLM_NAME    || 'OpenAI';
+export function getActiveProvider(agentRole?: 'supr' | 'code' | 'research' | 'sub'): ModelProvider {
+  // 1. Resolve Global Keys (SQLite overrides first, then process.env)
+  const minimaxKey  = getSetting('global_minimax_key')  || process.env.MINIMAX_API_KEY;
+  const geminiKey   = getSetting('global_gemini_key')   || process.env.GEMINI_API_KEY;
+  const backupKey   = getSetting('global_backup_key')   || process.env.BACKUP_LLM_API_KEY;
+  const backupUrl   = getSetting('global_backup_url')   || process.env.BACKUP_LLM_BASE_URL || 'https://api.openai.com/v1';
+  const backupModel = getSetting('global_backup_model') || process.env.BACKUP_LLM_MODEL   || 'gpt-4o-mini';
+  const backupName  = getSetting('global_backup_name')  || process.env.BACKUP_LLM_NAME    || 'OpenAI';
 
-  // Build individual providers lazily
-  const buildMinimax = (): ModelProvider => new OpenAICompatibleProvider({
+  // 2. Helper builders
+  const buildMinimax = (key: string, model: string = 'MiniMax-M2.7') => new OpenAICompatibleProvider({
     name: 'MiniMax-M2.7',
-    apiKey: minimaxKey!,
+    apiKey: key,
     baseUrl: 'https://api.minimax.io/v1',
-    defaultModel: 'MiniMax-M2.7',
+    defaultModel: model,
   });
 
-  const buildGemini = (): ModelProvider => new GeminiProvider(geminiKey);
+  const buildGemini = (key?: string) => new GeminiProvider(key);
 
-  const buildBackup = (): ModelProvider => new OpenAICompatibleProvider({
-    name: backupName,
-    apiKey: backupKey!,
-    baseUrl: backupUrl,
-    defaultModel: backupModel,
+  const buildBackup = (key: string, url: string, model: string, name: string) => new OpenAICompatibleProvider({
+    name: name,
+    apiKey: key,
+    baseUrl: url,
+    defaultModel: model,
   });
 
-  // Resolve the primary (MiniMax > Gemini > nothing)
-  let primary: ModelProvider | null = null;
-  if (minimaxKey) primary = buildMinimax();
-  else if (geminiKey) primary = buildGemini();
+  // 3. Resolve role-specific custom settings if provided
+  if (agentRole) {
+    const roleProvider = getSetting(`llm_provider_${agentRole}`) || 'default';
+    const roleKey      = getSetting(`llm_key_${agentRole}`);
+    const roleModel    = getSetting(`llm_model_${agentRole}`);
+    const roleUrl      = getSetting(`llm_url_${agentRole}`);
 
-  // If both a primary and a backup exist, chain them
-  if (primary && backupKey) {
-    return new FallbackProvider(primary, buildBackup());
+    if (roleProvider !== 'default') {
+      if (roleProvider === 'gemini') {
+        const key = roleKey || geminiKey;
+        return buildGemini(key);
+      }
+      if (roleProvider === 'minimax') {
+        const key = roleKey || minimaxKey;
+        if (!key) {
+          throw new Error(`MiniMax API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
+        }
+        return buildMinimax(key, roleModel || 'MiniMax-M2.7');
+      }
+      if (roleProvider === 'openai_compat') {
+        const key = roleKey || backupKey;
+        const url = roleUrl || backupUrl;
+        const model = roleModel || backupModel;
+        if (!key) {
+          throw new Error(`OpenAI-compatible API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
+        }
+        return buildBackup(key, url, model, `Custom-${agentRole}`);
+      }
+    }
   }
 
-  // Primary only (no backup configured)
+  // 4. Fallback to Global priority chain (MiniMax > Gemini > Backup)
+  let primary: ModelProvider | null = null;
+  if (minimaxKey) {
+    primary = buildMinimax(minimaxKey);
+  } else if (geminiKey) {
+    primary = buildGemini(geminiKey);
+  }
+
+  if (primary && backupKey) {
+    return new FallbackProvider(primary, buildBackup(backupKey, backupUrl, backupModel, backupName));
+  }
+
   if (primary) return primary;
+  if (backupKey) return buildBackup(backupKey, backupUrl, backupModel, backupName);
 
-  // Backup only (no primary key configured)
-  if (backupKey) return buildBackup();
-
-  // No keys at all — return Gemini so the error is readable
-  console.warn('[getActiveProvider] No LLM API keys found. Set MINIMAX_API_KEY, GEMINI_API_KEY, or BACKUP_LLM_API_KEY.');
+  // Return standard GeminiProvider if all else fails
   return new GeminiProvider();
 }

@@ -26,6 +26,35 @@ export default function SettingsPage() {
   const [permissionBoundary, setPermissionBoundary] = useState('governed');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Global LLM Keys States
+  const [globalMinimaxKey, setGlobalMinimaxKey] = useState('');
+  const [globalGeminiKey, setGlobalGeminiKey] = useState('');
+  const [globalBackupKey, setGlobalBackupKey] = useState('');
+  const [globalBackupUrl, setGlobalBackupUrl] = useState('');
+  const [globalBackupModel, setGlobalBackupModel] = useState('');
+  const [globalBackupName, setGlobalBackupName] = useState('');
+
+  // Role Overrides States
+  const [suprProvider, setSuprProvider] = useState('default');
+  const [suprKey, setSuprKey] = useState('');
+  const [suprModel, setSuprModel] = useState('');
+  const [suprUrl, setSuprUrl] = useState('');
+
+  const [codeProvider, setCodeProvider] = useState('default');
+  const [codeKey, setCodeKey] = useState('');
+  const [codeModel, setCodeModel] = useState('');
+  const [codeUrl, setCodeUrl] = useState('');
+
+  const [researchProvider, setResearchProvider] = useState('default');
+  const [researchKey, setResearchKey] = useState('');
+  const [researchModel, setResearchModel] = useState('');
+  const [researchUrl, setResearchUrl] = useState('');
+
+  const [subProvider, setSubProvider] = useState('default');
+  const [subKey, setSubKey] = useState('');
+  const [subModel, setSubModel] = useState('');
+  const [subUrl, setSubUrl] = useState('');
+
   // Channels States
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [slackEnabled, setSlackEnabled] = useState(true);
@@ -46,6 +75,7 @@ export default function SettingsPage() {
 
   const modeRef = useRef<HTMLDivElement>(null);
   const permissionsRef = useRef<HTMLDivElement>(null);
+  const llmRef = useRef<HTMLDivElement>(null);
   const memoryRef = useRef<HTMLDivElement>(null);
   const standardsRef = useRef<HTMLDivElement>(null);
   const channelsRef = useRef<HTMLDivElement>(null);
@@ -60,6 +90,38 @@ export default function SettingsPage() {
 
       if (settings.operating_mode) setOperatingMode(settings.operating_mode);
       if (settings.permission_boundary) setPermissionBoundary(settings.permission_boundary);
+
+      // Global Keys
+      if (settings.global_minimax_key) setGlobalMinimaxKey(settings.global_minimax_key);
+      if (settings.global_gemini_key) setGlobalGeminiKey(settings.global_gemini_key);
+      if (settings.global_backup_key) setGlobalBackupKey(settings.global_backup_key);
+      if (settings.global_backup_url) setGlobalBackupUrl(settings.global_backup_url);
+      if (settings.global_backup_model) setGlobalBackupModel(settings.global_backup_model);
+      if (settings.global_backup_name) setGlobalBackupName(settings.global_backup_name);
+
+      // Supr Role Override
+      if (settings.llm_provider_supr) setSuprProvider(settings.llm_provider_supr);
+      if (settings.llm_key_supr) setSuprKey(settings.llm_key_supr);
+      if (settings.llm_model_supr) setSuprModel(settings.llm_model_supr);
+      if (settings.llm_url_supr) setSuprUrl(settings.llm_url_supr);
+
+      // Code Role Override
+      if (settings.llm_provider_code) setCodeProvider(settings.llm_provider_code);
+      if (settings.llm_key_code) setCodeKey(settings.llm_key_code);
+      if (settings.llm_model_code) setCodeModel(settings.llm_model_code);
+      if (settings.llm_url_code) setCodeUrl(settings.llm_url_code);
+
+      // Research Role Override
+      if (settings.llm_provider_research) setResearchProvider(settings.llm_provider_research);
+      if (settings.llm_key_research) setResearchKey(settings.llm_key_research);
+      if (settings.llm_model_research) setResearchModel(settings.llm_model_research);
+      if (settings.llm_url_research) setResearchUrl(settings.llm_url_research);
+
+      // Sub-agents Override
+      if (settings.llm_provider_sub) setSubProvider(settings.llm_provider_sub);
+      if (settings.llm_key_sub) setSubKey(settings.llm_key_sub);
+      if (settings.llm_model_sub) setSubModel(settings.llm_model_sub);
+      if (settings.llm_url_sub) setSubUrl(settings.llm_url_sub);
       
       setEmailEnabled(settings.channels_email === 'true');
       setSlackEnabled(settings.channels_slack === 'true');
@@ -273,6 +335,7 @@ export default function SettingsPage() {
             {[
               { name: 'Operating Mode', ref: modeRef },
               { name: 'Permissions', ref: permissionsRef },
+              { name: 'LLM Configuration', ref: llmRef },
               { name: 'Memory', ref: memoryRef },
               { name: 'Standards', ref: standardsRef },
               { name: 'Channels & Socials', ref: channelsRef },
@@ -383,6 +446,388 @@ export default function SettingsPage() {
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
+          {/* LLM Configuration Panel */}
+          <div ref={llmRef} className="flex flex-col gap-6">
+            <div className="border-b-4 border-primary pb-4 mb-4">
+              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">LLM Configuration</h2>
+              <p className="font-body text-on-surface-variant mt-2">Manage API keys, endpoints, and models for Supr and sub-agents on the fly.</p>
+            </div>
+
+            {/* 1. Global API Keys & Defaults */}
+            <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-32 h-6 bg-primary text-on-primary text-[8px] font-black uppercase flex items-center justify-center rotate-45 translate-x-8 translate-y-3 pointer-events-none select-none tracking-widest shadow-sm">
+                Global Keys
+              </div>
+              <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2 mb-2">
+                <span className="material-symbols-outlined text-primary">key</span> Global Providers & Fallbacks
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">MiniMax M2.7 API Key</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="password" 
+                      value={globalMinimaxKey}
+                      onChange={(e) => setGlobalMinimaxKey(e.target.value)}
+                      className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                      placeholder="sk-..."
+                    />
+                    <button 
+                      onClick={() => handleUpdateSetting('global_minimax_key', globalMinimaxKey, 'Global MiniMax key saved ✓')}
+                      className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
+                    >Save</button>
+                  </div>
+                  <span className="text-[9px] text-on-surface-variant block mt-1">Primary LLM if set. API: https://api.minimax.io/v1</span>
+                </div>
+
+                <div>
+                  <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Gemini API Key</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="password" 
+                      value={globalGeminiKey}
+                      onChange={(e) => setGlobalGeminiKey(e.target.value)}
+                      className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                      placeholder="AIzaSy..."
+                    />
+                    <button 
+                      onClick={() => handleUpdateSetting('global_gemini_key', globalGeminiKey, 'Global Gemini key saved ✓')}
+                      className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
+                    >Save</button>
+                  </div>
+                  <span className="text-[9px] text-on-surface-variant block mt-1">Secondary primary LLM. Used if MiniMax key is missing.</span>
+                </div>
+              </div>
+
+              <div className="w-full h-0.5 bg-outline-variant my-2"></div>
+
+              <h4 className="font-headline font-bold text-xs uppercase text-primary tracking-wide">Backup Provider Config (OpenAI-Compatible)</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup Name</label>
+                  <input 
+                    type="text" 
+                    value={globalBackupName}
+                    onChange={(e) => setGlobalBackupName(e.target.value)}
+                    className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-bold"
+                    placeholder="e.g. OpenAI, Groq, Together"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup Model Name</label>
+                  <input 
+                    type="text" 
+                    value={globalBackupModel}
+                    onChange={(e) => setGlobalBackupModel(e.target.value)}
+                    className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
+                    placeholder="gpt-4o-mini, llama-3.3-70b-versatile"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup API Base URL</label>
+                  <input 
+                    type="text" 
+                    value={globalBackupUrl}
+                    onChange={(e) => setGlobalBackupUrl(e.target.value)}
+                    className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
+                    placeholder="https://api.openai.com/v1"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup API Key</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="password" 
+                      value={globalBackupKey}
+                      onChange={(e) => setGlobalBackupKey(e.target.value)}
+                      className="flex-1 bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
+                      placeholder="sk-..."
+                    />
+                    <button 
+                      onClick={async () => {
+                        await Promise.all([
+                          updateSettingAction('global_backup_name', globalBackupName),
+                          updateSettingAction('global_backup_model', globalBackupModel),
+                          updateSettingAction('global_backup_url', globalBackupUrl),
+                          updateSettingAction('global_backup_key', globalBackupKey),
+                        ]);
+                        showToast('Backup LLM config saved ✓');
+                      }}
+                      className="bg-primary text-on-primary font-bold uppercase text-xs px-6 neo-border hover:bg-tertiary transition-colors"
+                    >Save Backup Config</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Custom Role Overrides */}
+            <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-6">
+              <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
+                <span className="material-symbols-outlined text-primary">diversity_3</span> Agent Customization Override
+              </h3>
+              
+              <p className="font-body text-xs text-on-surface-variant leading-relaxed">
+                By default, all agents inherit the global priority flow (MiniMax → Gemini → Backup). 
+                Override specific agents below to run them on separate providers or custom models on the fly!
+              </p>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                {/* Supr Override */}
+                <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
+                  <div className="flex justify-between items-center border-b border-primary pb-2">
+                    <span className="font-headline font-bold text-xs uppercase text-primary flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm">psychology</span> Lead Orchestrator (Supr)
+                    </span>
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-primary-container border border-primary">Active</span>
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
+                    <select 
+                      value={suprProvider} 
+                      onChange={(e) => setSuprProvider(e.target.value)}
+                      className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
+                    >
+                      <option value="default">Default (Global Flow)</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="minimax">MiniMax M2.7</option>
+                      <option value="openai_compat">OpenAI-Compatible</option>
+                    </select>
+                  </div>
+                  {suprProvider !== 'default' && (
+                    <div className="space-y-2 animate-fadeIn text-[10px]">
+                      <input 
+                        type="password" 
+                        value={suprKey}
+                        onChange={(e) => setSuprKey(e.target.value)}
+                        placeholder="Custom API Key (leave blank to inherit global)"
+                        className="w-full bg-surface neo-border p-1 text-xs font-mono"
+                      />
+                      <input 
+                        type="text" 
+                        value={suprModel}
+                        onChange={(e) => setSuprModel(e.target.value)}
+                        placeholder="Custom Model Name Override"
+                        className="w-full bg-surface neo-border p-1 text-xs"
+                      />
+                      {suprProvider === 'openai_compat' && (
+                        <input 
+                          type="text" 
+                          value={suprUrl}
+                          onChange={(e) => setSuprUrl(e.target.value)}
+                          placeholder="Custom Endpoint URL Override"
+                          className="w-full bg-surface neo-border p-1 text-xs font-mono"
+                        />
+                      )}
+                    </div>
+                  )}
+                  <button 
+                    onClick={async () => {
+                      await Promise.all([
+                        updateSettingAction('llm_provider_supr', suprProvider),
+                        updateSettingAction('llm_key_supr', suprKey),
+                        updateSettingAction('llm_model_supr', suprModel),
+                        updateSettingAction('llm_url_supr', suprUrl),
+                      ]);
+                      showToast('Supr Orchestrator override saved ✓');
+                    }}
+                    className="mt-auto bg-primary text-on-primary font-bold uppercase text-[10px] py-1.5 neo-border hover:bg-tertiary"
+                  >Apply Override</button>
+                </div>
+
+                {/* Coding Agent Override */}
+                <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
+                  <div className="flex justify-between items-center border-b border-primary pb-2">
+                    <span className="font-headline font-bold text-xs uppercase text-primary flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm">code</span> Coding Agent
+                    </span>
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-primary-container border border-primary">Active</span>
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
+                    <select 
+                      value={codeProvider} 
+                      onChange={(e) => setCodeProvider(e.target.value)}
+                      className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
+                    >
+                      <option value="default">Default (Global Flow)</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="minimax">MiniMax M2.7</option>
+                      <option value="openai_compat">OpenAI-Compatible</option>
+                    </select>
+                  </div>
+                  {codeProvider !== 'default' && (
+                    <div className="space-y-2 animate-fadeIn text-[10px]">
+                      <input 
+                        type="password" 
+                        value={codeKey}
+                        onChange={(e) => setCodeKey(e.target.value)}
+                        placeholder="Custom API Key (leave blank to inherit global)"
+                        className="w-full bg-surface neo-border p-1 text-xs font-mono"
+                      />
+                      <input 
+                        type="text" 
+                        value={codeModel}
+                        onChange={(e) => setCodeModel(e.target.value)}
+                        placeholder="Custom Model Name Override"
+                        className="w-full bg-surface neo-border p-1 text-xs"
+                      />
+                      {codeProvider === 'openai_compat' && (
+                        <input 
+                          type="text" 
+                          value={codeUrl}
+                          onChange={(e) => setCodeUrl(e.target.value)}
+                          placeholder="Custom Endpoint URL Override"
+                          className="w-full bg-surface neo-border p-1 text-xs font-mono"
+                        />
+                      )}
+                    </div>
+                  )}
+                  <button 
+                    onClick={async () => {
+                      await Promise.all([
+                        updateSettingAction('llm_provider_code', codeProvider),
+                        updateSettingAction('llm_key_code', codeKey),
+                        updateSettingAction('llm_model_code', codeModel),
+                        updateSettingAction('llm_url_code', codeUrl),
+                      ]);
+                      showToast('Coding Agent override saved ✓');
+                    }}
+                    className="mt-auto bg-primary text-on-primary font-bold uppercase text-[10px] py-1.5 neo-border hover:bg-tertiary"
+                  >Apply Override</button>
+                </div>
+
+                {/* Research Agent Override */}
+                <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
+                  <div className="flex justify-between items-center border-b border-primary pb-2">
+                    <span className="font-headline font-bold text-xs uppercase text-primary flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm">travel_explore</span> Research Agent
+                    </span>
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-primary-container border border-primary">Active</span>
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
+                    <select 
+                      value={researchProvider} 
+                      onChange={(e) => setResearchProvider(e.target.value)}
+                      className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
+                    >
+                      <option value="default">Default (Global Flow)</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="minimax">MiniMax M2.7</option>
+                      <option value="openai_compat">OpenAI-Compatible</option>
+                    </select>
+                  </div>
+                  {researchProvider !== 'default' && (
+                    <div className="space-y-2 animate-fadeIn text-[10px]">
+                      <input 
+                        type="password" 
+                        value={researchKey}
+                        onChange={(e) => setResearchKey(e.target.value)}
+                        placeholder="Custom API Key (leave blank to inherit global)"
+                        className="w-full bg-surface neo-border p-1 text-xs font-mono"
+                      />
+                      <input 
+                        type="text" 
+                        value={researchModel}
+                        onChange={(e) => setResearchModel(e.target.value)}
+                        placeholder="Custom Model Name Override"
+                        className="w-full bg-surface neo-border p-1 text-xs"
+                      />
+                      {researchProvider === 'openai_compat' && (
+                        <input 
+                          type="text" 
+                          value={researchUrl}
+                          onChange={(e) => setResearchUrl(e.target.value)}
+                          placeholder="Custom Endpoint URL Override"
+                          className="w-full bg-surface neo-border p-1 text-xs font-mono"
+                        />
+                      )}
+                    </div>
+                  )}
+                  <button 
+                    onClick={async () => {
+                      await Promise.all([
+                        updateSettingAction('llm_provider_research', researchProvider),
+                        updateSettingAction('llm_key_research', researchKey),
+                        updateSettingAction('llm_model_research', researchModel),
+                        updateSettingAction('llm_url_research', researchUrl),
+                      ]);
+                      showToast('Research Agent override saved ✓');
+                    }}
+                    className="mt-auto bg-primary text-on-primary font-bold uppercase text-[10px] py-1.5 neo-border hover:bg-tertiary"
+                  >Apply Override</button>
+                </div>
+
+                {/* Sub-agents Override */}
+                <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
+                  <div className="flex justify-between items-center border-b border-primary pb-2">
+                    <span className="font-headline font-bold text-xs uppercase text-primary flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm">group</span> Sub-Agents (General)
+                    </span>
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-primary-container border border-primary">Active</span>
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
+                    <select 
+                      value={subProvider} 
+                      onChange={(e) => setSubProvider(e.target.value)}
+                      className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
+                    >
+                      <option value="default">Default (Global Flow)</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="minimax">MiniMax M2.7</option>
+                      <option value="openai_compat">OpenAI-Compatible</option>
+                    </select>
+                  </div>
+                  {subProvider !== 'default' && (
+                    <div className="space-y-2 animate-fadeIn text-[10px]">
+                      <input 
+                        type="password" 
+                        value={subKey}
+                        onChange={(e) => setSubKey(e.target.value)}
+                        placeholder="Custom API Key (leave blank to inherit global)"
+                        className="w-full bg-surface neo-border p-1 text-xs font-mono"
+                      />
+                      <input 
+                        type="text" 
+                        value={subModel}
+                        onChange={(e) => setSubModel(e.target.value)}
+                        placeholder="Custom Model Name Override"
+                        className="w-full bg-surface neo-border p-1 text-xs"
+                      />
+                      {subProvider === 'openai_compat' && (
+                        <input 
+                          type="text" 
+                          value={subUrl}
+                          onChange={(e) => setSubUrl(e.target.value)}
+                          placeholder="Custom Endpoint URL Override"
+                          className="w-full bg-surface neo-border p-1 text-xs font-mono"
+                        />
+                      )}
+                    </div>
+                  )}
+                  <button 
+                    onClick={async () => {
+                      await Promise.all([
+                        updateSettingAction('llm_provider_sub', subProvider),
+                        updateSettingAction('llm_key_sub', subKey),
+                        updateSettingAction('llm_model_sub', subModel),
+                        updateSettingAction('llm_url_sub', subUrl),
+                      ]);
+                      showToast('Sub-agents override saved ✓');
+                    }}
+                    className="mt-auto bg-primary text-on-primary font-bold uppercase text-[10px] py-1.5 neo-border hover:bg-tertiary"
+                  >Apply Override</button>
+                </div>
+
+              </div>
             </div>
           </div>
 

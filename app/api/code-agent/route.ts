@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
         let passed = false;
 
         try {
-          const provider = getActiveProvider();
+          const provider = getActiveProvider('code');
 
           const researchSection = researchContext
             ? `\n\nResearch Intelligence Available (from Research Agent OSINT brief):\n${researchContext}`

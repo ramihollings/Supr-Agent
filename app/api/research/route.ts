@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
         let recommendation = '';
 
         try {
-          const provider = getActiveProvider();
+          const provider = getActiveProvider('research');
           const prompt = `Generate an OSINT intelligence brief for this enterprise research query: "${query}". Return the JSON object now.`;
 
           send({ type: 'status', phase: 'extracting', content: `[RESEARCH AGENT] Extracting structured intelligence signals...` });
