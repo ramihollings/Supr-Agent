@@ -30,9 +30,20 @@ export default function WorkspacePage() {
     setShowWizard(true);
   };
 
+  const handleWizardClose = async () => {
+    setShowWizard(false);
+    // Refresh project list after wizard closes (new project may have been created)
+    try {
+      const data = await fetchMissionsAction();
+      setProjects(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container relative">
-      {showWizard && <MissionWizard onClose={() => setShowWizard(false)} />}
+      {showWizard && <MissionWizard onClose={handleWizardClose} />}
       <TopNav title="Dashboard Overview" />
       
       <div className="p-6 lg:p-8 flex-1 overflow-y-auto space-y-8 max-w-7xl mx-auto w-full">

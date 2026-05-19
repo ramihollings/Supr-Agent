@@ -16,7 +16,8 @@ import {
   createAgent,
   archiveAgent,
   deleteAgent,
-  extendAgent
+  extendAgent,
+  getMissionById
 } from '@/lib/db';
 import { writeIdentityProfile, deleteIdentityProfile } from '@/lib/agents';
 import { 
@@ -50,6 +51,14 @@ function handleActionError(error: unknown) {
 export async function fetchMissionState(): Promise<Mission | undefined> {
   try {
     return await getActiveMission();
+  } catch (error) {
+    handleActionError(error);
+  }
+}
+
+export async function fetchMissionByIdAction(id: string): Promise<Mission | undefined> {
+  try {
+    return await getMissionById(id);
   } catch (error) {
     handleActionError(error);
   }
@@ -335,4 +344,163 @@ export async function deleteCronJobAction(id: string) {
     return { success: false, error: String(error) };
   }
 }
+
+// ----------------------------------------------------
+// ORCHESTRATION HUB ACTIONS
+// ----------------------------------------------------
+
+export async function fetchOrchestrationFeed(projectId?: string) {
+  try {
+    const query = projectId
+      ? `SELECT * FROM Event_Log WHERE mission_id = ? AND event_type IN ('delegation','handoff','review','approval','escalation','governance') ORDER BY timestamp DESC`
+      : `SELECT * FROM Event_Log WHERE event_type IN ('delegation','handoff','review','approval','escalation','governance') ORDER BY timestamp DESC`;
+    const rows = projectId
+      ? db.prepare(query).all(projectId) as any[]
+      : db.prepare(query).all() as any[];
+    return rows.map(r => {
+      let detail = '', targetAgent = '';
+      try { const m = JSON.parse(r.metadata); detail = m.detail || ''; targetAgent = m.targetAgent || ''; } catch(e){}
+      return {
+        id: r.id,
+        eventType: r.event_type,
+        actor: r.actor_id,
+        targetAgent,
+        summary: r.summary,
+        detail,
+        timestamp: r.timestamp,
+        missionId: r.mission_id,
+      };
+    });
+  } catch (error) {
+    console.error("Failed to fetch orchestration feed:", error);
+    return [];
+  }
+}
+
+export async function fetchAgentStatuses() {
+  try {
+    const agents = db.prepare(`SELECT * FROM Agents WHERE status = 'active'`).all() as any[];
+    return agents.map(a => {
+      // Find if agent has an active task
+      const task = db.prepare(`SELECT title, status, mission_id FROM Tasks WHERE owner_agent_id = ? AND status = 'Active' LIMIT 1`).get(a.id) as any;
+      let missionName = '';
+      if (task) {
+        const m = db.prepare(`SELECT title FROM Missions WHERE id = ?`).get(task.mission_id) as any;
+        missionName = m?.title || '';
+      }
+      return {
+        id: a.id,
+        name: a.name,
+        role: a.role,
+        permissionTier: a.permission_tier,
+        isPermanent: a.type === 'permanent',
+        currentTask: task?.title || null,
+        currentProject: missionName || null,
+        status: task ? 'Working' : 'Idle',
+      };
+    });
+  } catch (error) {
+    console.error("Failed to fetch agent statuses:", error);
+    return [];
+  }
+}
+
+// ----------------------------------------------------
+// SETTINGS ACTIONS
+// ----------------------------------------------------
+
+export async function fetchSettingsAction() {
+  try {
+    const rows = db.prepare(`SELECT * FROM Settings`).all() as { key: string; value: string }[];
+    const settingsObj: Record<string, string> = {};
+    for (const r of rows) {
+      settingsObj[r.key] = r.value;
+    }
+    return settingsObj;
+  } catch (error) {
+    console.error("Failed to fetch settings:", error);
+    return {};
+  }
+}
+
+export async function updateSettingAction(key: string, value: string) {
+  try {
+    db.prepare(`
+      INSERT INTO Settings (key, value, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+    `).run(key, value);
+    return { success: true };
+  } catch (error) {
+    console.error(`Failed to update setting ${key}:`, error);
+    return { success: false, error: String(error) };
+  }
+}
+
+// ----------------------------------------------------
+// MEMORY BANK ACTIONS
+// ----------------------------------------------------
+
+export async function fetchMemoryItemsAction() {
+  try {
+    const rows = db.prepare(`SELECT * FROM Memory_Items ORDER BY created_at DESC`).all() as any[];
+    return rows.map(r => {
+      let key = r.scope || 'General';
+      let value = r.content || '';
+      try {
+        const parsed = JSON.parse(r.content);
+        if (parsed.key) key = parsed.key;
+        if (parsed.value) value = parsed.value;
+      } catch (e) {}
+      return {
+        id: r.id,
+        key,
+        value,
+        type: r.type || 'semantic',
+        scope: r.scope || 'General',
+        importance: r.importance >= 0.8 ? 'High' : r.importance >= 0.4 ? 'Medium' : 'Low',
+        createdAt: r.created_at,
+      };
+    });
+  } catch (error) {
+    console.error("Failed to fetch memory items:", error);
+    return [];
+  }
+}
+
+export async function purgeMemoryItemsAction(scope: string) {
+  try {
+    if (scope === 'all') {
+      db.prepare(`DELETE FROM Memory_Items`).run();
+    } else {
+      db.prepare(`DELETE FROM Memory_Items WHERE scope = ? OR type = ?`).run(scope, scope.toLowerCase());
+    }
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to purge memory items:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function addGlobalMemoryItemAction(key: string, value: string, importance: string, scope: string = 'User') {
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO Memory_Items (id, scope, type, content, importance)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const impVal = importance === 'High' ? 0.8 : importance === 'Medium' ? 0.5 : 0.2;
+    stmt.run(
+      `mem-${Date.now()}`,
+      scope,
+      'semantic',
+      JSON.stringify({ key, value }),
+      impVal
+    );
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to add memory item:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
 

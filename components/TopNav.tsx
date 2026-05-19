@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 
-export function TopNav({ title = "Roadmap Center", children }: { title?: string, children?: React.ReactNode }) {
+export function TopNav({ title = "Dashboard", children }: { title?: string, children?: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get('id');
@@ -97,6 +97,7 @@ export function TopNav({ title = "Roadmap Center", children }: { title?: string,
              <ul className="flex flex-col gap-2">
                 <li><Link href={getHrefWithParam('/')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Dashboard</Link></li>
                 <li><Link href={getHrefWithParam('/mission-control')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Control Center</Link></li>
+                <li><Link href={getHrefWithParam('/orchestration')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Observance Hub</Link></li>
                 <li><Link href={getHrefWithParam('/activity')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Updates</Link></li>
                 <li><Link href={getHrefWithParam('/agents')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Task Force</Link></li>
                 <li><Link href={getHrefWithParam('/reasoning')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Strategic Plan</Link></li>

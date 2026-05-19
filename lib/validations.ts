@@ -52,13 +52,13 @@ export const MessageSchema = z.object({
 export const ArtifactSchema = z.object({
   id: z.string(),
   filename: z.string(),
-  type: z.enum(['code', 'markdown', 'data']),
+  type: z.enum(['code', 'markdown', 'data', 'json']),
   content: z.string(),
 });
 
 export const ActivityEventSchema = z.object({
   id: z.string(),
-  eventType: z.enum(['approval', 'failure', 'task_complete', 'agent_action', 'supr_decision', 'permission']),
+  eventType: z.enum(['approval', 'failure', 'task_complete', 'agent_action', 'supr_decision', 'permission', 'delegation', 'handoff', 'review', 'escalation', 'governance']),
   actor: z.string(),
   actorIcon: z.string(),
   summary: z.string(),

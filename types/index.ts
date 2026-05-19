@@ -50,13 +50,13 @@ export interface Message {
 export interface Artifact {
   id: string;
   filename: string;
-  type: 'code' | 'markdown' | 'data';
+  type: 'code' | 'markdown' | 'data' | 'json';
   content: string;
 }
 
 export interface ActivityEvent {
   id: string;
-  eventType: 'approval' | 'failure' | 'task_complete' | 'agent_action' | 'supr_decision' | 'permission';
+  eventType: 'approval' | 'failure' | 'task_complete' | 'agent_action' | 'supr_decision' | 'permission' | 'delegation' | 'handoff' | 'review' | 'escalation' | 'governance';
   actor: string;
   actorIcon: string;
   summary: string;

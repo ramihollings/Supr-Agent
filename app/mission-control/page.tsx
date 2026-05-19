@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import { InlineApproval } from '@/components/InlineApproval';
 import { SteerableCanvas } from '@/components/SteerableCanvas';
 import { AgentCard, AgentInfo } from '@/components/AgentCard';
-import { fetchAgentsState, logActivityAction, updateTaskStatusAction } from '@/app/actions';
+import { fetchAgentsState, fetchMissionsAction, logActivityAction, updateTaskStatusAction } from '@/app/actions';
 import { Message, Mission } from '@/types';
 
 export default function MissionControlPage() {
@@ -18,6 +18,7 @@ export default function MissionControlPage() {
   const [readinessScore, setReadinessScore] = useState(72); // Default mock for active steerable
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [allProjects, setAllProjects] = useState<Mission[]>([]);
 
   // Telemetry Metrics
   const [tokenBurn, setTokenBurn] = useState(1.42);
@@ -58,13 +59,18 @@ export default function MissionControlPage() {
     setProjectId(id);
   }, []);
 
-  // Fetch agents state
+  // Fetch agents state and project list
   useEffect(() => {
     async function loadAgents() {
       const agentData = await fetchAgentsState();
       if (agentData) setAgents(agentData);
     }
+    async function loadProjects() {
+      const projects = await fetchMissionsAction();
+      if (projects) setAllProjects(projects);
+    }
     loadAgents();
+    loadProjects();
   }, []);
 
   // Scroll terminal to bottom
@@ -240,6 +246,58 @@ export default function MissionControlPage() {
           {toastMessage}
         </div>
       )}
+
+      {/* Project Switcher Toolbar */}
+      <div className="bg-surface-container-high border-b-4 border-primary px-4 py-2.5 flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-sm">folder_open</span>
+          <select
+            value={projectId || ''}
+            onChange={(e) => {
+              const newId = e.target.value;
+              window.location.href = `/mission-control?id=${newId}`;
+            }}
+            className="bg-background neo-border px-3 py-1.5 font-headline font-bold uppercase text-xs text-primary focus:outline-none focus:border-tertiary min-w-[200px]"
+          >
+            {allProjects.map(p => (
+              <option key={p.id} value={p.id}>{p.name} — {p.readinessScore}%</option>
+            ))}
+            {allProjects.length === 0 && <option value="m1">Loading projects...</option>}
+          </select>
+        </div>
+
+        {/* Prev / Next Navigation */}
+        <div className="flex gap-1">
+          <button
+            onClick={() => {
+              const idx = allProjects.findIndex(p => p.id === projectId);
+              if (idx > 0) window.location.href = `/mission-control?id=${allProjects[idx - 1].id}`;
+            }}
+            className="w-8 h-8 neo-border bg-background flex items-center justify-center hover:bg-primary hover:text-on-primary transition-colors text-primary"
+          >
+            <span className="material-symbols-outlined text-sm">chevron_left</span>
+          </button>
+          <button
+            onClick={() => {
+              const idx = allProjects.findIndex(p => p.id === projectId);
+              if (idx < allProjects.length - 1) window.location.href = `/mission-control?id=${allProjects[idx + 1].id}`;
+            }}
+            className="w-8 h-8 neo-border bg-background flex items-center justify-center hover:bg-primary hover:text-on-primary transition-colors text-primary"
+          >
+            <span className="material-symbols-outlined text-sm">chevron_right</span>
+          </button>
+        </div>
+
+        <span className="font-mono text-[10px] text-on-surface-variant">ID: {projectId}</span>
+
+        <a
+          href={`/orchestration`}
+          className="ml-auto bg-background neo-border px-3 py-1.5 font-headline font-bold uppercase text-[10px] text-primary hover:bg-primary hover:text-on-primary transition-colors flex items-center gap-1.5"
+        >
+          <span className="material-symbols-outlined text-xs">visibility</span>
+          Observance Hub
+        </a>
+      </div>
 
       {/* Main Command Workspace */}
       <div className="flex-1 flex overflow-hidden">

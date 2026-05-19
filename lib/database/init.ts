@@ -194,6 +194,31 @@ export function initDatabase() {
     )
   `);
 
+  // 12. Settings Table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS Settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Seed default settings if empty
+  const settingsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Settings`).get() as { cnt: number };
+  if (settingsCount.cnt === 0) {
+    const insertSetting = db.prepare(`
+      INSERT INTO Settings (key, value)
+      VALUES (?, ?)
+    `);
+    insertSetting.run('operating_mode', 'guided');
+    insertSetting.run('permission_boundary', 'governed');
+    insertSetting.run('governance_standards', JSON.stringify(['SOX', 'SOC2']));
+    insertSetting.run('channels_email', 'true');
+    insertSetting.run('channels_slack', 'true');
+    insertSetting.run('channels_telegram', 'false');
+    insertSetting.run('channels_social', 'false');
+  }
+
   // Seed default Skills if table is empty
   const skillsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Skills`).get() as { cnt: number };
   if (skillsCount.cnt === 0) {
@@ -255,6 +280,41 @@ export function initDatabase() {
       new Date(Date.now() - 45 * 60000).toISOString(),
       'Paused'
     );
+  }
+
+  // Seed orchestration events for the Observance Hub
+  const orchCount = db.prepare(`SELECT COUNT(*) as cnt FROM Event_Log WHERE event_type IN ('delegation','handoff','review','approval','escalation','governance')`).get() as { cnt: number };
+  if (orchCount.cnt === 0) {
+    const missionRow = db.prepare(`SELECT id FROM Missions LIMIT 1`).get() as { id: string } | undefined;
+    const mid = missionRow?.id || 'm1';
+    const insertEvent = db.prepare(`
+      INSERT INTO Event_Log (id, mission_id, event_type, actor_type, actor_id, summary, metadata, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const now = Date.now();
+    const events = [
+      { id: `orch-1`, type: 'delegation', actor: 'Supr', summary: 'Assigned Research Agent to Context Scan phase', detail: 'Research Agent has Observe+Draft permissions and direct access to the GitHub issues cache. Optimal fit for initial context gathering.', target: 'Research Agent', mins: 42 },
+      { id: `orch-2`, type: 'delegation', actor: 'Supr', summary: 'Assigned Signal Agent to Ingestion phase', detail: 'Signal Agent will run CloakBrowser stealth scraping on competitor product feeds. Task requires External_Act permission tier.', target: 'Signal Agent', mins: 38 },
+      { id: `orch-3`, type: 'handoff', actor: 'Research Agent', summary: 'Passed context findings → Code Agent for implementation', detail: 'Research Agent completed 24 data frame extractions. Handing structured JSON payload to Code Agent for schema integration.', target: 'Code Agent', mins: 30 },
+      { id: `orch-4`, type: 'review', actor: 'Supr', summary: 'Reviewed Code Agent output on Brief Gen phase', detail: 'Code Agent submitted spec draft v1. Supr flagged missing test coverage specifications and acceptance criteria. Requesting revisions.', target: 'Code Agent', mins: 25 },
+      { id: `orch-5`, type: 'escalation', actor: 'Supr', summary: 'Code Agent sandbox failure — rerouting to retry', detail: 'pytest suite failed: mock_tickets.json missing embedding schema key. Auto-retry attempt 2 of 3 initiated with adjusted parameters.', target: 'Code Agent', mins: 22 },
+      { id: `orch-6`, type: 'governance', actor: 'Supr', summary: 'Denied Execute permission for temporary Scout Agent', detail: 'Scout Agent requested sandbox execution access but only holds Observe tier. Escalating to user for manual permission grant.', target: 'Scout Agent', mins: 20 },
+      { id: `orch-7`, type: 'delegation', actor: 'Supr', summary: 'Reassigned QA Gate to QA Agent after Code Agent retry', detail: 'Code Agent completed retry successfully. QA Agent will now validate the corrected output against acceptance criteria.', target: 'QA Agent', mins: 18 },
+      { id: `orch-8`, type: 'review', actor: 'Supr', summary: 'Reviewed QA Agent test results on sandbox output', detail: 'QA Agent ran 12 assertions. 11 passed, 1 edge case flagged. Supr approved with conditional note to monitor edge case in production.', target: 'QA Agent', mins: 14 },
+      { id: `orch-9`, type: 'approval', actor: 'Supr', summary: 'Approved QA Gate — advancing project to Export phase', detail: 'All critical assertions passed. Readiness score advanced from 72% to 87%. Clearing project for artifact export and delivery bundle generation.', target: 'QA Agent', mins: 10 },
+      { id: `orch-10`, type: 'handoff', actor: 'QA Agent', summary: 'Passed validated artifacts → Signal Agent for export packaging', detail: 'QA-verified code and brief artifacts handed to Signal Agent for final formatting and delivery bundle compilation.', target: 'Signal Agent', mins: 8 },
+      { id: `orch-11`, type: 'delegation', actor: 'Supr', summary: 'Assigned Research Agent to compile strategic insights memo', detail: 'With core execution complete, Research Agent will compile a final strategic insights document from all memory items and findings.', target: 'Research Agent', mins: 5 },
+      { id: `orch-12`, type: 'governance', actor: 'Supr', summary: 'Promoted Code Agent permission tier: Edit → Execute', detail: 'Code Agent demonstrated reliability across 3 successful sandbox runs. Supr auto-promoted permission tier for future tasks.', target: 'Code Agent', mins: 3 },
+      { id: `orch-13`, type: 'approval', actor: 'Supr', summary: 'Final delivery bundle approved for strategic handoff', detail: 'All 3 deliverable artifacts validated. Readiness score: 87%. Project cleared for user review and download.', target: 'Signal Agent', mins: 1 },
+      { id: `orch-14`, type: 'delegation', actor: 'Supr', summary: 'Assigned Context Agent to begin next project intake', detail: 'With current project nearing completion, Supr is pre-allocating Context Agent to the intake phase of the next queued project.', target: 'Context Agent', mins: 0 },
+    ];
+    for (const ev of events) {
+      insertEvent.run(
+        ev.id, mid, ev.type, 'agent', ev.actor, ev.summary,
+        JSON.stringify({ detail: ev.detail, targetAgent: ev.target }),
+        new Date(now - ev.mins * 60000).toISOString()
+      );
+    }
   }
 
   console.log('Database initialization complete.');

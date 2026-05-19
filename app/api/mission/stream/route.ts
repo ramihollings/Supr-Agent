@@ -7,7 +7,12 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const encoder = new TextEncoder();
   const projectId = req.nextUrl.searchParams.get('id');
-  let lastMissionHash = '';
+  let lastHash = '';
+
+  // Lightweight hash: only check key fields, not the entire serialized object
+  const computeHash = (m: Mission): string => {
+    return `${m.status}:${m.readinessScore}:${m.phases.map(p => p.status).join(',')}:${m.tasks.map(t => t.status).join(',')}:${m.artifacts?.length ?? 0}:${m.failures?.filter(f => !f.resolved).length ?? 0}`;
+  };
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -25,7 +30,7 @@ export async function GET(req: NextRequest) {
       // Initial send
       const initialMission = await fetchProject();
       if (initialMission) {
-        lastMissionHash = JSON.stringify(initialMission);
+        lastHash = computeHash(initialMission);
         send(initialMission);
       }
 
@@ -34,15 +39,15 @@ export async function GET(req: NextRequest) {
           const mission = await fetchProject();
           if (!mission) return;
 
-          const currentHash = JSON.stringify(mission);
-          if (currentHash !== lastMissionHash) {
-            lastMissionHash = currentHash;
+          const currentHash = computeHash(mission);
+          if (currentHash !== lastHash) {
+            lastHash = currentHash;
             send(mission);
           }
         } catch (error) {
           console.error('SSE Stream Error:', error);
         }
-      }, 2000); // Poll every 2 seconds
+      }, 2000);
 
       req.signal.addEventListener('abort', () => {
         clearInterval(interval);

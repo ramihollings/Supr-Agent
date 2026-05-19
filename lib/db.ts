@@ -226,11 +226,6 @@ export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'i
 
 export async function createMission(missionData: Omit<Mission, 'id'>): Promise<Mission> {
   const newMissionId = `m-${Date.now()}`;
-  
-  // Optional: Set existing active missions to 'Done' if new one is active
-  if (missionData.status === 'Active') {
-    db.prepare(`UPDATE Missions SET status = 'Done' WHERE status = 'Active'`).run();
-  }
 
   const insertMission = db.prepare(`
     INSERT INTO Missions (id, title, goal, status)
