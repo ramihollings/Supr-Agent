@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { GeminiProvider } from '@/lib/providers/model';
+import { getActiveProvider } from '@/lib/providers/model';
 import { PermissionEngine } from '@/lib/services/governance';
 import { addActivityLog, getActiveMission } from '@/lib/db';
 
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
 
           // 2. LLM Generation
           try {
-            const provider = new GeminiProvider();
+            const provider = getActiveProvider();
             const systemContext = mission ? `Active Mission: ${mission.name}. Objective: ${mission.objective}` : 'No active mission.';
             
             const responseText = await provider.generateContent(prompt, {
@@ -68,11 +68,10 @@ export async function POST(req: NextRequest) {
 
             sendJSON({ type: 'message', content: responseText });
           } catch (llmError: any) {
-            console.error("Gemini Generation Error:", llmError);
-            // Fallback for missing API Key or other LLM errors during demo
+            console.error("LLM Generation Error:", llmError);
             sendJSON({ 
               type: 'message', 
-              content: `[FALLBACK MODE] I acknowledge your command: "${prompt}". Please configure GEMINI_API_KEY to enable live model generation. Error: ${llmError.message}` 
+              content: `[FALLBACK MODE] I acknowledge your command: "${prompt}". Please configure GEMINI_API_KEY or BACKUP_LLM_API_KEY to enable live model generation. Error: ${llmError.message}` 
             });
           }
           

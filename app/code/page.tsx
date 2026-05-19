@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { fetchMissionState, logActivityAction, recordFailureAction, updateTaskStatusAction, addArtifactAction, updateArtifactAction } from '@/app/actions';
+import { fetchMissionState, recordFailureAction, updateTaskStatusAction, addArtifactAction, updateArtifactAction } from '@/app/actions';
 import { Mission, Artifact } from '@/types';
 
 type TerminalLine = {
@@ -129,13 +129,6 @@ export default function CodePage() {
           summary: "AssertionError: assert 'cluster' in Index",
           suprGuidance: ""
         });
-        await logActivityAction(mission.id, {
-          eventType: 'failure',
-          actor: 'Code Agent',
-          actorIcon: 'code',
-          summary: 'AssertionError in Code Workspace',
-          detail: 'Tests failed on assert "cluster" in Index. Missing spec context.'
-        });
       }
     } else {
       // Test passes
@@ -149,77 +142,118 @@ export default function CodePage() {
 
       if (mission) {
         await updateTaskStatusAction(mission.id, 't2', 'Done');
-        await logActivityAction(mission.id, {
-          eventType: 'task_complete',
-          actor: 'Code Agent',
-          actorIcon: 'code',
-          summary: 'Task complete: Resolve Column Assertions',
-          detail: `All tests passed in gVisor sandbox after ${retryCount + 1} iterations.`
-        });
       }
     }
     setIsRunning(false);
   };
 
-  const handleSuprTriage = async () => {
+  const handleDiagnoseAndFix = async () => {
+    if (isRunning) return;
+    setIsRunning(true);
     setTriageState('triaging');
-    setTerminalLines(prev => [
-      ...prev,
-      { id: Date.now(), type: 'supr', content: '[SUPR] Triaging failure... Context scanner active.' },
-    ]);
 
-    await new Promise(r => setTimeout(r, 1500));
+    const currentCode = files[activeFile] || '';
 
-    // Dynamic guidance adapts depending on whether a research artifact was created by the Research Agent
+    // Gather research context from any available research artifacts
     const researchDocs = mission?.artifacts?.filter(a => a.filename.startsWith('research_')) || [];
-    const hasResearch = researchDocs.length > 0;
+    const researchContext = researchDocs.length > 0
+      ? researchDocs.map(doc => `--- ${doc.filename} ---\n${doc.content}`).join('\n\n')
+      : '';
 
-    if (hasResearch) {
-      const topResearch = researchDocs[0];
-      setTerminalLines(prev => [
-        ...prev,
-        { id: Date.now(), type: 'supr', content: `[SUPR] Found active OSINT specs in Research Library: ${topResearch.filename}` },
-        { id: Date.now() + 1, type: 'supr', content: `[SUPR] Recommended Fix: "embedding" column must default to [0]*128 if missing.` },
-        { id: Date.now() + 2, type: 'supr', content: '[SUPR] Sending guidance payload to Code Agent sandbox. Code updated.' },
-      ]);
-    } else {
-      setTerminalLines(prev => [
-        ...prev,
-        { id: Date.now(), type: 'supr', content: '[SUPR] WARNING: No active research specs compiled in the Research Library.' },
-        { id: Date.now() + 1, type: 'supr', content: '[SUPR] Triaged default guidance: Check for "embedding" schema keys and add a fallback.' },
-      ]);
-    }
-
-    if (mission) {
-      await logActivityAction(mission.id, {
-        eventType: 'supr_decision',
-        actor: 'Supr',
-        actorIcon: 'psychology',
-        summary: 'Transmitted revised specs to Code Agent',
-        detail: 'Sent guidance for missing columns fallback validation.'
-      });
-    }
-
-    setTriageState('retrying');
-  };
-
-  // Simulates Code Agent automatically applying the parsed fix from the research spec
-  const handleApplyFix = async () => {
-    const fixedCode = `# Cognitive Debt Detection Script\n# Author: Supr CodeBot\nimport pandas as pd\nimport numpy as np\nfrom sklearn.cluster import KMeans\n\ndef analyze_feedback(data_path: str):\n    """\n    Analyzes ticket feedback to identify clusters.\n    """\n    try:\n        df = pd.read_json(data_path)\n        # [FIX] Added validation based on Research Library specs\n        if 'embedding' not in df.columns:\n            df['embedding'] = df.apply(lambda r: [0]*128, axis=1)\n    except Exception as e:\n        print(f"Error: {e}")\n        raise e\n\n    vectors = np.stack(df['embedding'].values)\n    kmeans = KMeans(n_clusters=5, random_state=42)\n    df['cluster'] = kmeans.fit_predict(vectors)\n    return df\n\ndef generate_report(clustered_df):\n    return clustered_df.groupby("cluster").size().to_dict()`;
-
-    setFiles(prev => ({
-      ...prev,
-      'feedback_clusters.py': fixedCode
-    }));
-    setSaveStatus('editing');
-    setTriageState('idle');
-    showToast("Code Agent generated fix using Research specifications!");
-    
     setTerminalLines(prev => [
       ...prev,
-      { id: Date.now(), type: 'supr', content: '[CODE AGENT] Auto-applied research solution into feedback_clusters.py. Click "Run Test" to verify.' },
+      { id: Date.now(), type: 'supr', content: `[SUPR] Delegating ${activeFile} to Code Agent for Diagnostics Console run...` },
+      { id: Date.now() + 1, type: 'supr', content: researchContext
+        ? `[SUPR] Injecting ${researchDocs.length} OSINT research brief(s) into Code Agent context.`
+        : '[SUPR] No Research Library context found. Running static-only analysis.' },
     ]);
+
+    try {
+      const response = await fetch('/api/code-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: activeFile,
+          fileContent: currentCode,
+          researchContext,
+          missionId: mission?.id,
+        }),
+      });
+
+      if (!response.body) throw new Error('No response stream.');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+
+            if (msg.type === 'status') {
+              setTerminalLines(prev => [
+                ...prev,
+                { id: Date.now(), type: 'supr', content: msg.content },
+              ]);
+            }
+
+            if (msg.type === 'result') {
+              // Apply the real fix to the editor
+              if (msg.fixedCode) {
+                setFiles(prev => ({ ...prev, [activeFile]: msg.fixedCode }));
+                setSaveStatus('editing');
+              }
+
+              const resultLines: TerminalLine[] = [
+                { id: Date.now(), type: 'supr', content: `[CODE AGENT] Diagnosis: ${msg.diagnosis}` },
+                { id: Date.now() + 1, type: 'supr', content: `[CODE AGENT] Fix applied: ${msg.fix}` },
+                { id: Date.now() + 2, type: msg.passed ? 'success' : 'error', content: `Test result: ${msg.testResult}` },
+              ];
+
+              if (msg.passed) {
+                resultLines.push({ id: Date.now() + 3, type: 'success', content: `[CODE AGENT] ✓ All assertions passed. File updated in sandbox.` });
+                setTriageState('passed');
+                showToast(`Code Agent fixed ${activeFile} using ${researchDocs.length > 0 ? 'Research Library context' : 'static analysis'}!`);
+              } else {
+                resultLines.push({ id: Date.now() + 3, type: 'error', content: '[CODE AGENT] Fix partial — escalating to Supr for review.' });
+                setTriageState('failed');
+                setRetryCount(prev => prev + 1);
+              }
+
+              setTerminalLines(prev => [...prev, ...resultLines]);
+            }
+
+            if (msg.type === 'error') {
+              setTerminalLines(prev => [
+                ...prev,
+                { id: Date.now(), type: 'error', content: `[ERROR] ${msg.content}` },
+              ]);
+              setTriageState('failed');
+            }
+          } catch (parseErr) {
+            // Skip malformed NDJSON lines
+          }
+        }
+      }
+    } catch (err: any) {
+      setTerminalLines(prev => [
+        ...prev,
+        { id: Date.now(), type: 'error', content: `[ERROR] Code Agent pipeline failed: ${err.message}` },
+      ]);
+      setTriageState('failed');
+    }
+
+    setIsRunning(false);
   };
+
 
   const researchArtifacts = mission?.artifacts?.filter(a => a.filename.startsWith('research_')) || [];
 
@@ -445,37 +479,48 @@ export default function CodePage() {
 
                 {triageState === 'failed' && (
                   <>
-                    <p className="font-bold mb-2 text-error uppercase">Assertion Error (Iteration {retryCount})</p>
-                    <p className="text-on-surface-variant mb-4 leading-relaxed">The pytest suite failed because `mock_tickets.json` does not contain the `embedding` schema key, causing a pandas Stack failure.</p>
+                    <p className="font-bold mb-2 text-error uppercase">Diagnostics Failed (Iteration {retryCount})</p>
+                    <p className="text-on-surface-variant mb-4 leading-relaxed">The test suite encountered an error. Click below to let the Code Agent analyze the file, consult the Research Library, and generate a real fix.</p>
                     <button
-                      onClick={handleSuprTriage}
-                      className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1"
-                    >Diagnostics Console: Run Analysis</button>
+                      onClick={handleDiagnoseAndFix}
+                      disabled={isRunning}
+                      className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">psychology</span>
+                      Code Agent: Diagnose & Fix with AI
+                    </button>
                   </>
                 )}
 
                 {triageState === 'triaging' && (
-                  <div className="flex items-center gap-3">
-                    <span className="material-symbols-outlined animate-spin text-primary">sync</span>
-                    <span className="font-bold">Supr is checking OSINT logs...</span>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className="material-symbols-outlined animate-spin text-primary">sync</span>
+                      <span className="font-bold">Code Agent is running Gemini analysis...</span>
+                    </div>
+                    <p className="text-on-surface-variant text-[10px] leading-relaxed">Scanning file content, injecting Research Library context, generating structured fix...</p>
                   </div>
                 )}
 
                 {triageState === 'retrying' && (
                   <>
-                    <p className="font-bold mb-2 uppercase">Research Guidance Ready</p>
-                    <p className="text-on-surface-variant mb-4 leading-relaxed">Supr integrated specs from the Research Library and compiled a self-healing solution for the Code Agent.</p>
+                    <p className="font-bold mb-2 uppercase">AI Fix Ready</p>
+                    <p className="text-on-surface-variant mb-4 leading-relaxed">Code Agent generated a fix from the Research Library OSINT context. Run tests to verify.</p>
                     <button
-                      onClick={handleApplyFix}
-                      className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1"
-                    >Code Agent: Auto-Write Fix</button>
+                      onClick={handleDiagnoseAndFix}
+                      disabled={isRunning}
+                      className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">auto_fix_high</span>
+                      Re-run AI Diagnostics
+                    </button>
                   </>
                 )}
 
                 {triageState === 'passed' && (
                   <>
-                    <p className="font-bold mb-2 text-tertiary uppercase">Test Suite Passed ✓</p>
-                    <p className="text-on-surface-variant leading-relaxed">The missing columns issue was successfully resolved using the dynamic fallback fix derived from the competitor specs!</p>
+                    <p className="font-bold mb-2 text-tertiary uppercase">All Tests Passed ✓</p>
+                    <p className="text-on-surface-variant leading-relaxed">Code Agent successfully resolved all issues using AI analysis{researchArtifacts.length > 0 ? ' and Research Library OSINT context' : ''}. File updated in sandbox.</p>
                   </>
                 )}
              </div>

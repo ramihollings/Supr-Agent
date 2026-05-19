@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { fetchMissionState, addArtifactAction, addMemoryItemAction, logActivityAction } from '@/app/actions';
+import { fetchMissionState } from '@/app/actions';
 import { Mission, Artifact } from '@/types';
 
 type SearchLogEntry = {
@@ -59,95 +59,77 @@ export default function ResearchPage() {
     setBrowseState('searching');
     setExtractedData([]);
 
-    // Step 1: Search
-    setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[SUPR] Assigning Research Agent: "${searchQuery}"` }]);
-    setCurrentUrl(`https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`);
-    await new Promise(r => setTimeout(r, 1500));
+    setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[SUPR] Delegating OSINT task to Research Agent: "${searchQuery}"` }]);
 
-    setSearchLog(prev => [...prev, { id: Date.now(), type: 'search', content: `Searching: "${searchQuery}"` }]);
-    await new Promise(r => setTimeout(r, 1200));
-
-    // Step 2: Navigate to result
-    setBrowseState('browsing');
-    const slug = searchQuery.toLowerCase().replace(/\s+/g, '-');
-    const fakeUrl = `https://docs.stitch-intelligence.io/spec/${slug}`;
-    setCurrentUrl(fakeUrl);
-    setSearchLog(prev => [
-      ...prev,
-      { id: Date.now(), type: 'navigate', content: `Navigating to: ${fakeUrl}` },
-    ]);
-    await new Promise(r => setTimeout(r, 2000));
-
-    // Step 3: Extract
-    setBrowseState('extracting');
-    setSearchLog(prev => [
-      ...prev,
-      { id: Date.now(), type: 'extract', content: 'Extracting relevant competitor signals...' },
-    ]);
-    await new Promise(r => setTimeout(r, 1500));
-
-    // Dynamically tailor findings based on search query!
-    let findings = [
-      `Competitor validation logs confirm schema gaps in '${searchQuery}' endpoints.`,
-      `Embedding column validation must default to [0]*128 to handle null arrays.`,
-      `Estimated refactoring overhead: 12 lines of defensive logic in feedback_clusters.py.`
-    ];
-
-    if (searchQuery.toLowerCase().includes('latency') || searchQuery.toLowerCase().includes('speed')) {
-      findings = [
-        `Serialization latency averages 4.8s on JSON frames > 45MB.`,
-        `Root bottleneck exists in the Pandas JSON parser block.`,
-        `Switching to an iterative stream parser improves score parameters by 64%.`
-      ];
-    } else if (searchQuery.toLowerCase().includes('security') || searchQuery.toLowerCase().includes('audit')) {
-      findings = [
-        `gVisor sandbox successfully seals user code threads.`,
-        `Observe permissions are granted only on research workspace directories.`,
-        `Root access tokens are automatically rotated every 60 seconds.`
-      ];
-    }
-
-    setExtractedData(findings);
-
-    setSearchLog(prev => [
-      ...prev,
-      { id: Date.now(), type: 'supr', content: `[RESEARCH AGENT] Extracted ${findings.length} findings. Exporting markdown brief to SQLite.` },
-    ]);
-
-    if (mission) {
-      const filename = `research_${searchQuery.toLowerCase().replace(/\s+/g, '_')}.md`;
-      
-      // Save findings as a markdown artifact
-      await addArtifactAction(mission.id, {
-        filename,
-        type: 'markdown',
-        content: `# Research Findings: ${searchQuery}\n\n## OSINT Web Scrape Details\n- **Target URI**: ${fakeUrl}\n- **Timestamp**: ${new Date().toLocaleString()}\n\n## Extracted Competitor Specs\n${findings.map(f => `- **Spec Alert**: ${f}`).join('\n')}\n\n## Recommendations\n1. Ingest these signals into the Code Agent's context buffer.\n2. Apply defensive fallbacks to eliminate column assertions.`
+    try {
+      const response = await fetch('/api/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: searchQuery, missionId: mission?.id }),
       });
 
-      // Save to Memory Items
-      for (const finding of findings) {
-        await addMemoryItemAction(mission.id, {
-          key: 'research_finding',
-          value: finding,
-          importance: 'High'
-        });
+      if (!response.body) throw new Error('No response stream.');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+
+            if (msg.type === 'status') {
+              // Update the browser chrome and crawl log based on phase
+              if (msg.phase === 'searching') {
+                setBrowseState('searching');
+                const slug = searchQuery.toLowerCase().replace(/\s+/g, '-');
+                setCurrentUrl(`https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`);
+              } else if (msg.phase === 'browsing') {
+                setBrowseState('browsing');
+              } else if (msg.phase === 'extracting' || msg.phase === 'generating') {
+                setBrowseState('extracting');
+              }
+              setSearchLog(prev => [...prev, { id: Date.now(), type: 'navigate', content: msg.content }]);
+            }
+
+            if (msg.type === 'result') {
+              setExtractedData(msg.findings || []);
+              if (msg.url) setCurrentUrl(msg.url);
+              setBrowseState('done');
+              setSearchLog(prev => [
+                ...prev,
+                { id: Date.now(), type: 'extract', content: `[RESEARCH AGENT] Extracted ${msg.findings?.length || 0} intelligence signals.` },
+                { id: Date.now(), type: 'supr', content: `[SUPR] Brief saved to SQLite: ${msg.filename}. Syncing to Code Workspace.` },
+              ]);
+              // Refresh mission state to pick up new artifacts
+              await fetchState();
+            }
+
+            if (msg.type === 'error') {
+              setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[ERROR] ${msg.content}` }]);
+              setBrowseState('done');
+            }
+          } catch (parseErr) {
+            // Skip malformed lines
+          }
+        }
       }
-
-      await logActivityAction(mission.id, {
-        eventType: 'agent_action',
-        actor: 'Research Agent',
-        actorIcon: 'travel_explore',
-        summary: `Completed competitor search for: ${searchQuery}`,
-        detail: `Extracted ${findings.length} specs into SQLite. Dynamic files synced.`
-      });
-      
-      // Re-fetch state immediately to reflect changes
-      await fetchState();
+    } catch (err: any) {
+      setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[ERROR] Research pipeline failed: ${err.message}` }]);
+      setBrowseState('done');
     }
 
-    setBrowseState('done');
     setIsRunning(false);
   };
+
 
   return (
     <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden bg-surface-container">
