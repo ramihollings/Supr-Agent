@@ -435,7 +435,7 @@ export default function CodePage() {
           
           <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-black text-green-400 font-mono text-xs leading-loose">
              {terminalLines.length === 0 && (
-               <div className="text-green-800">gVisor Sandbox terminal ready. Click "Run Test" to trigger validation pytests.</div>
+               <div className="text-green-800">gVisor Sandbox terminal ready. Click &quot;Run Test&quot; to trigger validation pytests.</div>
              )}
              {terminalLines.map(line => (
                <div key={line.id} className={`mb-1 ${

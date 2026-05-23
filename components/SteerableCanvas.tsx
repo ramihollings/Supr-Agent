@@ -23,6 +23,8 @@ interface Props {
   onCheckpointAdded?: (label: string, beforeNodeId: string) => void;
 }
 
+const generateUniqueId = () => `cp-${Date.now()}`;
+
 export function SteerableCanvas({ onNodeSteered, onNodeRollback, onCheckpointAdded }: Props) {
   // 10 Glidepath DAG nodes
   const [nodes, setNodes] = useState<DAGNode[]>([
@@ -70,7 +72,7 @@ export function SteerableCanvas({ onNodeSteered, onNodeRollback, onCheckpointAdd
     const targetNode = nodes.find(n => n.id === edgeTarget);
     if (!sourceNode || !targetNode) return;
 
-    const newId = `cp-${Date.now()}`;
+    const newId = generateUniqueId();
     const newCheckpointNode: DAGNode = {
       id: newId,
       name: 'Manual Gate',

@@ -1,57 +1,533 @@
 @import "tailwindcss";
 
+:root {
+  /* Default: Neo-Brutalist structural variables */
+  --border-radius-base: 0px;
+  --border-style-base: 3px solid var(--color-primary);
+  --shadow-base: 4px 4px 0px 0px var(--color-primary);
+  --shadow-lg-base: 6px 6px 0px 0px var(--color-primary);
+  --font-headline: var(--font-space-grotesk), sans-serif;
+  --font-body: var(--font-inter), sans-serif;
+  --crt-glow: 0px 0px 0px transparent;
+}
+
 @theme {
-  --color-primary: #1a1a1a;
-  --color-primary-fixed: #ffcc00;
-  --color-primary-fixed-dim: #e6b800;
-  --color-primary-container: #ffcc00;
-  --color-on-primary: #ffffff;
-  --color-on-primary-container: #1a1a1a;
+  --color-primary: var(--color-primary-val, #1a1a1a);
+  --color-primary-fixed: var(--color-primary-fixed-val, #ffcc00);
+  --color-primary-fixed-dim: var(--color-primary-fixed-dim-val, #e6b800);
+  --color-primary-container: var(--color-primary-container-val, #ffcc00);
+  --color-on-primary: var(--color-on-primary-val, #ffffff);
+  --color-on-primary-container: var(--color-on-primary-container-val, #1a1a1a);
 
-  --color-secondary: #e63b2e;
-  --color-secondary-fixed: #ffdad6;
-  --color-secondary-fixed-dim: #ffb3ab;
-  --color-secondary-container: #ffdad6;
-  --color-on-secondary: #ffffff;
-  --color-on-secondary-container: #1a1a1a;
+  --color-secondary: var(--color-secondary-val, #e63b2e);
+  --color-secondary-fixed: var(--color-secondary-fixed-val, #ffdad6);
+  --color-secondary-fixed-dim: var(--color-secondary-fixed-dim-val, #ffb3ab);
+  --color-secondary-container: var(--color-secondary-container-val, #ffdad6);
+  --color-on-secondary: var(--color-on-secondary-val, #ffffff);
+  --color-on-secondary-container: var(--color-on-secondary-container-val, #1a1a1a);
 
-  --color-tertiary: #0055ff;
-  --color-tertiary-fixed: #d6e3ff;
-  --color-tertiary-fixed-dim: #a8c6ff;
-  --color-tertiary-container: #d6e3ff;
-  --color-on-tertiary: #ffffff;
-  --color-on-tertiary-container: #1a1a1a;
+  --color-tertiary: var(--color-tertiary-val, #0055ff);
+  --color-tertiary-fixed: var(--color-tertiary-fixed-val, #d6e3ff);
+  --color-tertiary-fixed-dim: var(--color-tertiary-fixed-dim-val, #a8c6ff);
+  --color-tertiary-container: var(--color-tertiary-container-val, #d6e3ff);
+  --color-on-tertiary: var(--color-on-tertiary-val, #ffffff);
+  --color-on-tertiary-container: var(--color-on-tertiary-container-val, #1a1a1a);
 
   --color-error: #cc0000;
   --color-error-container: #ffdad6;
   --color-on-error: #ffffff;
   --color-on-error-container: #93000a;
 
-  --color-background: #f5f0e8;
-  --color-on-background: #1a1a1a;
+  --color-background: var(--color-background-val, #f5f0e8);
+  --color-on-background: var(--color-on-background-val, #1a1a1a);
 
-  --color-surface: #f5f0e8;
-  --color-on-surface: #1a1a1a;
-  --color-surface-variant: #e8e3da;
-  --color-on-surface-variant: #4a4a4a;
-  --color-surface-container: #eee9e0;
-  --color-surface-container-high: #e8e3da;
-  --color-surface-container-low: #f2ede5;
-  --color-surface-container-lowest: #ffffff;
-  --color-surface-container-highest: #e2ddd4;
-  --color-surface-dim: #d6d1c9;
-  --color-surface-bright: #faf7f2;
-  --color-surface-tint: #1a1a1a;
+  --color-surface: var(--color-surface-val, #f5f0e8);
+  --color-on-surface: var(--color-on-surface-val, #1a1a1a);
+  --color-surface-variant: var(--color-surface-variant-val, #e8e3da);
+  --color-on-surface-variant: var(--color-on-surface-variant-val, #4a4a4a);
+  --color-surface-container: var(--color-surface-container-val, #eee9e0);
+  --color-surface-container-high: var(--color-surface-container-high-val, #e8e3da);
+  --color-surface-container-low: var(--color-surface-container-low-val, #f2ede5);
+  --color-surface-container-lowest: var(--color-surface-container-lowest-val, #ffffff);
+  --color-surface-container-highest: var(--color-surface-container-highest-val, #e2ddd4);
+  --color-surface-dim: var(--color-surface-dim-val, #d6d1c9);
+  --color-surface-bright: var(--color-surface-bright-val, #faf7f2);
+  --color-surface-tint: var(--color-primary-val, #1a1a1a);
 
-  --color-outline: #1a1a1a;
-  --color-outline-variant: #d0cbc3;
-  --color-inverse-surface: #1a1a1a;
-  --color-inverse-on-surface: #f5f0e8;
-  --color-inverse-primary: #f5f0e8;
+  --color-outline: var(--color-primary-val, #1a1a1a);
+  --color-outline-variant: var(--color-outline-variant-val, #d0cbc3);
+  --color-inverse-surface: var(--color-primary-val, #1a1a1a);
+  --color-inverse-on-surface: var(--color-background-val, #f5f0e8);
+  --color-inverse-primary: var(--color-background-val, #f5f0e8);
 
+  --font-headline: var(--font-headline);
+  --font-body: var(--font-body);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   7 TRANSFORMING THEMES
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Theme 1: Classic Neo-Brutalist (Default) */
+.theme-neobrutalist {
+  --border-radius-base: 0px;
+  --border-style-base: 3px solid var(--color-primary);
+  --shadow-base: 4px 4px 0px 0px var(--color-primary);
+  --shadow-lg-base: 6px 6px 0px 0px var(--color-primary);
   --font-headline: var(--font-space-grotesk), sans-serif;
   --font-body: var(--font-inter), sans-serif;
 }
+
+/* Theme 2: OpenClaw (Developer-Hacker terminal) */
+.theme-openclaw {
+  --border-radius-base: 0px;
+  --border-style-base: 1px solid var(--color-primary);
+  --shadow-base: 0 0 8px var(--color-primary);
+  --shadow-lg-base: 0 0 15px var(--color-primary);
+  --font-headline: Courier New, Courier, monospace;
+  --font-body: Courier New, Courier, monospace;
+  --crt-glow: 0 0 2px var(--color-primary);
+  background-image: radial-gradient(circle, rgba(0, 30, 0, 0.3) 0%, #000 100%), 
+                    repeating-linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                    linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  background-size: cover, 100% 4px, 6px 100%;
+}
+.theme-openclaw * {
+  text-shadow: 0 0 2px var(--color-primary);
+}
+
+/* Theme 3: Hermes Agent (Techy dashboard) */
+.theme-hermes {
+  --border-radius-base: 6px;
+  --border-style-base: 1px solid rgba(0, 255, 255, 0.2);
+  --shadow-base: 0 4px 12px rgba(0,0,0,0.5), 0 0 8px rgba(0, 255, 255, 0.08);
+  --shadow-lg-base: 0 8px 24px rgba(0,0,0,0.6), 0 0 15px rgba(0, 255, 255, 0.15);
+  --font-headline: var(--font-space-grotesk), sans-serif;
+  --font-body: var(--font-inter), sans-serif;
+  background-image: radial-gradient(circle at 10% 20%, rgba(4, 15, 25, 0.9) 0%, rgba(9, 9, 12, 1) 90.2%);
+}
+
+/* Theme 4: Google Neural Expressive (Glassmorphism & Radial Pastels) */
+.theme-google-neural {
+  --border-radius-base: 20px;
+  --border-style-base: 1px solid rgba(255, 255, 255, 0.3);
+  --shadow-base: 0 8px 32px 0 rgba(31, 38, 135, 0.04);
+  --shadow-lg-base: 0 12px 40px 0 rgba(31, 38, 135, 0.08);
+  --font-headline: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(at 0% 0%, rgba(226, 232, 240, 0.8) 0, transparent 50%),
+              radial-gradient(at 50% 0%, rgba(254, 243, 199, 0.5) 0, transparent 50%),
+              radial-gradient(at 100% 0%, rgba(253, 224, 71, 0.4) 0, transparent 50%),
+              radial-gradient(at 0% 100%, rgba(219, 234, 254, 0.7) 0, transparent 50%),
+              radial-gradient(at 100% 100%, rgba(245, 239, 254, 0.7) 0, transparent 50%);
+  background-attachment: fixed;
+}
+.theme-google-neural .neo-border {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Theme 5: Retro CRT Terminal */
+.theme-crt {
+  --border-radius-base: 0px;
+  --border-style-base: 2px solid var(--color-primary);
+  --shadow-base: 0 0 10px var(--color-primary);
+  --shadow-lg-base: 0 0 20px var(--color-primary);
+  --font-headline: "Courier New", Courier, monospace;
+  --font-body: "Courier New", Courier, monospace;
+  animation: flicker 0.15s infinite;
+}
+@keyframes flicker {
+  0% { opacity: 0.99; }
+  50% { opacity: 1; }
+  100% { opacity: 0.99; }
+}
+
+/* Theme 6: Cyberpunk City */
+.theme-cyberpunk {
+  --border-radius-base: 4px;
+  --border-style-base: 2px solid var(--color-primary);
+  --shadow-base: 3px 3px 0px 0px var(--color-secondary), 0 0 8px var(--color-primary);
+  --shadow-lg-base: 5px 5px 0px 0px var(--color-secondary), 0 0 15px var(--color-primary);
+  --font-headline: var(--font-space-grotesk), sans-serif;
+  --font-body: var(--font-inter), sans-serif;
+  background-image: linear-gradient(135deg, #120e26 0%, #0d0a1a 100%);
+}
+
+/* Theme 7: Minimalist Clean */
+.theme-minimalist {
+  --border-radius-base: 12px;
+  --border-style-base: 1px solid var(--color-outline-variant);
+  --shadow-base: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03);
+  --shadow-lg-base: 0 10px 15px -3px rgba(0,0,0,0.05), 0 4px 6px -2px rgba(0,0,0,0.03);
+  --font-headline: system-ui, -apple-system, sans-serif;
+  --font-body: system-ui, -apple-system, sans-serif;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   15 THREE-TONE COLOR PALETTES
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Palette 1: Classic (Default) */
+.palette-classic {
+  --color-primary-val: #1a1a1a;
+  --color-primary-fixed-val: #ffcc00;
+  --color-primary-fixed-dim-val: #e6b800;
+  --color-primary-container-val: #ffcc00;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #1a1a1a;
+  --color-secondary-val: #e63b2e;
+  --color-tertiary-val: #0055ff;
+  --color-background-val: #f5f0e8;
+  --color-surface-val: #f5f0e8;
+  --color-surface-variant-val: #e8e3da;
+  --color-on-surface-variant-val: #4a4a4a;
+  --color-surface-container-val: #eee9e0;
+  --color-surface-container-high-val: #e8e3da;
+  --color-surface-container-low-val: #f2ede5;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #e2ddd4;
+  --color-surface-dim-val: #d6d1c9;
+  --color-surface-bright-val: #faf7f2;
+  --color-outline-variant-val: #d0cbc3;
+}
+
+/* Palette 2: Cyberpunk Neon */
+.palette-cyberpunk-neon {
+  --color-primary-val: #ff007f; /* Neon Pink */
+  --color-primary-fixed-val: #00ffff; /* Neon Cyan */
+  --color-primary-container-val: #00ffff;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #0f0c1b;
+  --color-secondary-val: #ffe600; /* Neon Yellow */
+  --color-tertiary-val: #8b00ff; /* Neon Purple */
+  --color-background-val: #0f0a1c;
+  --color-surface-val: #18112c;
+  --color-surface-variant-val: #2b1f47;
+  --color-on-surface-val: #ffffff;
+  --color-on-background-val: #ffffff;
+  --color-on-surface-variant-val: #a89cb5;
+  --color-surface-container-val: #20173b;
+  --color-surface-container-high-val: #2b1f47;
+  --color-surface-container-low-val: #140e24;
+  --color-surface-container-lowest-val: #0f091a;
+  --color-surface-container-highest-val: #322554;
+  --color-surface-dim-val: #0b0714;
+  --color-surface-bright-val: #2e2154;
+  --color-outline-variant-val: #402f66;
+}
+
+/* Palette 3: Nordic Frost */
+.palette-nordic-frost {
+  --color-primary-val: #1f3a52; /* Deep Blue */
+  --color-primary-fixed-val: #a8c6ff; /* Ice Blue */
+  --color-primary-container-val: #d6e3ff;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #1f3a52;
+  --color-secondary-val: #3b7c80; /* Teal Frost */
+  --color-tertiary-val: #5f7d95; /* Muted Slate */
+  --color-background-val: #f4f8fa;
+  --color-surface-val: #f4f8fa;
+  --color-surface-variant-val: #e1ebf0;
+  --color-on-surface-variant-val: #4f606e;
+  --color-surface-container-val: #e8f0f3;
+  --color-surface-container-high-val: #e1ebf0;
+  --color-surface-container-low-val: #f0f5f7;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #dae5eb;
+  --color-surface-dim-val: #ccdbe0;
+  --color-surface-bright-val: #fafdff;
+  --color-outline-variant-val: #ccdbe0;
+}
+
+/* Palette 4: Forest Moss */
+.palette-forest-moss {
+  --color-primary-val: #2d4a22; /* Forest Green */
+  --color-primary-fixed-val: #a2b997; /* Light Olive */
+  --color-primary-container-val: #cce0c2;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #2d4a22;
+  --color-secondary-val: #7c683c; /* Warm Ochre */
+  --color-tertiary-val: #4a6670; /* Slate Pine */
+  --color-background-val: #f4f6f0;
+  --color-surface-val: #f4f6f0;
+  --color-surface-variant-val: #e2e6db;
+  --color-on-surface-variant-val: #5b6154;
+  --color-surface-container-val: #eaeee3;
+  --color-surface-container-high-val: #e2e6db;
+  --color-surface-container-low-val: #f0f3ea;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #dadfd0;
+  --color-surface-dim-val: #cdd3c0;
+  --color-surface-bright-val: #fafbfa;
+  --color-outline-variant-val: #cdd3c0;
+}
+
+/* Palette 5: Vintage Orange */
+.palette-vintage-orange {
+  --color-primary-val: #111111;
+  --color-primary-fixed-val: #d35400; /* Rust Orange */
+  --color-primary-container-val: #e67e22;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #ffffff;
+  --color-secondary-val: #2980b9; /* Classic Blue */
+  --color-tertiary-val: #27ae60; /* Forest Green */
+  --color-background-val: #fcf8f2;
+  --color-surface-val: #fcf8f2;
+  --color-surface-variant-val: #f0e6d6;
+  --color-on-surface-variant-val: #6e5e49;
+  --color-surface-container-val: #f5edd9;
+  --color-surface-container-high-val: #f0e6d6;
+  --color-surface-container-low-val: #FAF5EB;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #eaddc4;
+  --color-surface-dim-val: #e2d2b5;
+  --color-surface-bright-val: #fffdfa;
+  --color-outline-variant-val: #e2d2b5;
+}
+
+/* Palette 6: Matrix Digital */
+.palette-matrix-digital {
+  --color-primary-val: #00ff00; /* Neon Matrix Green */
+  --color-primary-fixed-val: #008800;
+  --color-primary-container-val: #004400;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #00ff00;
+  --color-secondary-val: #00a834;
+  --color-tertiary-val: #32cd32;
+  --color-background-val: #050a05;
+  --color-surface-val: #0b140b;
+  --color-surface-variant-val: #142814;
+  --color-on-surface-val: #00ff00;
+  --color-on-background-val: #00ff00;
+  --color-on-surface-variant-val: #39aa39;
+  --color-surface-container-val: #0f210f;
+  --color-surface-container-high-val: #142814;
+  --color-surface-container-low-val: #071007;
+  --color-surface-container-lowest-val: #030603;
+  --color-surface-container-highest-val: #1b351b;
+  --color-surface-dim-val: #040904;
+  --color-surface-bright-val: #1b351b;
+  --color-outline-variant-val: #142814;
+}
+
+/* Palette 7: Sunset Glow */
+.palette-sunset-glow {
+  --color-primary-val: #ff4757; /* Deep Coral */
+  --color-primary-fixed-val: #ffa502; /* Sun Yellow */
+  --color-primary-container-val: #ff7f50;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #ffffff;
+  --color-secondary-val: #6c5ce7; /* Sunset Purple */
+  --color-tertiary-val: #10ac84; /* Soft Teal */
+  --color-background-val: #1e1b29;
+  --color-surface-val: #272336;
+  --color-surface-variant-val: #3c3754;
+  --color-on-surface-val: #ffffff;
+  --color-on-background-val: #ffffff;
+  --color-on-surface-variant-val: #a49fc4;
+  --color-surface-container-val: #312c45;
+  --color-surface-container-high-val: #3c3754;
+  --color-surface-container-low-val: #1c1926;
+  --color-surface-container-lowest-val: #13111b;
+  --color-surface-container-highest-val: #494366;
+  --color-surface-dim-val: #110f1a;
+  --color-surface-bright-val: #413a5c;
+  --color-outline-variant-val: #494366;
+}
+
+/* Palette 8: Ocean Breeze */
+.palette-ocean-breeze {
+  --color-primary-val: #0070f3;
+  --color-primary-fixed-val: #00d2fc;
+  --color-primary-container-val: #e0f8ff;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #0051a8;
+  --color-secondary-val: #00b4d8;
+  --color-tertiary-val: #f39c12; /* Sandy Gold */
+  --color-background-val: #f0f7f9;
+  --color-surface-val: #f0f7f9;
+  --color-surface-variant-val: #dbeaf0;
+  --color-on-surface-variant-val: #41555e;
+  --color-surface-container-val: #e4eff2;
+  --color-surface-container-high-val: #dbeaf0;
+  --color-surface-container-low-val: #ecf3f5;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #d1e1e8;
+  --color-surface-dim-val: #c1d3db;
+  --color-surface-bright-val: #fafcfc;
+  --color-outline-variant-val: #c1d3db;
+}
+
+/* Palette 9: Royal Velvet */
+.palette-royal-velvet {
+  --color-primary-val: #5f27cd; /* Deep Royal Violet */
+  --color-primary-fixed-val: #f1c40f; /* Emperor Gold */
+  --color-primary-container-val: #341f97;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #ffffff;
+  --color-secondary-val: #ff4757; /* Velvet Red */
+  --color-tertiary-val: #48dbfb; /* Sky Cyan */
+  --color-background-val: #191224;
+  --color-surface-val: #221a2e;
+  --color-surface-variant-val: #362a4a;
+  --color-on-surface-val: #ffffff;
+  --color-on-background-val: #ffffff;
+  --color-on-surface-variant-val: #a698be;
+  --color-surface-container-val: #2a2039;
+  --color-surface-container-high-val: #362a4a;
+  --color-surface-container-low-val: #160f21;
+  --color-surface-container-lowest-val: #0f0a17;
+  --color-surface-container-highest-val: #43345c;
+  --color-surface-dim-val: #0d0814;
+  --color-surface-bright-val: #3b2e52;
+  --color-outline-variant-val: #43345c;
+}
+
+/* Palette 10: Sakura Pastel */
+.palette-sakura-pastel {
+  --color-primary-val: #ff7b90; /* Cherry Blossom Pink */
+  --color-primary-fixed-val: #ffd5e5;
+  --color-primary-container-val: #ffe5ed;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #b8002b;
+  --color-secondary-val: #a8dadc; /* Pastel Sage Blue */
+  --color-tertiary-val: #ffc6ff; /* Pale Violet */
+  --color-background-val: #fff9fa;
+  --color-surface-val: #fff9fa;
+  --color-surface-variant-val: #fbe3e6;
+  --color-on-surface-variant-val: #8a6c71;
+  --color-surface-container-val: #faebee;
+  --color-surface-container-high-val: #fbe3e6;
+  --color-surface-container-low-val: #fef4f6;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #f5d6da;
+  --color-surface-dim-val: #eebdc4;
+  --color-surface-bright-val: #fffefe;
+  --color-outline-variant-val: #eebdc4;
+}
+
+/* Palette 11: Minimal Monochrome */
+.palette-minimal-monochrome {
+  --color-primary-val: #000000;
+  --color-primary-fixed-val: #ffffff;
+  --color-primary-container-val: #333333;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #ffffff;
+  --color-secondary-val: #555555;
+  --color-tertiary-val: #888888;
+  --color-background-val: #ffffff;
+  --color-surface-val: #ffffff;
+  --color-surface-variant-val: #f0f0f0;
+  --color-on-surface-variant-val: #555555;
+  --color-surface-container-val: #f5f5f5;
+  --color-surface-container-high-val: #eeeeee;
+  --color-surface-container-low-val: #fafafa;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #e0e0e0;
+  --color-surface-dim-val: #d0d0d0;
+  --color-surface-bright-val: #ffffff;
+  --color-outline-variant-val: #d0d0d0;
+}
+
+/* Palette 12: Desert Cactus */
+.palette-desert-cactus {
+  --color-primary-val: #4a5c53; /* Deep Sage */
+  --color-primary-fixed-val: #e07a5f; /* Terracotta */
+  --color-primary-container-val: #f2cc8f; /* Cactus Yellow */
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #4a5c53;
+  --color-secondary-val: #e07a5f;
+  --color-tertiary-val: #81b29a;
+  --color-background-val: #faf6f0;
+  --color-surface-val: #faf6f0;
+  --color-surface-variant-val: #ece4d7;
+  --color-on-surface-variant-val: #615a4e;
+  --color-surface-container-val: #f3ebde;
+  --color-surface-container-high-val: #ece4d7;
+  --color-surface-container-low-val: #f7f2e9;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #e2d7c5;
+  --color-surface-dim-val: #cfc2ac;
+  --color-surface-bright-val: #fffefe;
+  --color-outline-variant-val: #cfc2ac;
+}
+
+/* Palette 13: Corporate Tech */
+.palette-corporate-tech {
+  --color-primary-val: #1e3a8a; /* Indigo */
+  --color-primary-fixed-val: #3b82f6; /* Modern Blue */
+  --color-primary-container-val: #eff6ff;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #1e3a8a;
+  --color-secondary-val: #0f766e; /* Deep Teal */
+  --color-tertiary-val: #f59e0b; /* Amber Alert */
+  --color-background-val: #f8fafc;
+  --color-surface-val: #f8fafc;
+  --color-surface-variant-val: #e2e8f0;
+  --color-on-surface-variant-val: #475569;
+  --color-surface-container-val: #f1f5f9;
+  --color-surface-container-high-val: #e2e8f0;
+  --color-surface-container-low-val: #f8fafc;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #cbd5e1;
+  --color-surface-dim-val: #b2c1d3;
+  --color-surface-bright-val: #ffffff;
+  --color-outline-variant-val: #cbd5e1;
+}
+
+/* Palette 14: Toxic Spill */
+.palette-toxic-spill {
+  --color-primary-val: #39ff14; /* Radioactive Green */
+  --color-primary-fixed-val: #ff007f; /* Acid Magenta */
+  --color-primary-container-val: #1f0c35;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #39ff14;
+  --color-secondary-val: #ff5e00; /* Hazard Orange */
+  --color-tertiary-val: #e700ff; /* Acid Purple */
+  --color-background-val: #090610;
+  --color-surface-val: #100b1d;
+  --color-surface-variant-val: #22163b;
+  --color-on-surface-val: #39ff14;
+  --color-on-background-val: #39ff14;
+  --color-on-surface-variant-val: #6efb56;
+  --color-surface-container-val: #19102c;
+  --color-surface-container-high-val: #22163b;
+  --color-surface-container-low-val: #0b0714;
+  --color-surface-container-lowest-val: #06040a;
+  --color-surface-container-highest-val: #2b1c4b;
+  --color-surface-dim-val: #06040a;
+  --color-surface-bright-val: #2e1e50;
+  --color-outline-variant-val: #22163b;
+}
+
+/* Palette 15: Warm Autumn */
+.palette-warm-autumn {
+  --color-primary-val: #6e1a0b; /* Maple Red */
+  --color-primary-fixed-val: #d97706; /* Gold Amber */
+  --color-primary-container-val: #fef3c7;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #6e1a0b;
+  --color-secondary-val: #451a03; /* Chestnut Espresso */
+  --color-tertiary-val: #92400e; /* Ochre Brown */
+  --color-background-val: #fbf7f0;
+  --color-surface-val: #fbf7f0;
+  --color-surface-variant-val: #efebd6;
+  --color-on-surface-variant-val: #695e4e;
+  --color-surface-container-val: #f6efe0;
+  --color-surface-container-high-val: #efebd6;
+  --color-surface-container-low-val: #fdfaf5;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #e4dcb8;
+  --color-surface-dim-val: #d6cc9c;
+  --color-surface-bright-val: #fffdfb;
+  --color-outline-variant-val: #d6cc9c;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   GLOBAL CLASS REBINDINGS BASED ON THE STRUCTURAL THEME VARIABLES
+   ───────────────────────────────────────────────────────────────────────────── */
 
 body {
   background-color: var(--color-background);
@@ -60,20 +536,63 @@ body {
 }
 
 .neo-shadow {
-    box-shadow: 4px 4px 0px 0px var(--color-primary);
-}
-.neo-shadow-lg {
-    box-shadow: 6px 6px 0px 0px var(--color-primary);
-}
-.neo-border {
-    border: 3px solid var(--color-primary);
+  box-shadow: var(--shadow-base);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 
-.custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: var(--color-background); border-left: 2px solid var(--color-primary); }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--color-primary); }
-.custom-scrollbar::-webkit-scrollbar-corner { background: var(--color-background); }
+.neo-shadow-lg {
+  box-shadow: var(--shadow-lg-base);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.neo-border {
+  border: var(--border-style-base);
+  border-radius: var(--border-radius-base);
+}
+
+/* Smooth transition overrides for theme switching */
+button, input, select, textarea, div.neo-border, nav, aside {
+  transition: background-color 0.2s ease, border-color 0.2s ease, border-radius 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+  border-radius: var(--border-radius-base);
+}
+
+.custom-scrollbar::-webkit-scrollbar { 
+  width: 8px; 
+  height: 8px; 
+}
+.custom-scrollbar::-webkit-scrollbar-track { 
+  background: var(--color-background); 
+  border-left: 1px solid var(--color-primary); 
+}
+.custom-scrollbar::-webkit-scrollbar-thumb { 
+  background: var(--color-primary); 
+  border-radius: var(--border-radius-base);
+}
+.custom-scrollbar::-webkit-scrollbar-corner { 
+  background: var(--color-background); 
+}
 
 .material-symbols-outlined {
-    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* Glassmorphism helpers for Google Neural theme */
+.backdrop-blur-sm {
+  backdrop-filter: blur(8px);
+}
+.backdrop-blur-md {
+  backdrop-filter: blur(16px);
+}
+
+/* CRT Screen Curve Overlay for OpenClaw/CRT Terminal themes */
+.theme-crt::before, .theme-openclaw::before {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  z-index: 9999;
+  background-size: 100% 2px, 3px 100%;
+  pointer-events: none;
+  opacity: 0.15;
 }

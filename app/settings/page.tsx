@@ -76,9 +76,21 @@ export default function SettingsPage() {
   const modeRef = useRef<HTMLDivElement>(null);
   const permissionsRef = useRef<HTMLDivElement>(null);
   const llmRef = useRef<HTMLDivElement>(null);
+  const appearanceRef = useRef<HTMLDivElement>(null);
+  const integrationsRef = useRef<HTMLDivElement>(null);
   const memoryRef = useRef<HTMLDivElement>(null);
   const standardsRef = useRef<HTMLDivElement>(null);
   const channelsRef = useRef<HTMLDivElement>(null);
+
+  // Theme & Appearance States
+  const [currentTheme, setCurrentTheme] = useState('neobrutalist');
+  const [currentPalette, setCurrentPalette] = useState('classic');
+
+  // Integration credentials
+  const [integrationComposio, setIntegrationComposio] = useState('');
+  const [integrationGithub, setIntegrationGithub] = useState('');
+  const [integrationSlack, setIntegrationSlack] = useState('');
+  const [integrationGmail, setIntegrationGmail] = useState('');
 
   // Load settings and memories from SQLite
   useEffect(() => {
@@ -87,6 +99,20 @@ export default function SettingsPage() {
         fetchSettingsAction(),
         fetchMemoryItemsAction()
       ]);
+
+      if (settings.appearance_theme) {
+        setCurrentTheme(settings.appearance_theme);
+        localStorage.setItem('supr_theme', settings.appearance_theme);
+      }
+      if (settings.appearance_palette) {
+        setCurrentPalette(settings.appearance_palette);
+        localStorage.setItem('supr_palette', settings.appearance_palette);
+      }
+
+      if (settings.integrations_composio) setIntegrationComposio(settings.integrations_composio);
+      if (settings.integrations_github) setIntegrationGithub(settings.integrations_github);
+      if (settings.integrations_slack) setIntegrationSlack(settings.integrations_slack);
+      if (settings.integrations_gmail) setIntegrationGmail(settings.integrations_gmail);
 
       if (settings.operating_mode) setOperatingMode(settings.operating_mode);
       if (settings.permission_boundary) setPermissionBoundary(settings.permission_boundary);
@@ -152,6 +178,24 @@ export default function SettingsPage() {
   const handleModeChange = (mode: string) => {
     setOperatingMode(mode);
     handleUpdateSetting('operating_mode', mode, `Operating mode set to ${mode} ✓`);
+  };
+
+  const handleThemeChange = (theme: string) => {
+    setCurrentTheme(theme);
+    localStorage.setItem('supr_theme', theme);
+    const htmlClasses = document.documentElement.className.split(' ');
+    const cleanedClasses = htmlClasses.filter(c => !c.startsWith('theme-'));
+    document.documentElement.className = `theme-${theme} ` + cleanedClasses.join(' ');
+    handleUpdateSetting('appearance_theme', theme, `Theme set to ${theme.toUpperCase()} ✓`);
+  };
+
+  const handlePaletteChange = (palette: string) => {
+    setCurrentPalette(palette);
+    localStorage.setItem('supr_palette', palette);
+    const htmlClasses = document.documentElement.className.split(' ');
+    const cleanedClasses = htmlClasses.filter(c => !c.startsWith('palette-'));
+    document.documentElement.className = `palette-${palette} ` + cleanedClasses.join(' ');
+    handleUpdateSetting('appearance_palette', palette, `Color Palette set to ${palette.toUpperCase()} ✓`);
   };
 
   const handleToggleChannel = (channel: string, current: boolean, label: string) => {
@@ -336,6 +380,8 @@ export default function SettingsPage() {
               { name: 'Operating Mode', ref: modeRef },
               { name: 'Permissions', ref: permissionsRef },
               { name: 'LLM Configuration', ref: llmRef },
+              { name: 'Theme & Appearance', ref: appearanceRef },
+              { name: 'Integrations', ref: integrationsRef },
               { name: 'Memory', ref: memoryRef },
               { name: 'Standards', ref: standardsRef },
               { name: 'Channels & Socials', ref: channelsRef },
@@ -828,6 +874,196 @@ export default function SettingsPage() {
                 </div>
 
               </div>
+            </div>
+          </div>
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
+          {/* Theme & Appearance Section */}
+          <div ref={appearanceRef} className="flex flex-col gap-6">
+            <div className="border-b-4 border-primary pb-4 mb-4">
+              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Theme & Appearance</h2>
+              <p className="font-body text-on-surface-variant mt-2">Morph the entire design system and layout structure with instant preview.</p>
+            </div>
+
+            {/* Layout Themes */}
+            <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
+              <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
+                <span className="material-symbols-outlined text-primary">layers</span> Structural Layout Styles (7 Themes)
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {[
+                  { id: 'neobrutalist', name: 'Neo-Brutalist', desc: 'Thick black borders, solid fills, and offset drop shadows. (Default)', icon: 'grid_view' },
+                  { id: 'openclaw', name: 'OpenClaw Terminal', desc: 'Retro developer monospace hacker layout with scanlines and green font glows.', icon: 'terminal' },
+                  { id: 'hermes', name: 'Hermes Cybernetic', desc: 'Clean dark cyber dashboard with compact borders and subtle cyan tech halos.', icon: 'developer_board' },
+                  { id: 'google-neural', name: 'Google Neural', desc: 'Pastel glassmorphic card layers, deep backdrop blurs, and soft radial color clouds.', icon: 'lens_blur' },
+                  { id: 'crt', name: 'Phosphor CRT', desc: 'Monochrome glowing green grid layout with curved cathode screen flicker.', icon: 'monitor' },
+                  { id: 'cyberpunk', name: 'Neon Cyberpunk', desc: 'Deep purple canvas with hot pink highlights and heavy glowing neon bevels.', icon: 'palette' },
+                  { id: 'minimalist', name: 'Minimalist Clean', desc: 'Sleek professional white space design with extremely soft card borders.', icon: 'space_dashboard' },
+                ].map(theme => (
+                  <div 
+                    key={theme.id}
+                    onClick={() => handleThemeChange(theme.id)}
+                    className={`p-4 border-2 border-primary bg-background cursor-pointer hover:bg-surface-container transition-all flex flex-col justify-between min-h-[140px] shadow-[2px_2px_0px_0px_var(--color-primary)] ${
+                      currentTheme === theme.id ? 'ring-2 ring-primary bg-primary-container text-on-primary-container' : ''
+                    }`}
+                  >
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-headline font-bold text-xs uppercase flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-sm">{theme.icon}</span> {theme.name}
+                        </span>
+                        {currentTheme === theme.id && <span className="material-symbols-outlined text-sm text-green-600">check_circle</span>}
+                      </div>
+                      <p className="text-[10px] leading-relaxed text-on-surface-variant">{theme.desc}</p>
+                    </div>
+                    <span className="text-[8px] font-bold uppercase tracking-wider mt-4">Select Style</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 3-Tone Color Palettes */}
+            <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
+              <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
+                <span className="material-symbols-outlined text-primary">color_lens</span> Curated 3-Tone Palettes (15 Choices)
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+                {[
+                  { id: 'classic', name: 'Classic Supr', c1: '#ffcc00', c2: '#e63b2e', c3: '#0055ff' },
+                  { id: 'cyberpunk-neon', name: 'Cyber Neon', c1: '#ff007f', c2: '#00ffff', c3: '#ffe600' },
+                  { id: 'nordic-frost', name: 'Nordic Frost', c1: '#1f3a52', c2: '#3b7c80', c3: '#5f7d95' },
+                  { id: 'forest-moss', name: 'Forest Moss', c1: '#2d4a22', c2: '#7c683c', c3: '#4a6670' },
+                  { id: 'vintage-orange', name: 'Rust Vintage', c1: '#111111', c2: '#d35400', c3: '#2980b9' },
+                  { id: 'matrix-digital', name: 'Digital Matrix', c1: '#00ff00', c2: '#008800', c3: '#32cd32' },
+                  { id: 'sunset-glow', name: 'Sunset Glow', c1: '#ff4757', c2: '#6c5ce7', c3: '#10ac84' },
+                  { id: 'ocean-breeze', name: 'Ocean Breeze', c1: '#0070f3', c2: '#00d2fc', c3: '#f39c12' },
+                  { id: 'royal-velvet', name: 'Royal Velvet', c1: '#5f27cd', c2: '#f1c40f', c3: '#ff4757' },
+                  { id: 'sakura-pastel', name: 'Sakura Pastel', c1: '#ff7b90', c2: '#a8dadc', c3: '#ffc6ff' },
+                  { id: 'minimal-monochrome', name: 'Monochrome', c1: '#000000', c2: '#555555', c3: '#cccccc' },
+                  { id: 'desert-cactus', name: 'Desert Cactus', c1: '#4a5c53', c2: '#e07a5f', c3: '#81b29a' },
+                  { id: 'corporate-tech', name: 'Corporate Tech', c1: '#1e3a8a', c2: '#0f766e', c3: '#f59e0b' },
+                  { id: 'toxic-spill', name: 'Toxic Spill', c1: '#39ff14', c2: '#ff007f', c3: '#ff5e00' },
+                  { id: 'warm-autumn', name: 'Warm Autumn', c1: '#6e1a0b', c2: '#d97706', c3: '#92400e' },
+                ].map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => handlePaletteChange(p.id)}
+                    className={`p-2.5 border-2 border-primary bg-background flex flex-col gap-2 hover:bg-surface-container transition-all text-left shadow-[2px_2px_0px_0px_var(--color-primary)] ${
+                      currentPalette === p.id ? 'ring-2 ring-primary bg-primary-container text-on-primary-container' : ''
+                    }`}
+                  >
+                    <span className="font-headline font-bold text-[9px] uppercase truncate block">{p.name}</span>
+                    <div className="flex gap-1">
+                      <span className="w-4 h-4 border border-primary block" style={{ backgroundColor: p.c1 }} title="Primary"></span>
+                      <span className="w-4 h-4 border border-primary block" style={{ backgroundColor: p.c2 }} title="Secondary"></span>
+                      <span className="w-4 h-4 border border-primary block" style={{ backgroundColor: p.c3 }} title="Tertiary"></span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
+          {/* Integrations Section */}
+          <div ref={integrationsRef} className="flex flex-col gap-6">
+            <div className="border-b-4 border-primary pb-4 mb-4">
+              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">API & Integrations Credentials</h2>
+              <p className="font-body text-on-surface-variant mt-2">Provide keys to run real commands on GitHub, Slack, and Gmail, or fall back to high-fidelity logs simulation.</p>
+            </div>
+
+            <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-6">
+              
+              {/* Composio */}
+              <div>
+                <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Composio API Connection Key</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password" 
+                    value={integrationComposio}
+                    onChange={(e) => {
+                      setIntegrationComposio(e.target.value);
+                      handleUpdateSetting('integrations_composio', e.target.value);
+                    }}
+                    className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                    placeholder="••••••••••••••••••••"
+                  />
+                  <button 
+                    onClick={() => handleUpdateSetting('integrations_composio', integrationComposio, 'Composio key updated ✓')}
+                    className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
+                  >Save</button>
+                </div>
+                <span className="text-[9px] text-on-surface-variant block mt-1">Connects dynamic workspaces, tool schemas, and agent executions via Composio.</span>
+              </div>
+
+              {/* GitHub */}
+              <div>
+                <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">GitHub Personal Access Token (PAT)</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password" 
+                    value={integrationGithub}
+                    onChange={(e) => {
+                      setIntegrationGithub(e.target.value);
+                      handleUpdateSetting('integrations_github', e.target.value);
+                    }}
+                    className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                    placeholder="ghp_••••••••••••••••••••"
+                  />
+                  <button 
+                    onClick={() => handleUpdateSetting('integrations_github', integrationGithub, 'GitHub token updated ✓')}
+                    className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
+                  >Save</button>
+                </div>
+                <span className="text-[9px] text-on-surface-variant block mt-1">Clearance token enabling Supr to pull repos, create issues, and manage task branches.</span>
+              </div>
+
+              {/* Slack */}
+              <div>
+                <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Slack Webhook URL</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password" 
+                    value={integrationSlack}
+                    onChange={(e) => {
+                      setIntegrationSlack(e.target.value);
+                      handleUpdateSetting('integrations_slack', e.target.value);
+                    }}
+                    className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                    placeholder="https://hooks.slack.com/services/••••••••"
+                  />
+                  <button 
+                    onClick={() => handleUpdateSetting('integrations_slack', integrationSlack, 'Slack webhook updated ✓')}
+                    className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
+                  >Save</button>
+                </div>
+                <span className="text-[9px] text-on-surface-variant block mt-1">Webhooks enabling direct pings to your channels for approval alerts and deployment traces.</span>
+              </div>
+
+              {/* Gmail */}
+              <div>
+                <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Gmail App Password / Access Code</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password" 
+                    value={integrationGmail}
+                    onChange={(e) => {
+                      setIntegrationGmail(e.target.value);
+                      handleUpdateSetting('integrations_gmail', e.target.value);
+                    }}
+                    className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                    placeholder="•••• •••• •••• ••••"
+                  />
+                  <button 
+                    onClick={() => handleUpdateSetting('integrations_gmail', integrationGmail, 'Gmail credential updated ✓')}
+                    className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
+                  >Save</button>
+                </div>
+                <span className="text-[9px] text-on-surface-variant block mt-1">Required App Password enabling direct SMTP/IMAP scans for pulling messages and automated notifications.</span>
+              </div>
+
             </div>
           </div>
 

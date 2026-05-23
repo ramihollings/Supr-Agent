@@ -1,7 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, startTransition } from 'react';
 import { getActiveMissionAction } from '@/app/actions';
 import { Mission } from '@/types';
 
@@ -13,7 +13,9 @@ export default function MissionPacketPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id') || 'm1';
-    setProjectId(id);
+    startTransition(() => {
+      setProjectId(id);
+    });
   }, []);
 
   useEffect(() => {

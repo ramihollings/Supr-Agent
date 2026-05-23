@@ -1,12 +1,12 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, startTransition, Suspense } from 'react';
 import { Mission, MemoryItem } from '@/types';
 import { getActiveMissionAction, fetchMissionsAction } from '@/app/actions';
 import { useSearchParams, useRouter } from 'next/navigation';
 
-export default function ReasoningPage() {
+function ReasoningPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -36,7 +36,9 @@ export default function ReasoningPage() {
   // Load selected project state
   const loadSelectedProject = async (id: string) => {
     if (!id) return;
-    setIsRefreshing(true);
+    startTransition(() => {
+      setIsRefreshing(true);
+    });
     const data = await getActiveMissionAction(id);
     setMission(data || null);
     setTimeout(() => setIsRefreshing(false), 500);
@@ -44,7 +46,25 @@ export default function ReasoningPage() {
 
   useEffect(() => {
     if (selectedProjectId) {
-      loadSelectedProject(selectedProjectId);
+      let active = true;
+      Promise.resolve().then(() => {
+        if (active) {
+          setIsRefreshing(true);
+        }
+      });
+      getActiveMissionAction(selectedProjectId).then(data => {
+        if (active) {
+          setMission(data || null);
+          setTimeout(() => {
+            if (active) {
+              setIsRefreshing(false);
+            }
+          }, 500);
+        }
+      });
+      return () => {
+        active = false;
+      };
     }
   }, [selectedProjectId]);
 
@@ -190,7 +210,7 @@ export default function ReasoningPage() {
                       event.eventType === 'governance' ? 'border-primary' :
                       'border-secondary'
                     }`}>
-                      <p className="font-body text-sm italic text-on-surface-variant">"{event.detail}"</p>
+                      <p className="font-body text-sm italic text-on-surface-variant">&ldquo;{event.detail}&rdquo;</p>
                     </div>
                   </article>
                 ))
@@ -206,5 +226,20 @@ export default function ReasoningPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function ReasoningPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
+        <TopNav title="Reasoning & Memory Core" />
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 max-w-7xl mx-auto w-full flex items-center justify-center">
+          <p className="font-headline font-bold text-sm uppercase text-primary animate-pulse">Syncing Memory Core...</p>
+        </main>
+      </div>
+    }>
+      <ReasoningPageContent />
+    </Suspense>
   );
 }

@@ -3,7 +3,16 @@ import path from 'path';
 import fs from 'fs';
 
 // Initialize the local SQLite database
-const dbPath = path.resolve(process.cwd(), 'supr_local.db');
+const dbPath = process.env.SQLITE_DB_PATH 
+  ? path.resolve(process.env.SQLITE_DB_PATH) 
+  : path.resolve(process.cwd(), 'supr_local.db');
+
+// Ensure database directory exists
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const db = new Database(dbPath, { verbose: console.log });
 
 export function initDatabase() {
@@ -203,20 +212,52 @@ export function initDatabase() {
     )
   `);
 
-  // Seed default settings if empty
-  const settingsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Settings`).get() as { cnt: number };
-  if (settingsCount.cnt === 0) {
-    const insertSetting = db.prepare(`
-      INSERT INTO Settings (key, value)
-      VALUES (?, ?)
-    `);
-    insertSetting.run('operating_mode', 'guided');
-    insertSetting.run('permission_boundary', 'governed');
-    insertSetting.run('governance_standards', JSON.stringify(['SOX', 'SOC2']));
-    insertSetting.run('channels_email', 'true');
-    insertSetting.run('channels_slack', 'true');
-    insertSetting.run('channels_telegram', 'false');
-    insertSetting.run('channels_social', 'false');
+  // 13. Supr_Chat_Messages Table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS Supr_Chat_Messages (
+      id TEXT PRIMARY KEY,
+      sender TEXT NOT NULL,
+      content TEXT NOT NULL,
+      file_name TEXT,
+      file_type TEXT,
+      file_content TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Seed default settings
+  const insertSetting = db.prepare(`
+    INSERT OR IGNORE INTO Settings (key, value)
+    VALUES (?, ?)
+  `);
+  
+  insertSetting.run('operating_mode', 'guided');
+  insertSetting.run('permission_boundary', 'governed');
+  insertSetting.run('governance_standards', JSON.stringify(['SOX', 'SOC2']));
+  insertSetting.run('channels_email', 'true');
+  insertSetting.run('channels_slack', 'true');
+  insertSetting.run('channels_telegram', 'false');
+  insertSetting.run('channels_social', 'false');
+  
+  // Seeding new appearance and integration settings
+  insertSetting.run('appearance_theme', 'neobrutalist');
+  insertSetting.run('appearance_palette', 'classic');
+  insertSetting.run('integrations_composio', '');
+  insertSetting.run('integrations_github', '');
+  insertSetting.run('integrations_slack', '');
+  insertSetting.run('integrations_gmail', '');
+
+  // Seed initial coordinator message in Supr-Chat if empty
+  const chatMessagesCount = db.prepare(`SELECT COUNT(*) as cnt FROM Supr_Chat_Messages`).get() as { cnt: number };
+  if (chatMessagesCount.cnt === 0) {
+    db.prepare(`
+      INSERT INTO Supr_Chat_Messages (id, sender, content)
+      VALUES (?, ?, ?)
+    `).run(
+      'init-chat-msg',
+      'supr',
+      'Hello! I am Supr, your central coordinator. This is Supr-Chat, a rapid-fire space where you can ask me to perform quick tasks directly. You can upload documents, query data, run fast web intelligence lookups, or ask me to draft emails and scripts. How can I assist you today?'
+    );
   }
 
   // Seed default Skills if table is empty
@@ -246,6 +287,13 @@ export function initDatabase() {
       'Diagnoses code compiler failures and performs single-line replacements within docker nodes.',
       'Anthropic',
       JSON.stringify(['compile_sandbox', 'fix_syntax_lint'])
+    );
+    insertSkill.run(
+      'sk-4',
+      'Chrome DevTools Browser Automation',
+      'High-fidelity, ultra-fast headless browser control, screenshot capturing, JS execution, emulation, and Lighthouse diagnostics.',
+      'MCP',
+      JSON.stringify(['navigate', 'screenshot', 'execute_javascript', 'lighthouse_audit'])
     );
   }
 

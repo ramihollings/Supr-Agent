@@ -34,7 +34,14 @@ export default function SkillsPage() {
   };
 
   useEffect(() => {
-    loadSkills();
+    let active = true;
+    fetchSkillsState().then(data => {
+      if (active) {
+        if (data) setSkills(data);
+        setIsLoading(false);
+      }
+    });
+    return () => { active = false; };
   }, []);
 
   const showToast = (msg: string) => {

@@ -20,7 +20,11 @@ export default function AgentsPage() {
   };
 
   useEffect(() => {
-    loadAgents();
+    let active = true;
+    fetchAgentsState().then(data => {
+      if (active && data) setAgents(data);
+    });
+    return () => { active = false; };
   }, []);
 
   const showToast = (msg: string) => {

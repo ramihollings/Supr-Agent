@@ -90,7 +90,7 @@ export default function HelpPage() {
                 <div className="w-10 h-10 neo-border bg-primary text-on-primary flex items-center justify-center font-black shrink-0">1</div>
                 <div>
                   <h3 className="font-headline font-bold uppercase text-sm mb-1">Create a Project</h3>
-                  <p className="font-body text-sm text-on-surface-variant">Click <strong>"New Project"</strong> from the Dashboard or sidebar. Define your project name, objective, and workflow type. Supr will generate an execution Glidepath automatically.</p>
+                  <p className="font-body text-sm text-on-surface-variant">Click <strong>&quot;New Project&quot;</strong> from the Dashboard or sidebar. Define your project name, objective, and workflow type. Supr will generate an execution Glidepath automatically.</p>
                 </div>
               </div>
               <div className="flex gap-6 items-start">

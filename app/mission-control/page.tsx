@@ -2,10 +2,11 @@
 
 import { TopNav } from '@/components/TopNav';
 import Link from 'next/link';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, startTransition } from 'react';
 import { InlineApproval } from '@/components/InlineApproval';
 import { SteerableCanvas } from '@/components/SteerableCanvas';
 import { AgentCard, AgentInfo } from '@/components/AgentCard';
+import { AgentVisionLab } from '@/components/AgentVisionLab';
 import { fetchAgentsState, fetchMissionsAction, logActivityAction, updateTaskStatusAction } from '@/app/actions';
 import { Message, Mission } from '@/types';
 
@@ -18,6 +19,26 @@ export default function MissionControlPage() {
   const [readinessScore, setReadinessScore] = useState(72); // Default mock for active steerable
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'glidepath' | 'browser'>('glidepath');
+
+  const handleAgentVisionLog = async (
+    eventType: 'approval' | 'failure' | 'task_complete' | 'agent_action' | 'supr_decision' | 'permission' | 'delegation' | 'handoff' | 'review' | 'escalation' | 'governance',
+    summary: string,
+    detail: string
+  ) => {
+    if (!projectId) return;
+    try {
+      await logActivityAction(projectId, {
+        eventType,
+        actor: 'Signal Agent',
+        actorIcon: 'smart_toy',
+        summary,
+        detail
+      });
+    } catch (err) {
+      console.error("Failed to write live devtools log to SQLite:", err);
+    }
+  };
   const [allProjects, setAllProjects] = useState<Mission[]>([]);
 
   // Telemetry Metrics
@@ -56,7 +77,9 @@ export default function MissionControlPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id') || 'm1';
-    setProjectId(id);
+    startTransition(() => {
+      setProjectId(id);
+    });
   }, []);
 
   // Fetch agents state and project list
@@ -396,82 +419,119 @@ export default function MissionControlPage() {
 
         {/* COLUMN 2: CENTER ACTIVE GLIDEPATH CANVAS & SANDBOX ARTIFCAT STUDIO */}
         <main className="flex-1 flex flex-col overflow-y-auto custom-scrollbar bg-surface-container border-r-4 border-primary">
+          {/* Tab Navigation Switches */}
+          <div className="flex bg-surface-container-high border-b-4 border-primary shrink-0">
+            <button
+              onClick={() => setActiveTab('glidepath')}
+              className={`flex-1 py-3 px-4 font-headline font-black uppercase text-xs border-r-4 border-primary transition-colors flex items-center justify-center gap-2 ${
+                activeTab === 'glidepath'
+                  ? 'bg-primary text-on-primary'
+                  : 'bg-background text-primary hover:bg-surface-container'
+              }`}
+            >
+              <span className="material-symbols-outlined text-sm">hub</span>
+              Active Glidepath Canvas
+            </button>
+            <button
+              onClick={() => setActiveTab('browser')}
+              className={`flex-1 py-3 px-4 font-headline font-black uppercase text-xs transition-colors flex items-center justify-center gap-2 ${
+                activeTab === 'browser'
+                  ? 'bg-primary text-on-primary'
+                  : 'bg-background text-primary hover:bg-surface-container'
+              }`}
+            >
+              <span className="material-symbols-outlined text-sm">travel_explore</span>
+              Agent Vision & Browser Automation Lab
+            </button>
+          </div>
+
           <div className="p-4 flex flex-col gap-6 flex-1">
-            {/* The Steerable DAG Canvas */}
-            <SteerableCanvas
-              onNodeSteered={handleNodeSteered}
-              onNodeRollback={handleNodeRollback}
-              onCheckpointAdded={handleCheckpointAdded}
-            />
+            {activeTab === 'glidepath' ? (
+              <>
+                {/* The Steerable DAG Canvas */}
+                <SteerableCanvas
+                  onNodeSteered={handleNodeSteered}
+                  onNodeRollback={handleNodeRollback}
+                  onCheckpointAdded={handleCheckpointAdded}
+                />
 
-            {/* Split-screen panel: Sandbox & Artifact Studio */}
-            <section className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-[320px] shrink-0">
-              {/* Artifact Studio */}
-              <div className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-4 flex flex-col relative overflow-hidden">
-                <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
-                  <h4 className="font-headline text-lg font-black uppercase tracking-tight text-secondary flex items-center gap-1.5">
-                    <span className="material-symbols-outlined">design_services</span> Artifact Studio
-                  </h4>
-                  <span className="bg-secondary-container text-on-secondary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Live Preview</span>
-                </div>
-                <div className="flex-1 bg-surface-container-low neo-border p-4 overflow-y-auto custom-scrollbar">
-                  <article className="font-body text-xs space-y-4">
-                    <div className="border-l-4 border-secondary pl-3 py-1">
-                      <h4 className="font-headline font-bold text-sm uppercase text-primary">COMPETITOR SIGNAL TELEMETRY BRIEF</h4>
-                      <p className="text-[10px] text-on-surface-variant font-semibold">Generated by Signal Agent • Approved via Governance Engine</p>
+                {/* Split-screen panel: Sandbox & Artifact Studio */}
+                <section className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-[320px] shrink-0">
+                  {/* Artifact Studio */}
+                  <div className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-4 flex flex-col relative overflow-hidden">
+                    <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
+                      <h4 className="font-headline text-lg font-black uppercase tracking-tight text-secondary flex items-center gap-1.5">
+                        <span className="material-symbols-outlined">design_services</span> Artifact Studio
+                      </h4>
+                      <span className="bg-secondary-container text-on-secondary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Live Preview</span>
                     </div>
+                    <div className="flex-1 bg-surface-container-low neo-border p-4 overflow-y-auto custom-scrollbar">
+                      <article className="font-body text-xs space-y-4">
+                        <div className="border-l-4 border-secondary pl-3 py-1">
+                          <h4 className="font-headline font-bold text-sm uppercase text-primary">COMPETITOR SIGNAL TELEMETRY BRIEF</h4>
+                          <p className="text-[10px] text-on-surface-variant font-semibold">Generated by Signal Agent • Approved via Governance Engine</p>
+                        </div>
 
-                    <p className="leading-relaxed">This deliverable captures competitor releases extracted through the CloakBrowser crawler workspace. Focus points include API bottlenecks and schema redundancies.</p>
+                        <p className="leading-relaxed">This deliverable captures competitor releases extracted through the CloakBrowser crawler workspace. Focus points include API bottlenecks and schema redundancies.</p>
 
-                    <table className="w-full text-left border-collapse text-[10px] font-mono">
-                      <thead>
-                        <tr className="border-b-2 border-primary bg-surface">
-                          <th className="p-1.5 font-bold uppercase">System Metric</th>
-                          <th className="p-1.5 font-bold uppercase">Stitch Score</th>
-                          <th className="p-1.5 font-bold uppercase">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr className="border-b border-outline/10">
-                          <td className="p-1.5">JSON Serialization</td>
-                          <td className="p-1.5 text-secondary font-bold">98.2%</td>
-                          <td className="p-1.5 text-primary">Stable</td>
-                        </tr>
-                        <tr className="border-b border-outline/10">
-                          <td className="p-1.5">Docker Sandboxes</td>
-                          <td className="p-1.5 text-secondary font-bold">91.4%</td>
-                          <td className="p-1.5 text-tertiary">Optimized</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </article>
-                </div>
-              </div>
+                        <table className="w-full text-left border-collapse text-[10px] font-mono">
+                          <thead>
+                            <tr className="border-b-2 border-primary bg-surface">
+                              <th className="p-1.5 font-bold uppercase">System Metric</th>
+                              <th className="p-1.5 font-bold uppercase">Stitch Score</th>
+                              <th className="p-1.5 font-bold uppercase">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="border-b border-outline/10">
+                              <td className="p-1.5">JSON Serialization</td>
+                              <td className="p-1.5 text-secondary font-bold">98.2%</td>
+                              <td className="p-1.5 text-primary">Stable</td>
+                            </tr>
+                            <tr className="border-b border-outline/10">
+                              <td className="p-1.5">Docker Sandboxes</td>
+                              <td className="p-1.5 text-secondary font-bold">91.4%</td>
+                              <td className="p-1.5 text-tertiary">Optimized</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </article>
+                    </div>
+                  </div>
 
-              {/* Sandbox Terminal Emulator */}
-              <div className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-4 flex flex-col relative overflow-hidden">
-                <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
-                  <h4 className="font-headline text-lg font-black uppercase tracking-tight text-primary flex items-center gap-1.5">
-                    <span className="material-symbols-outlined">terminal</span> Sandbox gVisor Terminal
-                  </h4>
-                  <span className="bg-primary-container text-on-primary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Isolate Sandbox</span>
-                </div>
-                <div
-                  ref={terminalRef}
-                  className="flex-1 bg-black p-4 font-mono text-[10px] text-green-400 neo-border overflow-y-auto custom-scrollbar space-y-1.5 selection:bg-green-800"
-                >
-                  {terminalLogs.map((log, idx) => (
-                    <p key={idx} className={
-                      log.startsWith('➜') ? "text-blue-400 font-bold" :
-                        log.includes('Agent:') ? "text-amber-300 font-bold" :
-                          log.includes('[Sandbox Output]') ? "text-gray-300" : "text-green-400"
-                    }>
-                      {log}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            </section>
+                  {/* Sandbox Terminal Emulator */}
+                  <div className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-4 flex flex-col relative overflow-hidden">
+                    <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
+                      <h4 className="font-headline text-lg font-black uppercase tracking-tight text-primary flex items-center gap-1.5">
+                        <span className="material-symbols-outlined">terminal</span> Sandbox gVisor Terminal
+                      </h4>
+                      <span className="bg-primary-container text-on-primary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Isolate Sandbox</span>
+                    </div>
+                    <div
+                      ref={terminalRef}
+                      className="flex-1 bg-black p-4 font-mono text-[10px] text-green-400 neo-border overflow-y-auto custom-scrollbar space-y-1.5 selection:bg-green-800"
+                    >
+                      {terminalLogs.map((log, idx) => (
+                        <p key={idx} className={
+                          log.startsWith('➜') ? "text-blue-400 font-bold" :
+                            log.includes('Agent:') ? "text-amber-300 font-bold" :
+                              log.includes('[Sandbox Output]') ? "text-gray-300" : "text-green-400"
+                        }>
+                          {log}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <AgentVisionLab
+                projectId={projectId || undefined}
+                onLogActivity={handleAgentVisionLog}
+                onTraceUpdate={(trace) => setToolTraces(prev => [...prev.slice(-6), trace])}
+                onTerminalLog={(log) => setTerminalLogs(prev => [...prev, log])}
+              />
+            )}
           </div>
         </main>
 

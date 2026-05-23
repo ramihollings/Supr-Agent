@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  supr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: supr-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - APP_PASSWORD=${APP_PASSWORD}
+      - SQLITE_DB_PATH=/app/.agents/supr_local.db
+    volumes:
+      # Persist agent profiles and the SQLite database
+      - ./data/agents:/app/.agents
+      # Persist sandboxed workspace I/O
+      - ./data/workspaces:/app/supr_workspaces
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

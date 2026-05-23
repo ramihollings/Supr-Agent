@@ -54,7 +54,14 @@ export default function CronJobsPage() {
   };
 
   useEffect(() => {
-    loadCrons();
+    let active = true;
+    fetchCronJobsState().then(data => {
+      if (active) {
+        if (data) setCrons(data);
+        setIsLoading(false);
+      }
+    });
+    return () => { active = false; };
   }, []);
 
   const showToast = (msg: string) => {

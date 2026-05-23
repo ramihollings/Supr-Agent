@@ -23,3 +23,9 @@ This document outlines the engineering skills available to Supr and its subagent
 - **Description**: Safely renders structured data, code summaries, or reports into interactive HTML previews.
 - **Usage**: Invoked by the Planner or Demo agent to populate the Artifact Studio.
 - **Implementation**: Utilizes a strict Content Security Policy iframe rendering pipeline to ensure safe preview of LLM-generated UI code.
+
+### 5. Chrome DevTools MCP Browser Automation (`/devtools:*`)
+- **Description**: High-fidelity, ultra-fast headless browser control, screenshot capturing, JS execution, emulation, and Lighthouse diagnostics.
+- **Usage**: Invoked by the Web Research or QA agents to automate interactions, run web diagnostics, capture screenshots, and perform visual validation of pages.
+- **Implementation**: Leverages the bundled Chrome DevTools MCP server (`chrome-devtools-mcp`) integrated natively with the Antigravity v2.0 engine.
+

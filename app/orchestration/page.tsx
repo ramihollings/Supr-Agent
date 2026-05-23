@@ -1,7 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, startTransition } from 'react';
 import { fetchOrchestrationFeed, fetchAgentStatuses, fetchMissionsAction } from '@/app/actions';
 import { Mission } from '@/types';
 
@@ -53,7 +53,16 @@ export default function OrchestrationPage() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [filterType, setFilterType] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(true);
+  const [now, setNow] = useState<number>(0);
   const feedRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    startTransition(() => {
+      setNow(Date.now());
+    });
+    const interval = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -98,7 +107,8 @@ export default function OrchestrationPage() {
   };
 
   const getRelativeTime = (ts: string) => {
-    const diff = Date.now() - new Date(ts).getTime();
+    const baseTime = now || new Date(ts).getTime();
+    const diff = Math.max(0, baseTime - new Date(ts).getTime());
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'just now';
     if (mins < 60) return `${mins}m ago`;
@@ -153,7 +163,8 @@ export default function OrchestrationPage() {
             ) : (
               filteredEvents.map((ev, idx) => {
                 const config = EVENT_CONFIG[ev.eventType] || EVENT_CONFIG.delegation;
-                const isNew = idx === 0 && Date.now() - new Date(ev.timestamp).getTime() < 10000;
+                const baseTime = now || new Date(ev.timestamp).getTime();
+                const isNew = idx === 0 && (baseTime - new Date(ev.timestamp).getTime() < 10000);
                 return (
                   <article
                     key={ev.id}

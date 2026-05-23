@@ -1,7 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { fetchMissionsAction, fetchMissionByIdAction, fetchMissionState } from '@/app/actions';
 import { ActivityEvent, Mission } from '@/types';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -20,7 +20,7 @@ const EVENT_STYLE: Record<string, { icon: string; badgeClass: string; borderClas
   governance:    { icon: 'gavel',        badgeClass: 'text-on-surface bg-surface-container-high border-primary', borderClass: 'neo-border', iconBgClass: 'border-primary bg-surface-container-high', label: 'Governance' },
 };
 
-export default function ActivityPage() {
+function ActivityPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   
@@ -73,6 +73,7 @@ export default function ActivityPage() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
       <TopNav title="Activity & Audit Trail" />
+
       
       <main className="flex-1 overflow-y-auto p-4 md:p-8 max-w-5xl mx-auto w-full">
         <header className="mb-8 border-b-4 border-primary pb-6 flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -155,5 +156,20 @@ export default function ActivityPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function ActivityPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
+        <TopNav title="Activity & Audit Trail" />
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 max-w-5xl mx-auto w-full flex items-center justify-center">
+          <p className="font-headline font-bold text-sm uppercase text-primary animate-pulse">Syncing Updates...</p>
+        </main>
+      </div>
+    }>
+      <ActivityPageContent />
+    </Suspense>
   );
 }

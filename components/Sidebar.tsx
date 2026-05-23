@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { MissionWizard } from './MissionWizard';
 
 const navItems = [
   { href: '/', icon: 'dashboard', label: 'Dashboard' },
+  { href: '/supr-chat', icon: 'chat', label: 'Supr-Chat' },
   { href: '/mission-control', icon: 'insights', label: 'Control Center' },
   { href: '/orchestration', icon: 'visibility', label: 'Observance Hub' },
   { href: '/activity', icon: 'history', label: 'Updates' },
@@ -20,12 +21,29 @@ const navItems = [
 const bottomItems = [
   { href: '/code', icon: 'code', label: 'Code Workspace' },
   { href: '/research', icon: 'travel_explore', label: 'Research Library' },
+  { href: '/library', icon: 'folder_open', label: 'Universal Library' },
   { href: '/mission-packet', icon: 'inventory_2', label: 'Project Report' },
   { href: '/settings', icon: 'settings', label: 'Settings' },
   { href: '/help', icon: 'help_outline', label: 'Help' },
 ];
 
-export function Sidebar() {
+function SidebarSkeleton() {
+  return (
+    <nav className="hidden md:flex flex-col fixed left-0 top-0 h-full w-64 border-r-4 border-primary z-40 bg-background shadow-[6px_6px_0px_0px_rgba(26,26,26,1)]">
+      <div className="p-6 border-b-4 border-primary">
+        <div className="font-headline text-3xl font-black text-primary uppercase tracking-tighter flex items-center gap-2">
+          <Image src="/supr_logo.svg" alt="Supr Logo" width={36} height={36} className="shrink-0" />
+          Supr
+        </div>
+      </div>
+      <div className="flex-1 flex items-center justify-center p-4">
+        <p className="font-headline text-xs font-bold uppercase text-primary animate-pulse">Initializing System...</p>
+      </div>
+    </nav>
+  );
+}
+
+function SidebarContent() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -116,3 +134,12 @@ export function Sidebar() {
     </>
   );
 }
+
+export function Sidebar() {
+  return (
+    <Suspense fallback={<SidebarSkeleton />}>
+      <SidebarContent />
+    </Suspense>
+  );
+}
+
