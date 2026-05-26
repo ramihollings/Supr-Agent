@@ -326,12 +326,12 @@ npm install
 # Run the Next.js development server
 npm run dev
 ```
-Open `http://localhost:3000` to interact with Supr.
+Open `http://localhost:3001` to interact with Supr.
 
 #### 3. Tunneling Public HTTPS (Cloudflare Tunnel)
 If you want to access Supr on a mobile device or showcase it to team members, run the pre-bundled Cloudflare binary directly:
 ```powershell
-.\cloudflared.exe tunnel --url http://localhost:3000
+.\cloudflared.exe tunnel --url http://localhost:3001
 ```
 This generates a temporary public HTTPS link (e.g., `https://example-words.trycloudflare.com`) that routes directly to your local instance.
 
@@ -349,7 +349,7 @@ SQLite performs at its peak on a VPS where it can lock the filesystem natively:
 4. Put a reverse proxy like Caddy in front of the service to manage SSL:
    ```caddy
    yourdomain.com {
-       reverse_proxy localhost:3000
+       reverse_proxy localhost:3001
    }
    ```
 

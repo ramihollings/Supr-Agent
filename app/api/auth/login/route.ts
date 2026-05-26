@@ -1,13 +1,22 @@
 import { NextResponse } from 'next/server';
+import db from '@/lib/database/init';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { password } = body;
 
-    const expectedPassword = process.env.APP_PASSWORD;
+    let expectedPassword = process.env.APP_PASSWORD;
 
-    // If APP_PASSWORD is not set, allow access automatically
+    // If APP_PASSWORD is not set in env, check database Settings
+    if (!expectedPassword) {
+      const row = db.prepare("SELECT value FROM Settings WHERE key = ?").get("app_password") as { value: string } | undefined;
+      if (row && row.value) {
+        expectedPassword = row.value;
+      }
+    }
+
+    // If no password is set anywhere, allow access automatically
     if (!expectedPassword) {
       return NextResponse.json({ success: true, message: 'No authentication required' });
     }
@@ -29,6 +38,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: false, error: 'Invalid password' }, { status: 401 });
   } catch (error) {
+    console.error("Login verification failed:", error);
     return NextResponse.json({ success: false, error: 'An unexpected error occurred' }, { status: 500 });
   }
 }

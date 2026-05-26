@@ -47,8 +47,8 @@ RUN mkdir -p /app/supr_workspaces && chown nextjs:nodejs /app/supr_workspaces
 
 USER nextjs
 
-EXPOSE 3000
-ENV PORT=3000
+EXPOSE 3001
+ENV PORT=3001
 ENV HOSTNAME="0.0.0.0"
 
 # server.js is created by next build from the standalone output

@@ -1,17 +1,35 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
+let isAppSecured: boolean | null = null;
+
+async function checkAppSecurity(requestUrl: string): Promise<boolean> {
+  if (process.env.APP_PASSWORD) {
+    return true;
+  }
+  if (isAppSecured === true) {
+    return true;
+  }
+  try {
+    const statusUrl = new URL('/api/auth/status', requestUrl);
+    const res = await fetch(statusUrl.toString());
+    if (res.ok) {
+      const data = await res.json();
+      if (data.secured) {
+        isAppSecured = true;
+        return true;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to check app security status in middleware:", e);
+  }
+  return false;
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  const expectedPassword = process.env.APP_PASSWORD;
-
-  // 1. If APP_PASSWORD is not set, allow all traffic immediately
-  if (!expectedPassword) {
-    return NextResponse.next();
-  }
-
-  // 2. Define exclusions: static files, api routes for auth, and the login page itself
+  // 1. Define exclusions: static files, api routes for auth, and the login page itself
   const isAuthRoute = pathname.startsWith('/api/auth');
   const isLoginPage = pathname === '/login';
   const isStaticFile = 
@@ -21,6 +39,16 @@ export function middleware(request: NextRequest) {
 
   if (isAuthRoute || isLoginPage || isStaticFile) {
     return NextResponse.next();
+  }
+
+  // 2. Check if the app is secured (via env or database settings)
+  const secured = await checkAppSecurity(request.url);
+
+  // If the app is not secured, redirect to the login page (which will display the setup wizard)
+  if (!secured) {
+    const setupUrl = new URL('/login', request.url);
+    setupUrl.searchParams.set('callbackUrl', request.nextUrl.pathname + request.nextUrl.search);
+    return NextResponse.redirect(setupUrl);
   }
 
   // 3. Check for the session cookie

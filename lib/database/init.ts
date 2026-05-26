@@ -21,6 +21,10 @@ export function initDatabase() {
   // Enable WAL mode for better performance
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('temp_store = MEMORY');
+  db.pragma('cache_size = -2000');
 
   // 1. Missions Table
   db.exec(`
