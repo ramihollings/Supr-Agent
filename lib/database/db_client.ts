@@ -1,0 +1,94 @@
+import { Pool } from 'pg';
+import sqliteDb from './init';
+
+const isPostgres = !!(process.env.DATABASE_URL || process.env.PGHOST);
+
+let pgPool: Pool | null = null;
+if (isPostgres) {
+  const connectionString = process.env.DATABASE_URL;
+  if (connectionString) {
+    pgPool = new Pool({ connectionString });
+  } else {
+    pgPool = new Pool({
+      host: process.env.PGHOST,
+      user: process.env.PGUSER,
+      password: process.env.PGPASSWORD,
+      database: process.env.PGDATABASE,
+      port: process.env.PGPORT ? parseInt(process.env.PGPORT) : 5432,
+    });
+  }
+  console.log('[db_client] Initialized PostgreSQL connection pool.');
+} else {
+  console.log('[db_client] Falling back to SQLite.');
+}
+
+/**
+ * Helper to translate SQLite query placeholders (?) to PostgreSQL placeholders ($1, $2, ...)
+ */
+function translateQuery(sql: string): string {
+  if (!isPostgres) return sql;
+  let index = 1;
+  return sql.replace(/\?/g, () => `$${index++}`);
+}
+
+export const dbClient = {
+  isPostgres,
+
+  async query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+    if (isPostgres && pgPool) {
+      const pgSql = translateQuery(sql);
+      const res = await pgPool.query(pgSql, params);
+      return res.rows;
+    } else {
+      return sqliteDb.prepare(sql).all(params) as T[];
+    }
+  },
+
+  async queryOne<T = any>(sql: string, params: any[] = []): Promise<T | undefined> {
+    if (isPostgres && pgPool) {
+      const pgSql = translateQuery(sql);
+      const res = await pgPool.query(pgSql, params);
+      return res.rows[0];
+    } else {
+      return sqliteDb.prepare(sql).get(params) as T | undefined;
+    }
+  },
+
+  async execute(sql: string, params: any[] = []): Promise<void> {
+    if (isPostgres && pgPool) {
+      const pgSql = translateQuery(sql);
+      await pgPool.query(pgSql, params);
+    } else {
+      sqliteDb.prepare(sql).run(params);
+    }
+  },
+
+  // Helper for batch transaction execution
+  async runTransaction(operations: { sql: string; params: any[] }[]): Promise<void> {
+    if (isPostgres && pgPool) {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const op of operations) {
+          const pgSql = translateQuery(op.sql);
+          await client.query(pgSql, op.params);
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } else {
+      const transaction = sqliteDb.transaction((ops: typeof operations) => {
+        for (const op of ops) {
+          sqliteDb.prepare(op.sql).run(op.params);
+        }
+      });
+      transaction(operations);
+    }
+  }
+};
+
+export default dbClient;
