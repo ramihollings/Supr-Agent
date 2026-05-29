@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import dbClient from '@/lib/database/db_client';
+import { getSecretSetting, getSettingValue } from '@/lib/secrets';
 
 export interface ModelOptions {
   model?: string;
@@ -202,8 +202,7 @@ export class FallbackProvider extends ModelProvider {
 // Helper to query settings asynchronously
 async function getSetting(key: string): Promise<string | null> {
   try {
-    const row = await dbClient.queryOne<{ value: string }>('SELECT value FROM Settings WHERE key = ?', [key]);
-    return row ? row.value : null;
+    return await getSettingValue(key);
   } catch (err) {
     console.error(`[model.ts] Failed to query setting ${key}:`, err);
     return null;
@@ -219,9 +218,9 @@ async function getSetting(key: string): Promise<string | null> {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research' | 'sub'): Promise<ModelProvider> {
   // 1. Resolve Global Keys (SQLite overrides first, then process.env)
-  const minimaxKey  = await getSetting('global_minimax_key')  || process.env.MINIMAX_API_KEY;
-  const geminiKey   = await getSetting('global_gemini_key')   || process.env.GEMINI_API_KEY;
-  const backupKey   = await getSetting('global_backup_key')   || process.env.BACKUP_LLM_API_KEY;
+  const minimaxKey  = await getSecretSetting('global_minimax_key', process.env.MINIMAX_API_KEY);
+  const geminiKey   = await getSecretSetting('global_gemini_key', process.env.GEMINI_API_KEY);
+  const backupKey   = await getSecretSetting('global_backup_key', process.env.BACKUP_LLM_API_KEY);
   const backupUrl   = await getSetting('global_backup_url')   || process.env.BACKUP_LLM_BASE_URL || 'https://api.openai.com/v1';
   const backupModel = await getSetting('global_backup_model') || process.env.BACKUP_LLM_MODEL   || 'gpt-4o-mini';
   const backupName  = await getSetting('global_backup_name')  || process.env.BACKUP_LLM_NAME    || 'OpenAI';
@@ -246,14 +245,14 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
   // 3. Resolve role-specific custom settings if provided
   if (agentRole) {
     const roleProvider = await getSetting(`llm_provider_${agentRole}`) || 'default';
-    const roleKey      = await getSetting(`llm_key_${agentRole}`);
+    const roleKey      = await getSecretSetting(`llm_key_${agentRole}`);
     const roleModel    = await getSetting(`llm_model_${agentRole}`);
     const roleUrl      = await getSetting(`llm_url_${agentRole}`);
 
     if (roleProvider !== 'default') {
       if (roleProvider === 'gemini') {
         const key = roleKey || geminiKey;
-        return buildGemini(key);
+        return buildGemini(key || undefined);
       }
       if (roleProvider === 'minimax') {
         const key = roleKey || minimaxKey;

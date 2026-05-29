@@ -36,6 +36,7 @@ function BlendedDashboardContent() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'glidepath' | 'browser'>('glidepath');
+  const [mobilePanel, setMobilePanel] = useState<'chat' | 'work' | 'telemetry'>('work');
 
   // Telemetry Metrics
   const [tokenBurn, setTokenBurn] = useState(1.42);
@@ -340,10 +341,29 @@ function BlendedDashboardContent() {
           </Link>
         </div>
 
+        <div className="xl:hidden bg-background border-b-4 border-primary grid grid-cols-3">
+          {[
+            { id: 'chat', label: 'Chat', icon: 'chat_bubble' },
+            { id: 'work', label: 'Work', icon: 'hub' },
+            { id: 'telemetry', label: 'Signals', icon: 'radar' },
+          ].map((panel) => (
+            <button
+              key={panel.id}
+              onClick={() => setMobilePanel(panel.id as typeof mobilePanel)}
+              className={`py-3 px-2 border-r-2 last:border-r-0 border-primary font-headline font-black uppercase text-[10px] flex items-center justify-center gap-1.5 ${
+                mobilePanel === panel.id ? 'bg-primary text-on-primary' : 'bg-background text-primary'
+              }`}
+            >
+              <span className="material-symbols-outlined text-sm">{panel.icon}</span>
+              {panel.label}
+            </button>
+          ))}
+        </div>
+
         {/* Blended Command Workspace Layout */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col xl:flex-row overflow-hidden">
           {/* COLUMN 1: SUPR CHAT STREAM & STEERING PRESETS */}
-          <aside className="w-80 border-r-4 border-primary bg-background flex flex-col shrink-0 overflow-hidden">
+          <aside className={`${mobilePanel === 'chat' ? 'flex' : 'hidden'} xl:flex w-full xl:w-80 xl:border-r-4 border-primary bg-background flex-col shrink-0 overflow-hidden`}>
             <div className="p-4 border-b-4 border-primary bg-surface-container-high">
               <h3 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-1.5 mb-2.5">
                 <span className="material-symbols-outlined text-sm">construction</span>
@@ -431,7 +451,7 @@ function BlendedDashboardContent() {
           </aside>
 
           {/* COLUMN 2: CENTER ACTIVE GLIDEPATH CANVAS & SANDBOX STUDIO */}
-          <main className="flex-1 flex flex-col overflow-y-auto custom-scrollbar bg-surface-container border-r-4 border-primary">
+          <main className={`${mobilePanel === 'work' ? 'flex' : 'hidden'} xl:flex flex-1 flex-col overflow-y-auto custom-scrollbar bg-surface-container xl:border-r-4 border-primary`}>
             <div className="flex bg-surface-container-high border-b-4 border-primary shrink-0">
               <button
                 onClick={() => setActiveTab('glidepath')}
@@ -505,9 +525,9 @@ function BlendedDashboardContent() {
                     <div className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-4 flex flex-col relative overflow-hidden">
                       <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
                         <h4 className="font-headline text-lg font-black uppercase tracking-tight text-primary flex items-center gap-1.5">
-                          <span className="material-symbols-outlined">terminal</span> Secure Sandbox Terminal
+                          <span className="material-symbols-outlined">terminal</span> Sandbox Terminal
                         </h4>
-                        <span className="bg-primary-container text-on-primary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Secure Workspace</span>
+                        <span className="bg-primary-container text-on-primary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Simulated Logs</span>
                       </div>
                       <div
                         ref={terminalRef}
@@ -538,7 +558,7 @@ function BlendedDashboardContent() {
           </main>
 
           {/* COLUMN 3: OUT-OF-BAND TELEMETRY & METRICS */}
-          <aside className="w-80 bg-background flex flex-col shrink-0 overflow-y-auto custom-scrollbar p-5 gap-6">
+          <aside className={`${mobilePanel === 'telemetry' ? 'flex' : 'hidden'} xl:flex w-full xl:w-80 bg-background flex-col shrink-0 overflow-y-auto custom-scrollbar p-5 gap-6`}>
             <section className="border-4 border-primary p-4 bg-surface relative overflow-hidden">
               <h4 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-1.5 border-b-2 border-primary pb-2 mb-2">
                 <span className="material-symbols-outlined text-sm text-tertiary">lightbulb</span>
@@ -553,7 +573,7 @@ function BlendedDashboardContent() {
               <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
                 <h4 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-secondary animate-pulse">radar</span>
-                  Active Traces
+                  Simulated Traces
                 </h4>
                 <span className="w-2 h-2 bg-secondary rounded-full animate-ping"></span>
               </div>
@@ -568,7 +588,7 @@ function BlendedDashboardContent() {
 
             <section className="border-4 border-primary p-4 bg-surface-container flex flex-col gap-4">
               <h4 className="font-headline font-black uppercase text-sm tracking-tight text-primary border-b-2 border-primary pb-2">
-                Orchestration Telemetries
+                Mission Metrics
               </h4>
 
               <div>

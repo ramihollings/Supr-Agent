@@ -9,7 +9,7 @@ import { MissionWizard } from './MissionWizard';
 const navItems = [
   { href: '/', icon: 'dashboard', label: 'Dashboard' },
   { href: '/supr-chat', icon: 'chat', label: 'Supr-Chat' },
-  { href: '/orchestration', icon: 'visibility', label: 'Observance Hub' },
+  { href: '/orchestration', icon: 'visibility', label: 'Observability' },
   { href: '/agents', icon: 'smart_toy', label: 'Agents' },
   { href: '/reasoning', icon: 'psychology', label: 'Reasoning Core' },
   { href: '/skills', icon: 'construction', label: 'Skills' },
@@ -17,9 +17,9 @@ const navItems = [
 ];
 
 const bottomItems = [
-  { href: '/code', icon: 'code', label: 'Code Workspace' },
-  { href: '/research', icon: 'travel_explore', label: 'Research Library' },
-  { href: '/library', icon: 'folder_open', label: 'Universal Library' },
+  { href: '/code', icon: 'code', label: 'Code' },
+  { href: '/research', icon: 'travel_explore', label: 'Research' },
+  { href: '/library', icon: 'folder_open', label: 'Library' },
   { href: '/mission-packet', icon: 'inventory_2', label: 'Project Report' },
   { href: '/settings', icon: 'settings', label: 'Settings' },
   { href: '/help', icon: 'help_outline', label: 'Help' },

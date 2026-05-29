@@ -310,6 +310,7 @@ export function initDatabase() {
   `);
   
   insertSetting.run('sandbox_allow_api_keys', 'false');
+  insertSetting.run('sandbox_api_key_approval', '');
   
   insertSetting.run('operating_mode', 'guided');
   insertSetting.run('permission_boundary', 'governed');

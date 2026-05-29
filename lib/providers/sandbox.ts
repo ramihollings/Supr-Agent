@@ -232,14 +232,15 @@ export class LocalNodeSandbox extends AbstractSandboxProvider {
       const { getSqliteDb } = require('../database/init');
       const db = getSqliteDb();
       const settingRow = db.prepare("SELECT value FROM Settings WHERE key = 'sandbox_allow_api_keys'").get() as { value: string } | undefined;
-      const allowKeys = settingRow?.value === 'true';
+      const approvalRow = db.prepare("SELECT value FROM Settings WHERE key = 'sandbox_api_key_approval'").get() as { value: string } | undefined;
+      const allowKeys = settingRow?.value === 'true' && approvalRow?.value === 'approved';
 
       if (allowKeys) {
         if (process.env.GEMINI_API_KEY) {
-          envFlags += ` -e GEMINI_API_KEY="${process.env.GEMINI_API_KEY}"`;
+          envFlags += ` -e GEMINI_API_KEY`;
         }
         if (process.env.MINIMAX_API_KEY) {
-          envFlags += ` -e MINIMAX_API_KEY="${process.env.MINIMAX_API_KEY}"`;
+          envFlags += ` -e MINIMAX_API_KEY`;
         }
       }
     } catch (dbErr) {

@@ -2,10 +2,14 @@ import { NextRequest } from 'next/server';
 import { getActiveProvider } from '@/lib/providers/model';
 import { PermissionEngine } from '@/lib/services/governance';
 import { addActivityLog, getActiveMission } from '@/lib/db';
+import { requireApiAuth } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const authError = await requireApiAuth(req);
+  if (authError) return authError;
+
   try {
     const { prompt } = await req.json();
     const encoder = new TextEncoder();

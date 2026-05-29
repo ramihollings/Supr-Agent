@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getActiveProvider } from '@/lib/providers/model';
 import { addActivityLog, addArtifact, addMemoryItem, getActiveMission, getMissionById } from '@/lib/db';
+import { requireApiAuth } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,9 @@ RULES:
 - Do NOT use generic filler. Every finding must reference the query topic directly.`;
 
 export async function POST(req: NextRequest) {
+  const authError = await requireApiAuth(req);
+  if (authError) return authError;
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

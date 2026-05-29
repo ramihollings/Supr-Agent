@@ -1,20 +1,9 @@
 import { NextResponse } from 'next/server';
-import dbClient from '@/lib/database/db_client';
+import { isAppSecured } from '@/lib/auth';
 
 export async function GET() {
   try {
-    // 1. Check if password is set in environment variables
-    if (process.env.APP_PASSWORD) {
-      return NextResponse.json({ secured: true });
-    }
-
-    // 2. Check if password is set in Settings table
-    const row = await dbClient.queryOne<{ value: string }>("SELECT value FROM Settings WHERE key = ?", ["app_password"]);
-    if (row && row.value) {
-      return NextResponse.json({ secured: true });
-    }
-
-    return NextResponse.json({ secured: false });
+    return NextResponse.json({ secured: await isAppSecured() });
   } catch (error) {
     console.error("Failed to check auth status:", error);
     return NextResponse.json({ secured: false, error: String(error) }, { status: 500 });

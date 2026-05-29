@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import dbClient from '@/lib/database/db_client';
+import { createSessionToken, hashPassword, setSessionCookie } from '@/lib/auth';
 
 export async function POST(request: Request) {
   try {
@@ -20,26 +21,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Application is already secured' }, { status: 400 });
     }
 
-    // Save the password to Settings table
+    const passwordHash = await hashPassword(password);
+
+    // Save the password hash to Settings table
     await dbClient.execute(`
       INSERT INTO Settings (key, value, updated_at)
       VALUES ('app_password', ?, CURRENT_TIMESTAMP)
       ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
-    `, [password]);
+    `, [passwordHash]);
 
     // Create session response
     const response = NextResponse.json({ success: true, message: 'Authentication successful' });
     
-    const isHttps = request.url.startsWith('https:') || request.headers.get('x-forwarded-proto') === 'https';
-
-    // Set the auth token cookie
-    response.cookies.set('supr_auth_token', 'true', {
-      httpOnly: true,
-      secure: isHttps,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
+    setSessionCookie(response, await createSessionToken(), request);
 
     return response;
   } catch (error) {

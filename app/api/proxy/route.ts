@@ -1,59 +1,180 @@
 import { NextResponse } from 'next/server';
-import dns from 'dns';
+import dns from 'dns/promises';
+import net from 'net';
+import { requireApiAuth } from '@/lib/auth';
 
-async function isSafeUrl(targetUrl: string): Promise<boolean> {
-  try {
-    const parsedUrl = new URL(targetUrl);
-    const hostname = parsedUrl.hostname;
+const MAX_REDIRECTS = 3;
+const MAX_BYTES = 2 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = 10000;
 
-    // Block obvious loopback, localhost, and broadcast
-    const directBlock = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
-    if (directBlock.includes(hostname.toLowerCase())) {
-      return false;
-    }
+function isPrivateIp(ip: string) {
+  if (net.isIPv4(ip)) {
+    const parts = ip.split('.').map(Number);
+    const [a, b] = parts;
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      a >= 224
+    );
+  }
 
-    // Direct check for local IP subnets to save DNS lookup time
-    if (
-      hostname.startsWith('10.') ||
-      hostname.startsWith('192.168.') ||
-      hostname.startsWith('169.254.') ||
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
-    ) {
-      return false;
-    }
+  if (net.isIPv6(ip)) {
+    const normalized = ip.toLowerCase();
+    return (
+      normalized === '::1' ||
+      normalized === '::' ||
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      normalized.startsWith('fe80:')
+    );
+  }
 
-    // Resolve domain to IP and check
-    const ip = await new Promise<string>((resolve, reject) => {
-      dns.lookup(hostname, (err, address) => {
-        if (err) reject(err);
-        else resolve(address);
-      });
-    }).catch(() => null);
+  return true;
+}
 
-    if (!ip) {
-      return false;
-    }
+async function assertSafeUrl(targetUrl: string) {
+  const parsedUrl = new URL(targetUrl);
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+    throw new Error('Only HTTP and HTTPS URLs are supported.');
+  }
 
-    // Subnet checks on resolved IP
-    if (
-      ip === '127.0.0.1' ||
-      ip === '::1' ||
-      ip === '0.0.0.0' ||
-      ip.startsWith('10.') ||
-      ip.startsWith('192.168.') ||
-      ip.startsWith('169.254.') ||
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)
-    ) {
-      return false;
-    }
+  const hostname = parsedUrl.hostname.toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    throw new Error('Local network resources are blocked.');
+  }
 
-    return true;
-  } catch {
-    return false;
+  if (net.isIP(hostname) && isPrivateIp(hostname)) {
+    throw new Error('Private network resources are blocked.');
+  }
+
+  const addresses = await dns.lookup(hostname, { all: true, verbatim: false });
+  if (addresses.length === 0 || addresses.some((entry) => isPrivateIp(entry.address))) {
+    throw new Error('Private network DNS targets are blocked.');
   }
 }
 
+function normalizeTargetUrl(rawUrl: string) {
+  const trimmed = rawUrl.trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+async function fetchSafely(initialUrl: string) {
+  let currentUrl = initialUrl;
+
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+    await assertSafeUrl(currentUrl);
+
+    const response = await fetch(currentUrl, {
+      headers: {
+        'User-Agent': 'SuprProxy/1.0',
+      },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location');
+      if (!location) throw new Error('Redirect response did not include a location.');
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+
+    return { response, finalUrl: currentUrl };
+  }
+
+  throw new Error('Too many redirects.');
+}
+
+async function readLimited(response: Response) {
+  const contentLength = response.headers.get('content-length');
+  if (contentLength && Number(contentLength) > MAX_BYTES) {
+    throw new Error('Target response is too large.');
+  }
+
+  if (!response.body) return new Uint8Array();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.length;
+    if (total > MAX_BYTES) {
+      await reader.cancel();
+      throw new Error('Target response exceeded the size limit.');
+    }
+    chunks.push(value);
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return merged;
+}
+
+function rewriteHtml(html: string, normalizedUrl: string) {
+  const parsedUrl = new URL(normalizedUrl);
+  const origin = parsedUrl.origin;
+
+  let rewritten = html.replace(/(src|href)=["'](?!https?:\/\/|\/\/|data:|javascript:|#)([^"']+)["']/gi, (_match, attr, linkPath) => {
+    const absolutePath = new URL(linkPath, origin + parsedUrl.pathname).toString();
+    return `${attr}="${absolutePath}"`;
+  });
+
+  rewritten = rewritten.replace(/(src|href)=["']\/\/([^"']+)["']/gi, (_match, attr, domain) => {
+    return `${attr}="https://${domain}"`;
+  });
+
+  rewritten = rewritten.replace(/<a\s+([^>]*?)href=["'](https?:\/\/[^"']+)["']/gi, (match, attrs, link) => {
+    if (link.includes('/api/proxy')) return match;
+    return `<a ${attrs}href="/api/proxy?url=${encodeURIComponent(link)}"`;
+  });
+
+  const injectedCode = `
+    <style>
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #f1f1f1; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+    <script>
+      document.addEventListener('submit', function(e) {
+        const form = e.target;
+        if (form && form.action) {
+          e.preventDefault();
+          const actionUrl = new URL(form.action, window.location.href).href;
+          const method = (form.method || 'GET').toUpperCase();
+          if (method === 'GET') {
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+            for (const [key, value] of formData.entries()) params.append(key, value.toString());
+            const separator = actionUrl.includes('?') ? '&' : '?';
+            window.location.href = '/api/proxy?url=' + encodeURIComponent(actionUrl + separator + params.toString());
+          }
+        }
+      });
+    </script>
+  `;
+
+  return rewritten.includes('</head>')
+    ? rewritten.replace('</head>', `${injectedCode}</head>`)
+    : rewritten + injectedCode;
+}
+
 export async function GET(request: Request) {
+  const authError = await requireApiAuth(request);
+  if (authError) return authError;
+
   const { searchParams } = new URL(request.url);
   const targetUrl = searchParams.get('url');
 
@@ -62,132 +183,34 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Basic normalization of the URL
-    let normalizedUrl = targetUrl.trim();
-    if (!/^https?:\/\//i.test(normalizedUrl)) {
-      normalizedUrl = 'https://' + normalizedUrl;
-    }
-
-    // SSRF Validation
-    const safe = await isSafeUrl(normalizedUrl);
-    if (!safe) {
-      return new NextResponse('Access to private or local network resources is forbidden (SSRF Protection)', { status: 403 });
-    }
-
-    const response = await fetch(normalizedUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
+    const normalizedUrl = normalizeTargetUrl(targetUrl);
+    const { response, finalUrl } = await fetchSafely(normalizedUrl);
 
     if (!response.ok) {
       return new NextResponse(`Failed to fetch target URL: ${response.statusText}`, { status: response.status });
     }
 
-    const contentType = response.headers.get('content-type') || '';
-    
-    // If it's HTML, we rewrite URLs so links and assets load correctly.
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const bytes = await readLimited(response);
+
     if (contentType.includes('text/html')) {
-      let html = await response.text();
-      const parsedUrl = new URL(normalizedUrl);
-      const origin = parsedUrl.origin;
-
-      // 1. Rewrite relative links, stylesheets, scripts, images to absolute
-      html = html.replace(/(src|href)=["'](?!https?:\/\/|\/\/|data:|javascript:|#)([^"']+)["']/gi, (match, attr, path) => {
-        let absolutePath = '';
-        if (path.startsWith('/')) {
-          absolutePath = `${origin}${path}`;
-        } else {
-          // Resolve relative path
-          const currentPath = parsedUrl.pathname;
-          const basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
-          absolutePath = `${origin}${basePath}${path}`;
-        }
-        return `${attr}="${absolutePath}"`;
-      });
-
-      // 2. Rewrite protocol-relative links (e.g. //cdn.com -> https://cdn.com)
-      html = html.replace(/(src|href)=["']\/\/([^"']+)["']/gi, (match, attr, domain) => {
-        return `${attr}="https://${domain}"`;
-      });
-
-      // 3. Rewrite anchor tags so clicking links stays in the proxy
-      html = html.replace(/<a\s+([^>]*?)href=["'](https?:\/\/[^"']+)["']/gi, (match, attrs, link) => {
-        if (link.includes('/api/proxy')) {
-          return match;
-        }
-        return `<a ${attrs}href="/api/proxy?url=${encodeURIComponent(link)}"`;
-      });
-
-      // 4. Inject a script to prevent iframe escaping and block top-level redirections
-      const injectedCode = `
-        <style>
-          ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-          }
-          ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-          }
-          ::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 4px;
-          }
-          ::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-          }
-        </style>
-        <script>
-          // Prevent iframe escaping / frame-busting
-          window.onbeforeunload = function() {
-            // Cancel navigation outside iframe
-          };
-          
-          // Intercept forms to submit through the proxy
-          document.addEventListener('submit', function(e) {
-            const form = e.target;
-            if (form && form.action) {
-              e.preventDefault();
-              const actionUrl = new URL(form.action, window.location.href).href;
-              const method = (form.method || 'GET').toUpperCase();
-              
-              if (method === 'GET') {
-                const formData = new FormData(form);
-                const params = new URLSearchParams();
-                for (const [key, value] of formData.entries()) {
-                  params.append(key, value.toString());
-                }
-                const separator = actionUrl.includes('?') ? '&' : '?';
-                const fullUrl = actionUrl + separator + params.toString();
-                window.location.href = '/api/proxy?url=' + encodeURIComponent(fullUrl);
-              }
-            }
-          });
-        </script>
-      `;
-
-      if (html.includes('</head>')) {
-        html = html.replace('</head>', `${injectedCode}</head>`);
-      } else {
-        html = html + injectedCode;
-      }
-
-      return new NextResponse(html, {
+      const html = new TextDecoder().decode(bytes);
+      return new NextResponse(rewriteHtml(html, finalUrl), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
         },
       });
     }
 
-    // For images, stylesheets, or other static assets, return them directly
-    const buffer = await response.arrayBuffer();
-    return new NextResponse(buffer, {
+    return new NextResponse(bytes, {
       headers: {
         'Content-Type': contentType,
+        'X-Content-Type-Options': 'nosniff',
       },
     });
-
   } catch (error: any) {
-    return new NextResponse(`Proxy error: ${error.message}`, { status: 500 });
+    return new NextResponse(`Proxy error: ${error.message}`, { status: 400 });
   }
 }
+

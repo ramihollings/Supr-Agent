@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { verifySessionToken } from '@/lib/session';
 
 let isAppSecured: boolean | null = null;
 
@@ -54,7 +55,7 @@ export async function middleware(request: NextRequest) {
   // 3. Check for the session cookie
   const authToken = request.cookies.get('supr_auth_token')?.value;
 
-  if (authToken === 'true') {
+  if (await verifySessionToken(authToken)) {
     return NextResponse.next();
   }
 

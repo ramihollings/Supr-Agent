@@ -1,10 +1,14 @@
 import { NextRequest } from 'next/server';
 import { getActiveMission, getMissionById } from '@/lib/db';
 import { Mission } from '@/types';
+import { requireApiAuth } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const authError = await requireApiAuth(req);
+  if (authError) return authError;
+
   const encoder = new TextEncoder();
   const projectId = req.nextUrl.searchParams.get('id');
   let lastHash = '';

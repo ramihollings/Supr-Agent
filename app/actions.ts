@@ -430,11 +430,7 @@ export async function fetchAgentStatuses() {
 export async function fetchSettingsAction() {
   try {
     const rows = await dbClient.query(`SELECT * FROM Settings`);
-    const settingsObj: Record<string, string> = {};
-    for (const r of rows) {
-      settingsObj[r.key] = r.value;
-    }
-    return settingsObj;
+    return redactSettings(rows);
   } catch (error) {
     console.error("Failed to fetch settings:", error);
     return {};
@@ -443,6 +439,17 @@ export async function fetchSettingsAction() {
 
 export async function updateSettingAction(key: string, value: string) {
   try {
+    z.string().min(1).max(128).regex(/^[a-z0-9_]+$/i).parse(key);
+    z.string().max(isSecretSettingKey(key) ? 8192 : 2048).parse(value);
+
+    if (key.endsWith('_configured')) {
+      return { success: false, error: 'Configured flags are read-only.' };
+    }
+
+    if (isSecretSettingKey(key) && value.trim() === '') {
+      return { success: true, unchanged: true };
+    }
+
     const sql = `
       INSERT INTO Settings (key, value, updated_at)
       VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -591,17 +598,53 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getActiveProvider } from '@/lib/providers/model';
 import { GoogleGenAI } from '@google/genai';
+import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
 
 const execAsync = promisify(exec);
+const MAX_WORKSPACE_FILE_BYTES = 512 * 1024;
+const MAX_CHAT_FILE_BYTES = 256 * 1024;
+const EXECUTION_WINDOW_MS = 60 * 1000;
+const EXECUTION_LIMIT_PER_WINDOW = 5;
+const ALLOWED_WORKSPACE_EXTENSIONS = new Set(['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.py', '.csv', '.html', '.css']);
+const EXECUTION_ATTEMPTS = new Map<string, number[]>();
 
 const getWorkspacePath = (filename: string) => {
-  const safeName = path.basename(filename);
+  const safeName = path.basename(filename).trim();
+  const ext = path.extname(safeName).toLowerCase();
+
+  if (!safeName || safeName !== filename || safeName.startsWith('.') || safeName.includes('\0')) {
+    throw new Error('Invalid workspace filename.');
+  }
+  if (!ALLOWED_WORKSPACE_EXTENSIONS.has(ext)) {
+    throw new Error(`Unsupported workspace file type: ${ext || 'none'}.`);
+  }
+
   const dir = path.resolve(process.cwd(), 'supr_workspaces');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  return path.join(dir, safeName);
+  const resolvedPath = path.resolve(dir, safeName);
+  if (!resolvedPath.startsWith(dir + path.sep)) {
+    throw new Error('Workspace path validation failed.');
+  }
+  return resolvedPath;
 };
+
+function assertContentWithinLimit(content: string, limit: number) {
+  if (Buffer.byteLength(content, 'utf-8') > limit) {
+    throw new Error(`Content exceeds ${Math.floor(limit / 1024)}KB limit.`);
+  }
+}
+
+function assertExecutionRate(filename: string) {
+  const now = Date.now();
+  const attempts = (EXECUTION_ATTEMPTS.get(filename) || []).filter((time) => now - time < EXECUTION_WINDOW_MS);
+  if (attempts.length >= EXECUTION_LIMIT_PER_WINDOW) {
+    throw new Error('Execution rate limit reached. Please wait before running more code.');
+  }
+  attempts.push(now);
+  EXECUTION_ATTEMPTS.set(filename, attempts);
+}
 
 function chatSystemInstruction(settings: any) {
   const mode = settings.operating_mode || 'guided';
@@ -644,8 +687,8 @@ export async function fetchChatMessagesAction() {
 }
 
 export async function generateImagenImageAction(prompt: string): Promise<string> {
-  const settings = await fetchSettingsAction();
-  const apiKey = settings.global_gemini_key || process.env.GEMINI_API_KEY;
+  z.string().min(1).max(2000).parse(prompt);
+  const apiKey = await getSecretSetting('global_gemini_key', process.env.GEMINI_API_KEY);
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured.');
   }
@@ -686,6 +729,13 @@ export async function sendChatMessageAction(
   file?: { name: string; type: string; content: string }
 ) {
   try {
+    z.string().min(1).max(12000).parse(content);
+    if (file) {
+      z.string().max(180).parse(file.name);
+      z.string().max(120).parse(file.type);
+      assertContentWithinLimit(file.content || '', MAX_CHAT_FILE_BYTES);
+    }
+
     const shadow = await checkShadowModeAction();
 
     // 1. Insert User Message (only if NOT in shadow mode)
@@ -755,10 +805,14 @@ export async function sendChatMessageAction(
 
     // Fetch integration keys from Settings
     const settings = await fetchSettingsAction();
-    const hasComposio = !!settings.integrations_composio;
-    const hasGithub = !!settings.integrations_github;
-    const hasSlack = !!settings.integrations_slack;
-    const hasGmail = !!settings.integrations_gmail;
+    const composioIntegration = await getSecretSetting('integrations_composio');
+    const githubIntegration = await getSecretSetting('integrations_github');
+    const slackIntegration = await getSecretSetting('integrations_slack');
+    const gmailIntegration = await getSecretSetting('integrations_gmail');
+    const hasComposio = !!composioIntegration;
+    const hasGithub = !!githubIntegration;
+    const hasSlack = !!slackIntegration;
+    const hasGmail = !!gmailIntegration;
 
     if (isEmailRequest) {
       if (hasGmail) {
@@ -780,7 +834,7 @@ export async function sendChatMessageAction(
       if (hasSlack) {
         simulationLogs.push('[SLACK API] Dispatching raw webhook notification...');
         try {
-          await fetch(settings.integrations_slack, {
+          await fetch(slackIntegration!, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: `Supr-Chat: ${content}` })
@@ -860,7 +914,11 @@ export async function fetchWorkspaceFilesAction() {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    const files = fs.readdirSync(dir);
+    const files = fs.readdirSync(dir).filter((file) => {
+      const ext = path.extname(file).toLowerCase();
+      if (!ALLOWED_WORKSPACE_EXTENSIONS.has(ext)) return false;
+      return fs.statSync(path.join(dir, file)).isFile();
+    });
     return files.map(file => {
       const filePath = path.join(dir, file);
       const stats = fs.statSync(filePath);
@@ -892,6 +950,7 @@ export async function readWorkspaceFileAction(filename: string) {
 
 export async function writeWorkspaceFileAction(filename: string, content: string) {
   try {
+    assertContentWithinLimit(content, MAX_WORKSPACE_FILE_BYTES);
     const filePath = getWorkspacePath(filename);
     fs.writeFileSync(filePath, content, 'utf-8');
     return { success: true };
@@ -916,15 +975,16 @@ export async function deleteWorkspaceFileAction(filename: string) {
 
 export async function executeCodeAction(filename: string, language: string) {
   try {
+    assertExecutionRate(filename);
     const filePath = getWorkspacePath(filename);
     if (!fs.existsSync(filePath)) {
       return { success: false, error: `File ${filename} does not exist.` };
     }
 
     let cmd = '';
-    if (language === 'python' || filename.endsWith('.py')) {
+    if ((language === 'python' || filename.endsWith('.py')) && filename.endsWith('.py')) {
       cmd = `python "${filePath}"`;
-    } else if (language === 'javascript' || filename.endsWith('.js')) {
+    } else if ((language === 'javascript' || filename.endsWith('.js')) && filename.endsWith('.js')) {
       cmd = `node "${filePath}"`;
     } else {
       return { success: false, error: `Language/file type for ${filename} is not supported for sandbox execution.` };
@@ -967,5 +1027,3 @@ export async function fetchAllArtifactsAction() {
     return [];
   }
 }
-
-
