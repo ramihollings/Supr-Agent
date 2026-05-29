@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/database/init';
+import dbClient from '@/lib/database/db_client';
 
 export async function POST(request: Request) {
   try {
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
 
     // If APP_PASSWORD is not set in env, check database Settings
     if (!expectedPassword) {
-      const row = db.prepare("SELECT value FROM Settings WHERE key = ?").get("app_password") as { value: string } | undefined;
+      const row = await dbClient.queryOne<{ value: string }>("SELECT value FROM Settings WHERE key = ?", ["app_password"]);
       if (row && row.value) {
         expectedPassword = row.value;
       }
@@ -24,10 +24,12 @@ export async function POST(request: Request) {
     if (password === expectedPassword) {
       const response = NextResponse.json({ success: true, message: 'Authentication successful' });
       
+      const isHttps = request.url.startsWith('https:') || request.headers.get('x-forwarded-proto') === 'https';
+      
       // Set the auth token cookie
       response.cookies.set('supr_auth_token', 'true', {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isHttps,
         sameSite: 'lax',
         path: '/',
         maxAge: 60 * 60 * 24 * 7, // 7 days

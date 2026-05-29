@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/database/init';
+import dbClient from '@/lib/database/db_client';
 
 export async function GET() {
   try {
@@ -8,8 +8,8 @@ export async function GET() {
       return NextResponse.json({ secured: true });
     }
 
-    // 2. Check if password is set in SQLite Settings table
-    const row = db.prepare("SELECT value FROM Settings WHERE key = ?").get("app_password") as { value: string } | undefined;
+    // 2. Check if password is set in Settings table
+    const row = await dbClient.queryOne<{ value: string }>("SELECT value FROM Settings WHERE key = ?", ["app_password"]);
     if (row && row.value) {
       return NextResponse.json({ secured: true });
     }

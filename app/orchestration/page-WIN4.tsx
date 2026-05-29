@@ -1,9 +1,10 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
-import { useState, useEffect, useRef, startTransition } from 'react';
+import { useState, useEffect, useRef, startTransition, Suspense } from 'react';
 import { fetchOrchestrationFeed, fetchAgentStatuses, fetchMissionsAction } from '@/app/actions';
 import { Mission } from '@/types';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 interface OrchEvent {
   id: string;
@@ -28,61 +29,78 @@ interface AgentStatus {
 }
 
 const EVENT_CONFIG: Record<string, { icon: string; color: string; verb: string }> = {
-  delegation:  { icon: 'assignment_ind', color: 'bg-primary text-on-primary', verb: 'DELEGATED' },
-  handoff:     { icon: 'swap_horiz',     color: 'bg-tertiary text-on-tertiary', verb: 'HANDOFF' },
-  review:      { icon: 'rate_review',    color: 'bg-secondary text-on-secondary', verb: 'REVIEWED' },
-  approval:    { icon: 'check_circle',   color: 'bg-primary text-on-primary', verb: 'APPROVED' },
-  escalation:  { icon: 'warning',        color: 'bg-error text-on-error', verb: 'ESCALATED' },
-  governance:  { icon: 'shield',         color: 'bg-surface-tint text-on-primary', verb: 'GOVERNANCE' },
+  delegation:    { icon: 'assignment_ind', color: 'bg-primary text-on-primary', verb: 'DELEGATION' },
+  handoff:       { icon: 'swap_horiz',     color: 'bg-tertiary text-on-tertiary', verb: 'HANDOFF' },
+  review:        { icon: 'rate_review',    color: 'bg-secondary text-on-secondary', verb: 'REVIEW' },
+  approval:      { icon: 'check_circle',   color: 'bg-primary text-on-primary', verb: 'APPROVAL' },
+  escalation:    { icon: 'warning',        color: 'bg-error text-on-error', verb: 'ESCALATION' },
+  governance:    { icon: 'shield',         color: 'bg-surface-tint text-on-primary', verb: 'GOVERNANCE' },
+  supr_decision: { icon: 'psychology',     color: 'bg-primary-container text-primary border-primary', verb: 'DECISION' },
+  agent_action:  { icon: 'smart_toy',      color: 'bg-surface-container-high text-primary border-primary', verb: 'ACTION' },
+  task_complete: { icon: 'task_alt',       color: 'bg-tertiary-container text-on-tertiary-container', verb: 'COMPLETE' },
+  failure:       { icon: 'error',          color: 'bg-error-container text-error border-error', verb: 'FAILURE' },
+  permission:    { icon: 'gavel',          color: 'bg-secondary-container text-secondary', verb: 'PERMISSION' }
 };
 
 const LIVE_EVENTS = [
-  { type: 'delegation', actor: 'Supr', target: 'Research Agent', summary: 'Dispatched Research Agent to scan new project intake backlog' },
-  { type: 'review', actor: 'Supr', target: 'Code Agent', summary: 'Reviewing Code Agent workspace diff before merge approval' },
-  { type: 'handoff', actor: 'Signal Agent', target: 'QA Agent', summary: 'Forwarding compiled telemetry payload to QA Agent for validation' },
-  { type: 'governance', actor: 'Supr', target: 'Scout Agent', summary: 'Enforcing rate-limit on Scout Agent external API calls' },
-  { type: 'approval', actor: 'Supr', target: 'Code Agent', summary: 'Approved sandbox deployment — all assertions passing' },
-  { type: 'escalation', actor: 'Supr', target: 'Research Agent', summary: 'Research Agent timeout on OSINT crawl — extending deadline' },
-  { type: 'delegation', actor: 'Supr', target: 'QA Agent', summary: 'Assigned QA Agent to run regression suite on latest artifact' },
-  { type: 'handoff', actor: 'Code Agent', target: 'Signal Agent', summary: 'Passing build artifacts to Signal Agent for delivery packaging' },
+  { type: 'delegation', actor: 'Supr', target: 'Research Agent', summary: 'Delegated Research Agent to scan project documentation.' },
+  { type: 'review', actor: 'Supr', target: 'Code Agent', summary: 'Reviewing Code Agent workspace differences.' },
+  { type: 'handoff', actor: 'Signal Agent', target: 'QA Agent', summary: 'Forwarding activity logs to QA Agent.' },
+  { type: 'governance', actor: 'Supr', target: 'Scout Agent', summary: 'Enforcing rate-limits on external API triggers.' },
+  { type: 'approval', actor: 'Supr', target: 'Code Agent', summary: 'Approved safe workspace deployment.' },
+  { type: 'escalation', actor: 'Supr', target: 'Research Agent', summary: 'Research Agent encountered scrape limits.' }
 ];
 
-export default function OrchestrationPage() {
+function OrchestrationContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [events, setEvents] = useState<OrchEvent[]>([]);
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
-  const [filterType, setFilterType] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(true);
-  const [now, setNow] = useState<number>(0);
+
+  // Filters
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
+  const [selectedType, setSelectedType] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  
+  const [now, setNow] = useState<number>(Date.now());
   const feedRef = useRef<HTMLDivElement>(null);
 
+  // Sync initial project ID from URL if present
   useEffect(() => {
-    startTransition(() => {
-      setNow(Date.now());
-    });
+    const urlProjId = searchParams.get('id');
+    if (urlProjId) {
+      setSelectedProjectId(urlProjId);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    async function load() {
-      setIsLoading(true);
-      const [feed, statuses, missionList] = await Promise.all([
-        fetchOrchestrationFeed(),
-        fetchAgentStatuses(),
-        fetchMissionsAction()
-      ]);
-      setEvents(feed);
-      setAgentStatuses(statuses);
-      setMissions(missionList);
-      setIsLoading(false);
-    }
-    load();
-  }, []);
+  const loadData = async () => {
+    const [feed, statuses, missionList] = await Promise.all([
+      fetchOrchestrationFeed(selectedProjectId === 'all' ? undefined : selectedProjectId),
+      fetchAgentStatuses(),
+      fetchMissionsAction()
+    ]);
+    setEvents(feed);
+    setAgentStatuses(statuses);
+    setMissions(missionList);
+    setIsLoading(false);
+  };
 
-  // Simulate live orchestration events ticking in
+  useEffect(() => {
+    loadData();
+  }, [selectedProjectId]);
+
+  // Simulated live updates
   useEffect(() => {
     const interval = setInterval(() => {
+      if (selectedProjectId !== 'all') return;
       const template = LIVE_EVENTS[Math.floor(Math.random() * LIVE_EVENTS.length)];
       const newEvent: OrchEvent = {
         id: `live-${Date.now()}`,
@@ -95,19 +113,33 @@ export default function OrchestrationPage() {
         missionId: missions[0]?.id || 'm1',
       };
       setEvents(prev => [newEvent, ...prev]);
-    }, 6000);
+    }, 8000);
     return () => clearInterval(interval);
-  }, [missions]);
+  }, [missions, selectedProjectId]);
 
-  const filteredEvents = filterType === 'all' ? events : events.filter(e => e.eventType === filterType);
-
-  const formatTime = (ts: string) => {
-    const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const handleProjectFilterChange = (id: string) => {
+    setSelectedProjectId(id);
+    const params = new URLSearchParams(searchParams.toString());
+    if (id === 'all') {
+      params.delete('id');
+    } else {
+      params.set('id', id);
+    }
+    router.push(`/orchestration?${params.toString()}`);
   };
 
+  // Filter events client-side based on search + type
+  const filteredEvents = events.filter(e => {
+    const matchesType = selectedType === 'all' || e.eventType === selectedType;
+    const matchesSearch = searchQuery === '' || 
+      e.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      e.actor.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      e.targetAgent?.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesType && matchesSearch;
+  });
+
   const getRelativeTime = (ts: string) => {
-    const baseTime = now || new Date(ts).getTime();
+    const baseTime = now;
     const diff = Math.max(0, baseTime - new Date(ts).getTime());
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'just now';
@@ -116,95 +148,128 @@ export default function OrchestrationPage() {
     return `${hrs}h ago`;
   };
 
+  const formatTime = (ts: string) => {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
-      <TopNav title="Observance Hub" />
+      <TopNav title="Observance & Activity Hub" />
 
       <main className="flex-1 flex overflow-hidden">
-        {/* LEFT: Live Delegation Feed */}
+        {/* LEFT: Unified scannable timeline feed */}
         <div className="flex-1 flex flex-col overflow-hidden border-r-4 border-primary">
-          {/* Feed Header with Filters */}
+          
+          {/* Timeline Header and Filter Toolbar */}
           <div className="p-4 border-b-4 border-primary bg-background flex flex-col gap-3">
-            <div className="flex justify-between items-center">
-              <h2 className="font-headline text-2xl font-black uppercase tracking-tighter text-primary flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary animate-pulse">radio_button_checked</span>
-                Live Orchestration Feed
-              </h2>
-              <span className="bg-primary text-on-primary px-3 py-1 text-[10px] font-bold uppercase neo-border">
-                {filteredEvents.length} Events
+            <div className="flex justify-between items-center flex-wrap gap-2">
+              <div>
+                <h2 className="font-headline text-xl font-black uppercase tracking-tighter text-primary flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-secondary animate-pulse">radio_button_checked</span>
+                  Central Observability Log
+                </h2>
+                <p className="font-body text-[10px] text-on-surface-variant font-bold uppercase mt-0.5">CENTRAL ACTIVITY FEED tracking actions, approvals, and decisions.</p>
+              </div>
+              <span className="bg-primary text-on-primary px-2.5 py-0.5 text-[9px] font-bold uppercase neo-border">
+                {filteredEvents.length} Events Listed
               </span>
             </div>
-            <div className="flex gap-2 flex-wrap">
-              {['all', 'delegation', 'handoff', 'review', 'approval', 'escalation', 'governance'].map(type => (
-                <button
-                  key={type}
-                  onClick={() => setFilterType(type)}
-                  className={`px-3 py-1.5 text-[10px] font-headline font-bold uppercase neo-border transition-all ${
-                    filterType === type
-                      ? 'bg-primary text-on-primary neo-shadow'
-                      : 'bg-surface hover:bg-surface-container'
-                  }`}
+
+            {/* Filter controls row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t-2 border-outline-variant pt-3">
+              <div>
+                <label className="block text-[9px] font-black uppercase text-primary mb-1">Project Workspace</label>
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => handleProjectFilterChange(e.target.value)}
+                  className="w-full bg-surface border-2 border-primary px-2.5 py-1.5 font-headline font-bold uppercase text-[10px] cursor-pointer focus:outline-none"
                 >
-                  {type === 'all' ? 'All Events' : type}
-                </button>
-              ))}
+                  <option value="all">All Projects</option>
+                  {missions.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-black uppercase text-primary mb-1">Event Group</label>
+                <select
+                  value={selectedType}
+                  onChange={(e) => setSelectedType(e.target.value)}
+                  className="w-full bg-surface border-2 border-primary px-2.5 py-1.5 font-headline font-bold uppercase text-[10px] cursor-pointer focus:outline-none"
+                >
+                  <option value="all">All Categories</option>
+                  {Object.keys(EVENT_CONFIG).map(type => (
+                    <option key={type} value={type}>{EVENT_CONFIG[type].verb}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-black uppercase text-primary mb-1">Search Keywords</label>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Filter logs by summary/actor..."
+                  className="w-full bg-surface border-2 border-primary px-2.5 py-1.5 font-body text-[10px] focus:outline-none focus:border-tertiary"
+                />
+              </div>
             </div>
           </div>
 
-          {/* Feed Stream */}
-          <div ref={feedRef} className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
+          {/* Timeline Feed Stream */}
+          <div ref={feedRef} className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2 bg-surface-container-low">
             {isLoading ? (
-              <div className="font-mono text-primary text-lg uppercase font-bold animate-pulse p-8">Connecting to orchestration bus...</div>
+              <div className="font-mono text-primary text-xs uppercase font-bold animate-pulse p-4">Syncing Central Trace Bus...</div>
             ) : filteredEvents.length === 0 ? (
-              <div className="p-12 text-center text-on-surface-variant">
-                <span className="material-symbols-outlined text-5xl mb-4 block text-outline">visibility_off</span>
-                <p className="font-headline font-bold uppercase">No orchestration events matching filter</p>
+              <div className="p-12 text-center text-on-surface-variant bg-background neo-border">
+                <span className="material-symbols-outlined text-4xl mb-2 text-outline">visibility_off</span>
+                <p className="font-headline text-xs font-bold uppercase">No records found matching filters</p>
               </div>
             ) : (
               filteredEvents.map((ev, idx) => {
                 const config = EVENT_CONFIG[ev.eventType] || EVENT_CONFIG.delegation;
-                const baseTime = now || new Date(ev.timestamp).getTime();
-                const isNew = idx === 0 && (baseTime - new Date(ev.timestamp).getTime() < 10000);
+                const isNew = idx === 0 && (Date.now() - new Date(ev.timestamp).getTime() < 10000);
                 return (
                   <article
                     key={ev.id}
-                    className={`neo-border bg-background p-4 flex gap-4 relative overflow-hidden transition-all hover:neo-shadow group ${
-                      isNew ? 'animate-pulse border-secondary' : ''
+                    className={`neo-border bg-background p-2.5 flex gap-3 relative transition-all hover:bg-surface-bright group ${
+                      isNew ? 'border-secondary bg-primary-container/10' : ''
                     }`}
                   >
-                    {/* Event Type Badge */}
-                    <div className={`w-10 h-10 neo-border ${config.color} flex items-center justify-center shrink-0`}>
-                      <span className="material-symbols-outlined text-lg">{config.icon}</span>
+                    {/* Compact Icon */}
+                    <div className={`w-8 h-8 neo-border ${config.color} flex items-center justify-center shrink-0`}>
+                      <span className="material-symbols-outlined text-base font-bold">{config.icon}</span>
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      {/* Header Row */}
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className={`text-[9px] font-bold uppercase px-2 py-0.5 neo-border ${config.color}`}>
+                      {/* Sub-Header Row */}
+                      <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                        <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 border border-primary ${config.color}`}>
                           {config.verb}
                         </span>
-                        <span className="font-headline font-black text-xs uppercase text-primary">
+                        <span className="font-headline font-black text-[10px] uppercase text-primary">
                           {ev.actor}
                         </span>
                         {ev.targetAgent && (
                           <>
-                            <span className="material-symbols-outlined text-xs text-on-surface-variant">arrow_forward</span>
-                            <span className="font-headline font-bold text-xs uppercase text-tertiary">
+                            <span className="material-symbols-outlined text-[10px] text-on-surface-variant">arrow_forward</span>
+                            <span className="font-headline font-bold text-[10px] uppercase text-tertiary">
                               {ev.targetAgent}
                             </span>
                           </>
                         )}
-                        <span className="ml-auto font-mono text-[9px] text-on-surface-variant shrink-0">
+                        <span className="ml-auto font-mono text-[8px] text-on-surface-variant shrink-0">
                           {formatTime(ev.timestamp)} · {getRelativeTime(ev.timestamp)}
                         </span>
                       </div>
 
-                      {/* Summary */}
-                      <p className="font-body text-sm font-semibold text-primary leading-snug">{ev.summary}</p>
-
-                      {/* Detail (expandable on hover) */}
+                      {/* Log text (concise) */}
+                      <p className="font-body text-xs text-primary leading-tight font-semibold">{ev.summary}</p>
                       {ev.detail && (
-                        <p className="font-body text-xs text-on-surface-variant mt-1.5 leading-relaxed border-l-4 border-outline-variant pl-3 opacity-70 group-hover:opacity-100 transition-opacity">
+                        <p className="font-body text-[10px] text-on-surface-variant mt-1 leading-normal border-l-2 border-outline-variant pl-2 opacity-80 group-hover:opacity-100 transition-opacity">
                           {ev.detail}
                         </p>
                       )}
@@ -216,109 +281,41 @@ export default function OrchestrationPage() {
           </div>
         </div>
 
-        {/* RIGHT: Team Status Board */}
-        <aside className="w-80 bg-background flex flex-col overflow-y-auto custom-scrollbar shrink-0">
-          {/* Team Status Header */}
-          <div className="p-4 border-b-4 border-primary bg-surface-container-high">
-            <h3 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-2">
+        {/* RIGHT: Team status board (Compact Summary) */}
+        <aside className="w-72 bg-background flex flex-col overflow-y-auto custom-scrollbar shrink-0">
+          <div className="p-3.5 border-b-4 border-primary bg-surface-container-high">
+            <h3 className="font-headline font-black uppercase text-xs tracking-tight text-primary flex items-center gap-1.5">
               <span className="material-symbols-outlined text-sm">groups</span>
-              Team Status Board
+              Active Agent Statuses
             </h3>
-            <p className="font-body text-[10px] text-on-surface-variant mt-1">Real-time agent assignment and availability</p>
+            <p className="font-body text-[9px] text-on-surface-variant mt-0.5">Governor status monitor loops</p>
           </div>
 
-          {/* Supr Supervisor Card (always first) */}
-          <div className="m-4 neo-border bg-primary-container p-4 relative">
-            <div className="absolute top-2 right-2">
-              <span className="w-2.5 h-2.5 bg-secondary rounded-full inline-block animate-pulse"></span>
-            </div>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 neo-border bg-primary text-on-primary flex items-center justify-center">
-                <span className="material-symbols-outlined">psychology</span>
+          <div className="p-3.5 space-y-3 flex-1">
+            {/* Supr Supervisor Status */}
+            <div className="neo-border bg-primary-container p-3 relative">
+              <div className="absolute top-2.5 right-2.5">
+                <span className="w-2.5 h-2.5 bg-secondary rounded-full inline-block animate-pulse"></span>
               </div>
-              <div>
-                <h4 className="font-headline font-black uppercase text-sm text-primary">Supr.</h4>
-                <p className="font-body text-[10px] text-on-surface-variant">Supervisor Orchestrator</p>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-8 h-8 neo-border bg-primary text-on-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-sm">psychology</span>
+                </div>
+                <div>
+                  <h4 className="font-headline font-black uppercase text-xs text-primary">Supr.</h4>
+                  <p className="font-body text-[8px] text-on-surface-variant font-bold uppercase">Supervisor Orchestrator</p>
+                </div>
               </div>
-            </div>
-            <div className="space-y-2 text-[10px]">
-              <div className="flex justify-between">
-                <span className="font-bold uppercase text-on-surface-variant">Status</span>
-                <span className="font-bold text-primary bg-primary-container px-2 py-0.5 neo-border">Directing</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="font-bold uppercase text-on-surface-variant">Permission</span>
-                <span className="font-bold text-secondary">Root</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="font-bold uppercase text-on-surface-variant">Active Delegations</span>
-                <span className="font-bold text-primary">{events.filter(e => e.eventType === 'delegation').length}</span>
+              <div className="space-y-1 text-[8px] font-semibold text-on-surface-variant uppercase">
+                <div className="flex justify-between"><span>Status</span><span className="text-primary font-bold">Directing</span></div>
+                <div className="flex justify-between"><span>Active Traces</span><span className="text-secondary font-bold">{events.length}</span></div>
               </div>
             </div>
-          </div>
 
-          {/* Sub-Agent Cards */}
-          <div className="px-4 pb-4 space-y-3">
-            {agentStatuses.length === 0 && !isLoading && (
-              // Show mock agents when DB has no active task assignments
-              <>
-                {[
-                  { name: 'Research Agent', role: 'Context & OSINT', tier: 'Draft', status: 'Working', task: 'Context Scan', project: 'BUILDSIGNAL' },
-                  { name: 'Code Agent', role: 'Sandbox Execution', tier: 'Execute', status: 'Waiting for Review', task: 'Schema Integration', project: 'BUILDSIGNAL' },
-                  { name: 'QA Agent', role: 'Quality Validation', tier: 'Edit', status: 'Idle', task: null, project: null },
-                  { name: 'Signal Agent', role: 'Delivery & Export', tier: 'External_Act', status: 'Working', task: 'Bundle Compilation', project: 'BUILDSIGNAL' },
-                ].map(agent => (
-                  <div key={agent.name} className="neo-border bg-surface p-3 relative">
-                    <div className="absolute top-2 right-2">
-                      <span className={`w-2 h-2 rounded-full inline-block ${
-                        agent.status === 'Working' ? 'bg-secondary animate-pulse' :
-                        agent.status === 'Waiting for Review' ? 'bg-tertiary animate-pulse' :
-                        'bg-outline-variant'
-                      }`}></span>
-                    </div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-8 h-8 neo-border bg-surface-container flex items-center justify-center">
-                        <span className="material-symbols-outlined text-sm text-primary">smart_toy</span>
-                      </div>
-                      <div>
-                        <h4 className="font-headline font-bold uppercase text-xs text-primary">{agent.name}</h4>
-                        <p className="font-body text-[9px] text-on-surface-variant">{agent.role}</p>
-                      </div>
-                    </div>
-                    <div className="space-y-1.5 text-[9px]">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold uppercase text-on-surface-variant">Status</span>
-                        <span className={`font-bold px-1.5 py-0.5 neo-border text-[8px] ${
-                          agent.status === 'Working' ? 'bg-primary text-on-primary' :
-                          agent.status === 'Waiting for Review' ? 'bg-tertiary text-on-tertiary' :
-                          'bg-surface-container text-on-surface-variant'
-                        }`}>{agent.status}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="font-bold uppercase text-on-surface-variant">Tier</span>
-                        <span className="font-bold text-primary">{agent.tier}</span>
-                      </div>
-                      {agent.task && (
-                        <div className="flex justify-between">
-                          <span className="font-bold uppercase text-on-surface-variant">Task</span>
-                          <span className="font-bold text-secondary truncate max-w-[120px]">{agent.task}</span>
-                        </div>
-                      )}
-                      {agent.project && (
-                        <div className="flex justify-between">
-                          <span className="font-bold uppercase text-on-surface-variant">Project</span>
-                          <span className="font-mono text-[8px] text-tertiary">{agent.project}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-
+            {/* Subagent Statuses */}
             {agentStatuses.map(agent => (
               <div key={agent.id} className="neo-border bg-surface p-3 relative">
-                <div className="absolute top-2 right-2">
+                <div className="absolute top-2.5 right-2.5">
                   <span className={`w-2 h-2 rounded-full inline-block ${
                     agent.status === 'Working' ? 'bg-secondary animate-pulse' : 'bg-outline-variant'
                   }`}></span>
@@ -329,66 +326,31 @@ export default function OrchestrationPage() {
                   </div>
                   <div>
                     <h4 className="font-headline font-bold uppercase text-xs text-primary">{agent.name}</h4>
-                    <p className="font-body text-[9px] text-on-surface-variant">{agent.role}</p>
+                    <p className="font-body text-[8px] text-on-surface-variant font-bold uppercase">{agent.role}</p>
                   </div>
                 </div>
-                <div className="space-y-1.5 text-[9px]">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold uppercase text-on-surface-variant">Status</span>
-                    <span className={`font-bold px-1.5 py-0.5 neo-border text-[8px] ${
-                      agent.status === 'Working' ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
-                    }`}>{agent.status}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-bold uppercase text-on-surface-variant">Tier</span>
-                    <span className="font-bold text-primary">{agent.permissionTier}</span>
-                  </div>
-                  {agent.currentTask && (
-                    <div className="flex justify-between">
-                      <span className="font-bold uppercase text-on-surface-variant">Task</span>
-                      <span className="font-bold text-secondary truncate max-w-[120px]">{agent.currentTask}</span>
-                    </div>
-                  )}
-                  {agent.currentProject && (
-                    <div className="flex justify-between">
-                      <span className="font-bold uppercase text-on-surface-variant">Project</span>
-                      <span className="font-mono text-[8px] text-tertiary">{agent.currentProject}</span>
-                    </div>
-                  )}
+                <div className="space-y-1 text-[8px] font-semibold text-on-surface-variant uppercase">
+                  <div className="flex justify-between"><span>Status</span><span>{agent.status}</span></div>
+                  <div className="flex justify-between"><span>Tier</span><span className="text-primary">{agent.permissionTier}</span></div>
+                  {agent.currentTask && <div className="flex justify-between"><span>Task</span><span className="text-secondary truncate max-w-[100px]">{agent.currentTask}</span></div>}
                 </div>
               </div>
             ))}
           </div>
-
-          {/* Supr Decision Log Strip */}
-          <div className="mt-auto border-t-4 border-primary bg-surface-container-high p-4">
-            <h4 className="font-headline font-black uppercase text-[10px] tracking-tight text-primary mb-3 flex items-center gap-1">
-              <span className="material-symbols-outlined text-xs">gavel</span>
-              Latest Governance Decisions
-            </h4>
-            <div className="space-y-2">
-              {events
-                .filter(e => ['approval', 'governance', 'escalation'].includes(e.eventType))
-                .slice(0, 3)
-                .map(ev => {
-                  const config = EVENT_CONFIG[ev.eventType] || EVENT_CONFIG.governance;
-                  return (
-                    <div key={ev.id} className="flex items-start gap-2 p-2 bg-background neo-border text-[9px]">
-                      <span className={`material-symbols-outlined text-xs shrink-0 mt-0.5 ${
-                        ev.eventType === 'approval' ? 'text-primary' :
-                        ev.eventType === 'escalation' ? 'text-error' : 'text-tertiary'
-                      }`}>{config.icon}</span>
-                      <div className="min-w-0">
-                        <p className="font-bold text-primary leading-tight truncate">{ev.summary}</p>
-                        <p className="text-on-surface-variant mt-0.5">{getRelativeTime(ev.timestamp)}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
         </aside>
       </main>
     </div>
+  );
+}
+
+export default function OrchestrationPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container items-center justify-center">
+        <p className="font-headline font-bold text-sm uppercase text-primary animate-pulse">Syncing Observance Hub...</p>
+      </div>
+    }>
+      <OrchestrationContent />
+    </Suspense>
   );
 }

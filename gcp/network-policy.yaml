@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-egress-restrictions
+  namespace: supr-sandbox-workers
+spec:
+  podSelector:
+    matchLabels:
+      tier: sandbox-worker
+  policyTypes:
+    - Egress
+  egress:
+    # Rule 1: Allow DNS resolution from kube-system Namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Rule 2: Allow outbound HTTPS to public internet, blocking internal/metadata ranges
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: 443

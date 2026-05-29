@@ -53,10 +53,10 @@ export async function POST(req: NextRequest) {
         let passed = false;
 
         try {
-          const provider = getActiveProvider('code');
+          const provider = await getActiveProvider('code');
 
           const researchSection = researchContext
-            ? `\n\nResearch Intelligence Available (from Research Agent OSINT brief):\n${researchContext}`
+            ? `\n\nResearch Intelligence Available (from Research Agent brief):\n${researchContext}`
             : '';
 
           const prompt = `Analyze this Python file named "${filename}" and produce a complete fix.

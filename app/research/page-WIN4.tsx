@@ -59,7 +59,7 @@ export default function ResearchPage() {
     setBrowseState('searching');
     setExtractedData([]);
 
-    setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[SUPR] Delegating OSINT task to Research Agent: "${searchQuery}"` }]);
+    setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[SUPR] Delegating research task to Research Agent: "${searchQuery}"` }]);
 
     try {
       const response = await fetch('/api/research', {
@@ -172,7 +172,7 @@ export default function ResearchPage() {
               className="w-full mt-3 bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border neo-shadow text-xs hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <span className="material-symbols-outlined text-[18px]">search</span>
-              Begin OSINT Crawl
+              Begin Web Crawl
             </button>
           </div>
 
@@ -182,7 +182,7 @@ export default function ResearchPage() {
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5 bg-surface-container-low">
             {extractedData.length === 0 && (
-              <p className="text-on-surface-variant text-[10px] font-body font-semibold uppercase italic text-center p-3">No specs extracted. Run an OSINT crawl.</p>
+              <p className="text-on-surface-variant text-[10px] font-body font-semibold uppercase italic text-center p-3">No specs extracted. Run a web crawl.</p>
             )}
             {extractedData.map((finding, i) => (
               <div key={i} className="p-2.5 border-l-4 border-tertiary bg-background neo-border font-body text-xs shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] leading-relaxed">
@@ -241,9 +241,9 @@ export default function ResearchPage() {
             {browseState === 'idle' && (
               <div className="flex flex-col items-center justify-center h-full text-center p-8">
                 <span className="material-symbols-outlined text-7xl text-outline mb-6">language</span>
-                <h3 className="font-headline font-bold uppercase text-xl text-on-surface-variant mb-2">OSINT Headless Browser Viewport</h3>
+                <h3 className="font-headline font-bold uppercase text-xl text-on-surface-variant mb-2">Headless Browser Viewport</h3>
                 <p className="font-body text-sm text-on-surface-variant max-w-md leading-relaxed">
-                  When the Research Agent browses the web, you will see exactly what it crawls here in real time. Enter a query and click &quot;Begin OSINT Crawl&quot; to start.
+                  When the Research Agent browses the web, you will see exactly what it crawls here in real time. Enter a query and click &quot;Begin Web Crawl&quot; to start.
                 </p>
                 <div className="mt-6 p-4 border-l-4 border-secondary bg-surface-container text-left max-w-md font-body text-xs text-on-surface-variant leading-relaxed">
                   <strong>Bridge Sync Active</strong>: Findings extracted in the browser are written directly to SQLite, immediately refreshing the context drawer in the Coding Agent&apos;s workspace!
@@ -334,7 +334,7 @@ export default function ResearchPage() {
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-black text-amber-400 font-mono text-xs leading-loose">
             {searchLog.length === 0 && (
-              <div className="text-amber-800">Crawl log ready. Run an OSINT query to see agent browser logs.</div>
+              <div className="text-amber-800">Crawl log ready. Run a research query to see agent browser logs.</div>
             )}
             {searchLog.map(line => (
               <div key={line.id} className={`mb-2 ${
@@ -412,7 +412,7 @@ export default function ResearchPage() {
             Research Engine Active
           </span>
         </div>
-        <span className="text-[10px] font-bold uppercase">Stitch OSINT V1.2</span>
+        <span className="text-[10px] font-bold uppercase">Supr Research V1.2</span>
       </footer>
     </div>
   );

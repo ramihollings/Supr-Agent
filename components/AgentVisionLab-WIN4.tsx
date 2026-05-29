@@ -100,7 +100,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
       source: 'reddit',
       author: 'u/saas_pioneer_42',
       community: 'r/saas',
-      content: 'Has anyone integrated Supr yet? We just migrated our background scrapers into their gVisor sandboxes and the performance is wild. No more Selenium cluster overhead.',
+      content: 'Has anyone integrated Supr yet? We just migrated our background scrapers into their secure workspaces and the performance is wild. No more Selenium cluster overhead.',
       time: '2 hours ago',
       engagement: '▲ 48 Upvotes • 12 Comments',
     },
@@ -109,7 +109,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
       source: 'twitter',
       author: 'Aiden Vance',
       handle: '@aiden_v',
-      content: 'Supr adding Chrome DevTools MCP is sneaky brilliant. Having an AI agent write test scripts, navigate, capture screenshots, and run Lighthouse audits on itself inside a sandbox is elite.',
+      content: 'Supr adding Chrome DevTools MCP is sneaky brilliant. Having an AI agent write test scripts, navigate, capture screenshots, and run Lighthouse audits on itself inside a secure workspace is elite.',
       time: '4 hours ago',
       engagement: '♥ 142 Likes • 18 Retweets',
     },
@@ -179,7 +179,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
         `CONSOLE ➜ Window width: ${device === 'desktop' ? '1280px' : device === 'tablet' ? '768px' : '375px'}`
       ]);
       if (onLogActivity) {
-        onLogActivity('agent_action', `Agent browsed to ${normalized}`, `Headless browser navigation succeeded. Render tree compiled successfully in gVisor sandbox.`);
+        onLogActivity('agent_action', `Agent browsed to ${normalized}`, `Headless browser navigation succeeded. Website contents loaded successfully in secure workspace.`);
       }
     }, 1000);
   };
@@ -248,8 +248,8 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
     setSyncStatus('Fetching raw payloads...');
 
     const timeStr = new Date().toLocaleTimeString();
-    if (onTraceUpdate) onTraceUpdate(`[${timeStr}] cloakbrowser::stealth_scrape -> Scraping Reddit subreddits and Twitter queries`);
-    if (onTerminalLog) onTerminalLog(`➜ cloakbrowser scrape --query="supr agent OR agentic orchestration"`);
+    if (onTraceUpdate) onTraceUpdate(`[${timeStr}] webcrawler::scrape -> Scraping Reddit subreddits and Twitter queries`);
+    if (onTerminalLog) onTerminalLog(`➜ webcrawler scrape --query="supr agent OR agentic orchestration"`);
 
     setTimeout(() => {
       setSyncStatus('Parsing DOM trees...');
@@ -418,7 +418,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                       <main className="space-y-3">
                         <div className="border-b border-primary/10 pb-2">
                           <h4 className="font-headline font-bold text-sm text-[#111111] hover:underline cursor-pointer">
-                            Show HN: Supr – Neobrutalist Agentic Orchestrator in gVisor Docker
+                            Show HN: Supr – Neobrutalist Agentic Orchestrator in Secure Workspace
                           </h4>
                           <p className="text-[10px] text-on-surface-variant mt-1">
                             142 points by <span className="underline">saas_architect</span> 3 hours ago | 42 comments
@@ -428,7 +428,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                         <div className="space-y-3 pl-2 border-l-2 border-primary/10 mt-3">
                           <div className="text-[11px] leading-relaxed">
                             <p className="font-bold text-[10px] text-[#ff6600]">▲ dylan_r 2 hours ago</p>
-                            <p className="mt-0.5">This looks incredible. I love the fact that the agent team status is stored inside standard SQLite. Running code compilers inside sandboxes and utilizing chrome devtools is super clean.</p>
+                            <p className="mt-0.5">This looks incredible. I love the fact that the agent team status is stored inside standard SQLite. Running code checks inside secure workspaces and utilizing browser automation is super clean.</p>
                           </div>
                           <div className="text-[11px] leading-relaxed pl-3 border-l border-primary/10">
                             <p className="font-bold text-[10px] text-[#2255ff]">▲ reply by tech_maven 1.5 hours ago</p>
@@ -532,12 +532,12 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                           <div className="bg-[#16161a] p-3 border-2 border-primary text-center">
                             <p className="text-[9px] uppercase font-bold text-[#a7a9be]">Automated API Tier</p>
                             <h4 className="font-headline font-black text-xl text-[#fffffe] mt-1">$299/mo</h4>
-                            <p className="text-[8px] text-[#ff8906] font-bold mt-1">✓ Unlimited Docker Nodes</p>
+                            <p className="text-[8px] text-[#ff8906] font-bold mt-1">✓ Unlimited Crawl Nodes</p>
                           </div>
                           <div className="bg-[#16161a] p-3 border-2 border-primary text-center">
                             <p className="text-[9px] uppercase font-bold text-[#a7a9be]">AI Orchestrator Base</p>
                             <h4 className="font-headline font-black text-xl text-[#fffffe] mt-1">$99/mo</h4>
-                            <p className="text-[8px] text-[#72757e] mt-1">✗ Restricted sandboxes</p>
+                            <p className="text-[8px] text-on-surface-variant mt-1">✗ Restricted workspaces</p>
                           </div>
                         </div>
 
@@ -558,13 +558,13 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                         <div className="w-12 h-12 bg-primary-fixed text-primary rounded-none border-2 border-primary mx-auto flex items-center justify-center animate-spin">
                           <span className="material-symbols-outlined text-2xl">verified_user</span>
                         </div>
-                        <h3 className="font-headline font-black text-sm text-white uppercase">SUPR LOCAL SANDBOX RUNNER</h3>
+                        <h3 className="font-headline font-black text-sm text-white uppercase">SUPR LOCAL WORKSPACE RUNNER</h3>
                         <p className="text-[10px] leading-relaxed text-gray-400">
-                          Static artifact HTML generated successfully. Sandboxed within gVisor isolation module. DevTools are listening for web audits.
+                          Static HTML page generated successfully. Running within secure workspace isolation. Browser automation is listening for web audits.
                         </p>
                         <div className="border border-primary/20 bg-background/5 p-2 rounded-none font-mono text-[9px] text-[#ffcc00] text-left">
                           <p className="font-bold">✓ Workspace build compiles cleanly</p>
-                          <p className="mt-1">✓ Lighthouse ready: click "Run Lighthouse Audit" on the panel to audit UX/SEO benchmarks.</p>
+                          <p className="mt-1">✓ Website checking ready: click "Trigger Lighthouse Audit Gate" on the panel to audit UX/SEO benchmarks.</p>
                         </div>
                       </div>
                     </div>
@@ -662,7 +662,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                       onClick={() => {
                         setCurrentStep(s.id);
                         if (onLogActivity) {
-                          onLogActivity('review', `Time-Travel rolled state to Step ${s.id}`, `Switched browser frame context to "${s.title}" in sandbox workspace.`);
+                          onLogActivity('review', `Time-Travel rolled state to Step ${s.id}`, `Switched browser frame context to "${s.title}" in secure workspace.`);
                         }
                       }}
                       className={`w-8 h-8 rounded-none border-2 flex items-center justify-center font-headline font-black text-xs transition-all hover:scale-110 active:scale-95 ${
@@ -808,7 +808,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                 <span className="bg-primary-container text-on-primary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Every 5m</span>
               </div>
               <p className="font-body text-[11px] text-on-surface-variant font-bold leading-normal mb-3">
-                Aggregates background scrapes of competitive subreddits (r/saas) and Twitter queries via CloakBrowser stealth workers.
+                Aggregates background scrapes of competitive subreddits (r/saas) and Twitter queries via automated web workers.
               </p>
 
               {/* Status & Settings */}
@@ -819,7 +819,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-on-surface-variant font-semibold">
                   <div>Interval: <span className="font-mono text-primary">5 Minutes</span></div>
-                  <div>Engine: <span className="font-mono text-primary">CloakBrowser</span></div>
+                  <div>Engine: <span className="font-mono text-primary">Web Crawler</span></div>
                   <div>Targets: <span className="font-mono text-primary">r/saas, Twitter</span></div>
                   <div>Mode: <span className="font-mono text-primary">Bypass Bot Block</span></div>
                 </div>

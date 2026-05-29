@@ -19,8 +19,13 @@ const db = new Database(dbPath, { verbose: console.log });
 export function initDatabaseSQLite() {
   console.log('Initializing Supr local SQLite database...');
 
-  // Enable WAL mode for better performance
-  db.pragma('journal_mode = WAL');
+  // Enable WAL mode for better performance outside container, use DELETE mode inside Docker mounts
+  const isDocker = fs.existsSync('/.dockerenv');
+  if (isDocker) {
+    db.pragma('journal_mode = DELETE');
+  } else {
+    db.pragma('journal_mode = WAL');
+  }
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   db.pragma('synchronous = NORMAL');
@@ -194,9 +199,19 @@ export function initDatabaseSQLite() {
       target_action TEXT,
       last_run DATETIME,
       status TEXT,
+      assigned_agent_id TEXT,
+      associated_task_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  try {
+    db.exec(`ALTER TABLE Cron_Jobs ADD COLUMN assigned_agent_id TEXT`);
+  } catch (e) {}
+
+  try {
+    db.exec(`ALTER TABLE Cron_Jobs ADD COLUMN associated_task_id TEXT`);
+  } catch (e) {}
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS Settings (
@@ -241,7 +256,7 @@ export function initDatabaseSQLite() {
   const chatMessagesCount = db.prepare(`SELECT COUNT(*) as cnt FROM Supr_Chat_Messages`).get() as { cnt: number };
   if (chatMessagesCount.cnt === 0) {
     db.prepare(`
-      INSERT INTO Supr_Chat_Messages (id, sender, content)
+      INSERT OR IGNORE INTO Supr_Chat_Messages (id, sender, content)
       VALUES (?, ?, ?)
     `).run(
       'init-chat-msg',
@@ -253,32 +268,44 @@ export function initDatabaseSQLite() {
   const skillsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Skills`).get() as { cnt: number };
   if (skillsCount.cnt === 0) {
     const insertSkill = db.prepare(`
-      INSERT INTO Skills (id, name, description, provider, tools)
+      INSERT OR IGNORE INTO Skills (id, name, description, provider, tools)
       VALUES (?, ?, ?, ?, ?)
     `);
     insertSkill.run('sk-1', 'Toprank SEO', 'Optimizes structured markdown deliverables for maximum Google search results positioning.', 'Custom API', JSON.stringify(['optimize_metadata', 'keyword_density_audit']));
-    insertSkill.run('sk-2', 'CloakBrowser Integration', 'Stealth crawler enabling play-by-play internet exploration without bot-fingerprint blocks.', 'Composio', JSON.stringify(['stealth_scrape', 'javascript_render']));
-    insertSkill.run('sk-3', 'AST Sandbox Self-Healer', 'Diagnoses code compiler failures and performs single-line replacements within docker nodes.', 'Anthropic', JSON.stringify(['compile_sandbox', 'fix_syntax_lint']));
-    insertSkill.run('sk-4', 'Chrome DevTools Browser Automation', 'High-fidelity, ultra-fast headless browser control, screenshot capturing, JS execution, emulation, and Lighthouse diagnostics.', 'MCP', JSON.stringify(['navigate', 'screenshot', 'execute_javascript', 'lighthouse_audit']));
+    insertSkill.run('sk-2', 'CloakBrowser Integration', 'Automated web browser helper for gathering internet data.', 'Composio', JSON.stringify(['stealth_scrape', 'javascript_render']));
+    insertSkill.run('sk-3', 'Code Self-Healer', 'Finds syntax and runtime errors in code and automatically applies fixes.', 'Anthropic', JSON.stringify(['compile_sandbox', 'fix_syntax_lint']));
+    insertSkill.run('sk-4', 'Web Browser Automation', 'Automates a web browser to read pages, take screenshots, run scripts, and check page loading diagnostics.', 'MCP', JSON.stringify(['navigate', 'screenshot', 'execute_javascript', 'lighthouse_audit']));
   }
 
   const cronsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Cron_Jobs`).get() as { cnt: number };
   if (cronsCount.cnt === 0) {
     const insertCron = db.prepare(`
-      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
+      INSERT OR IGNORE INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
-    insertCron.run('cr-1', 'Signal Aggregator Sync', 'Every 5 minutes', 'Scrape competitor product signals & feature releases via CloakBrowser.', new Date(Date.now() - 3 * 60000).toISOString(), 'Active');
-    insertCron.run('cr-2', 'Workspace Log Sanitizer', 'Daily at midnight', 'Clean temporary docker assets & compile cache objects inside local sandboxes.', new Date(Date.now() - 14 * 3600000).toISOString(), 'Active');
-    insertCron.run('cr-3', 'Semantic Index Compiler', 'Hourly', 'Trigger full recursive embedding update for vectorized RRF memory sync.', new Date(Date.now() - 45 * 60000).toISOString(), 'Paused');
+    insertCron.run('cr-1', 'Signal Aggregator Sync', 'Every 5 minutes', 'Find competitor product signals & feature releases using the automated browser.', new Date(Date.now() - 3 * 60000).toISOString(), 'Active');
+    insertCron.run('cr-2', 'Workspace Log Sanitizer', 'Daily at midnight', 'Clean temporary workspace files and cache files.', new Date(Date.now() - 14 * 3600000).toISOString(), 'Active');
+    insertCron.run('cr-3', 'Semantic Index Compiler', 'Hourly', 'Refresh AI memory with recent project files.', new Date(Date.now() - 45 * 60000).toISOString(), 'Paused');
   }
 
   const orchCount = db.prepare(`SELECT COUNT(*) as cnt FROM Event_Log WHERE event_type IN ('delegation','handoff','review','approval','escalation','governance')`).get() as { cnt: number };
   if (orchCount.cnt === 0) {
     const missionRow = db.prepare(`SELECT id FROM Missions LIMIT 1`).get() as { id: string } | undefined;
-    const mid = missionRow?.id || 'm1';
+    let mid = missionRow?.id;
+    if (!mid) {
+      mid = 'm1';
+      db.prepare(`
+        INSERT OR IGNORE INTO Missions (id, title, goal, status)
+        VALUES (?, ?, ?, ?)
+      `).run('m1', 'Production Migration v4.0', 'Hardening cloud-native architecture', 'Active');
+      
+      db.prepare(`
+        INSERT OR IGNORE INTO Glidepaths (id, mission_id, phases, tasks, readiness_score)
+        VALUES (?, ?, ?, ?, ?)
+      `).run('gp-m1', 'm1', '[]', '[]', 0.87);
+    }
     const insertEvent = db.prepare(`
-      INSERT INTO Event_Log (id, mission_id, event_type, actor_type, actor_id, summary, metadata, timestamp)
+      INSERT OR IGNORE INTO Event_Log (id, mission_id, event_type, actor_type, actor_id, summary, metadata, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const now = Date.now();
@@ -544,9 +571,9 @@ export async function initDatabasePostgres() {
       `, [id, name, description, provider, JSON.stringify(tools)]);
     };
     await insertSkill('sk-1', 'Toprank SEO', 'Optimizes structured markdown deliverables for maximum Google search results positioning.', 'Custom API', ['optimize_metadata', 'keyword_density_audit']);
-    await insertSkill('sk-2', 'CloakBrowser Integration', 'Stealth crawler enabling play-by-play internet exploration without bot-fingerprint blocks.', 'Composio', ['stealth_scrape', 'javascript_render']);
-    await insertSkill('sk-3', 'AST Sandbox Self-Healer', 'Diagnoses code compiler failures and performs single-line replacements within docker nodes.', 'Anthropic', ['compile_sandbox', 'fix_syntax_lint']);
-    await insertSkill('sk-4', 'Chrome DevTools Browser Automation', 'High-fidelity, ultra-fast headless browser control, screenshot capturing, JS execution, emulation, and Lighthouse diagnostics.', 'MCP', ['navigate', 'screenshot', 'execute_javascript', 'lighthouse_audit']);
+    await insertSkill('sk-2', 'CloakBrowser Integration', 'Automated web browser helper for gathering internet data.', 'Composio', ['stealth_scrape', 'javascript_render']);
+    await insertSkill('sk-3', 'Code Self-Healer', 'Finds syntax and runtime errors in code and automatically applies fixes.', 'Anthropic', ['compile_sandbox', 'fix_syntax_lint']);
+    await insertSkill('sk-4', 'Web Browser Automation', 'Automates a web browser to read pages, take screenshots, run scripts, and check page loading diagnostics.', 'MCP', ['navigate', 'screenshot', 'execute_javascript', 'lighthouse_audit']);
   }
 
   const cronsCount = await pool.query(`SELECT COUNT(*) as cnt FROM Cron_Jobs`);
@@ -554,15 +581,15 @@ export async function initDatabasePostgres() {
     await pool.query(`
       INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
       VALUES ($1, $2, $3, $4, $5, $6)
-    `, ['cr-1', 'Signal Aggregator Sync', 'Every 5 minutes', 'Scrape competitor product signals & feature releases via CloakBrowser.', new Date(Date.now() - 3 * 60000).toISOString(), 'Active']);
+    `, ['cr-1', 'Signal Aggregator Sync', 'Every 5 minutes', 'Find competitor product signals & feature releases using the automated browser.', new Date(Date.now() - 3 * 60000).toISOString(), 'Active']);
     await pool.query(`
       INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
       VALUES ($1, $2, $3, $4, $5, $6)
-    `, ['cr-2', 'Workspace Log Sanitizer', 'Daily at midnight', 'Clean temporary docker assets & compile cache objects inside local sandboxes.', new Date(Date.now() - 14 * 3600000).toISOString(), 'Active']);
+    `, ['cr-2', 'Workspace Log Sanitizer', 'Daily at midnight', 'Clean temporary workspace files and cache files.', new Date(Date.now() - 14 * 3600000).toISOString(), 'Active']);
     await pool.query(`
       INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
       VALUES ($1, $2, $3, $4, $5, $6)
-    `, ['cr-3', 'Semantic Index Compiler', 'Hourly', 'Trigger full recursive embedding update for vectorized RRF memory sync.', new Date(Date.now() - 45 * 60000).toISOString(), 'Paused']);
+    `, ['cr-3', 'Semantic Index Compiler', 'Hourly', 'Refresh AI memory with recent project files.', new Date(Date.now() - 45 * 60000).toISOString(), 'Paused']);
   }
 
   console.log('PostgreSQL database initialization complete.');

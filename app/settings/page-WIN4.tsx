@@ -1258,7 +1258,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-between items-center flex-wrap gap-4 mt-2">
-                  <p className="font-body text-xs text-on-surface-variant max-w-lg">Allows research and OSINT agents to draft or directly post scheduled social media announcements and trend analysis briefs.</p>
+                  <p className="font-body text-xs text-on-surface-variant max-w-lg">Allows research agents to draft or directly post scheduled social media announcements and trend analysis briefs.</p>
                 </div>
               </div>
 

@@ -1,4 +1,4 @@
-import db from './init';
+import { getSqliteDb } from './init';
 import fs from 'fs';
 import path from 'path';
 
@@ -11,6 +11,7 @@ export function migrate() {
   }
 
   const data = JSON.parse(fs.readFileSync(DB_JSON_PATH, 'utf-8'));
+  const db = getSqliteDb();
 
   db.pragma('foreign_keys = OFF');
 

@@ -6,6 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: supr-app
+    user: root
     restart: unless-stopped
     ports:
       - "3001:3001"
@@ -16,11 +17,15 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - APP_PASSWORD=${APP_PASSWORD}
       - SQLITE_DB_PATH=/app/.agents/supr_local.db
+      - HOST_WORKSPACE_PATH=${PWD}/data/workspaces
+      - CONTAINER_WORKSPACE_PATH=/app/supr_workspaces
     volumes:
       # Persist agent profiles and the SQLite database
       - ./data/agents:/app/.agents
       # Persist sandboxed workspace I/O
       - ./data/workspaces:/app/supr_workspaces
+      # Allow docker client in container to control host docker
+      - /var/run/docker.sock:/var/run/docker.sock
     read_only: true
     tmpfs:
       - /tmp:mode=1777,size=512M

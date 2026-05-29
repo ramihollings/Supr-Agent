@@ -154,7 +154,7 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
               {showShadowMenu && (
                 <div className="absolute top-full right-0 mt-2 w-56 bg-background border-4 border-primary p-3.5 neo-shadow-lg z-50 text-xs">
                   <h4 className="font-headline font-black uppercase text-primary border-b-2 border-primary pb-1.5 mb-2.5">Shadow Mode Setup</h4>
-                  <p className="font-body text-[10px] text-on-surface-variant mb-3 leading-relaxed">Runs in stealth mode. Message histories, tool execution logs, and sandbox telemetry events are NOT logged.</p>
+                  <p className="font-body text-[10px] text-on-surface-variant mb-3 leading-relaxed">Runs in stealth mode. Message histories, tool execution logs, and workspace telemetry events are NOT logged.</p>
                   
                   <div className="space-y-2">
                     <label className="block text-[9px] font-black uppercase text-on-surface-variant font-mono">Stealth Time Limit</label>
@@ -176,18 +176,14 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
 
             {children || (
               <>
-                <button 
-                  onClick={() => handleRedirect('/settings')}
-                  className="bg-background neo-border px-4 py-2 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors duration-100 active:translate-x-1 active:translate-y-1"
-                >
-                  Autonomous Engine
-                </button>
-                <button 
-                  onClick={() => handleRedirect('/mission-control')}
-                  className="bg-primary text-on-primary neo-border px-4 py-2 font-headline font-bold uppercase hover:bg-primary-container hover:text-on-primary-container transition-colors duration-100 active:translate-x-1 active:translate-y-1"
-                >
-                  Project Active
-                </button>
+                <div className="flex items-center gap-2 bg-surface neo-border-sm px-3 py-1.5 font-headline font-bold text-xs uppercase text-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-black animate-pulse inline-block"></span>
+                  <span>System: Online</span>
+                </div>
+                <div className="flex items-center gap-2 bg-surface neo-border-sm px-3 py-1.5 font-headline font-bold text-xs uppercase text-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
+                  <span className="material-symbols-outlined text-xs text-primary font-bold">verified_user</span>
+                  <span>Autopilot: Active</span>
+                </div>
               </>
             )}
           </div>
@@ -241,11 +237,9 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
              <ul className="flex flex-col gap-2">
                 <li><Link href={getHrefWithParam('/')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Dashboard</Link></li>
                 <li><Link href={getHrefWithParam('/supr-chat')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Supr-Chat</Link></li>
-                <li><Link href={getHrefWithParam('/mission-control')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Control Center</Link></li>
                 <li><Link href={getHrefWithParam('/orchestration')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Observance Hub</Link></li>
-                <li><Link href={getHrefWithParam('/activity')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Updates</Link></li>
-                <li><Link href={getHrefWithParam('/agents')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Task Force</Link></li>
-                <li><Link href={getHrefWithParam('/reasoning')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Strategic Plan</Link></li>
+                <li><Link href={getHrefWithParam('/agents')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Agents</Link></li>
+                <li><Link href={getHrefWithParam('/reasoning')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Reasoning Core</Link></li>
                 <li><Link href={getHrefWithParam('/skills')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Skills</Link></li>
                 <li><Link href={getHrefWithParam('/cron-jobs')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Cron Jobs</Link></li>
                 <li className="border-t-2 border-outline-variant pt-2 mt-2"><Link href={getHrefWithParam('/code')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary text-sm">Code Workspace</Link></li>

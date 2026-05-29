@@ -5,7 +5,7 @@ import { addActivityLog, addArtifact, addMemoryItem, getActiveMission, getMissio
 export const dynamic = 'force-dynamic';
 
 const RESEARCH_AGENT_SYSTEM = `You are the Research Agent inside Supr, an enterprise AI orchestration platform.
-Your task is to simulate a high-fidelity OSINT intelligence brief based on the user's search query.
+Your task is to simulate a high-fidelity research intelligence brief based on the user's search query.
 
 RULES:
 - Return ONLY a JSON object, no markdown fences, no extra text
@@ -39,11 +39,11 @@ export async function POST(req: NextRequest) {
           : await getActiveMission();
 
         // Phase 1: Searching
-        send({ type: 'status', phase: 'searching', content: `[RESEARCH AGENT] Dispatching OSINT query: "${query}"` });
+        send({ type: 'status', phase: 'searching', content: `[RESEARCH AGENT] Dispatching research query: "${query}"` });
         await new Promise(r => setTimeout(r, 600));
 
         // Phase 2: Navigating
-        send({ type: 'status', phase: 'browsing', content: `[RESEARCH AGENT] CloakBrowser engaged. Scanning indexed sources...` });
+        send({ type: 'status', phase: 'browsing', content: `[RESEARCH AGENT] Web browser engaged. Scanning indexed sources...` });
 
         let rawJson = '';
         let url = '';
@@ -52,8 +52,8 @@ export async function POST(req: NextRequest) {
         let recommendation = '';
 
         try {
-          const provider = getActiveProvider('research');
-          const prompt = `Generate an OSINT intelligence brief for this enterprise research query: "${query}". Return the JSON object now.`;
+          const provider = await getActiveProvider('research');
+          const prompt = `Generate a research intelligence brief for this enterprise query: "${query}". Return the JSON object now.`;
 
           send({ type: 'status', phase: 'extracting', content: `[RESEARCH AGENT] Extracting structured intelligence signals...` });
 
@@ -88,12 +88,12 @@ export async function POST(req: NextRequest) {
         if (mission) {
           const filename = `research_${query.toLowerCase().replace(/\W+/g, '_').substring(0, 40)}.md`;
           const mdContent = [
-            `# OSINT Intelligence Brief: ${query}`,
+            `# Research Intelligence Brief: ${query}`,
             ``,
             `## Source Analysis`,
             `- **Target Domain**: ${url}`,
             `- **Timestamp**: ${new Date().toLocaleString()}`,
-            `- **Agent**: Research Agent (CloakBrowser v1.2)`,
+            `- **Agent**: Research Agent (WebBrowser v1.2)`,
             ``,
             `## Extracted Intelligence Signals`,
             ...findings.map((f, i) => `${i + 1}. ${f}`),
@@ -120,8 +120,8 @@ export async function POST(req: NextRequest) {
             eventType: 'agent_action',
             actor: 'Research Agent',
             actorIcon: 'travel_explore',
-            summary: `OSINT brief completed for: "${query}"`,
-            detail: `${findings.length} intelligence signals extracted and persisted to SQLite. Markdown brief saved as ${filename}.`,
+            summary: `Research brief completed for: "${query}"`,
+            detail: `${findings.length} research signals extracted and persisted to SQLite. Markdown brief saved as ${filename}.`,
           });
         }
 

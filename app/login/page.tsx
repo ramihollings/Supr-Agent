@@ -45,7 +45,7 @@ function LoginPageContent() {
       if (res.ok && data.success) {
         // Redirect to original page or home
         const redirectUrl = searchParams.get('callbackUrl') || '/';
-        router.push(redirectUrl);
+        window.location.href = redirectUrl;
       } else {
         setError(data.error || 'Invalid credentials');
       }

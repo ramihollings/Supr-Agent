@@ -293,7 +293,9 @@ export async function fetchCronJobsState() {
       interval: r.interval,
       targetAction: r.target_action,
       lastRun: r.last_run,
-      status: r.status
+      status: r.status,
+      assignedAgentId: r.assigned_agent_id || null,
+      associatedTaskId: r.associated_task_id || null
     }));
   } catch (error) {
     console.error("Failed to fetch cron jobs:", error);
@@ -323,14 +325,14 @@ export async function triggerCronJobAction(id: string) {
   }
 }
 
-export async function createCronJobAction(data: { name: string; interval: string; targetAction: string }) {
+export async function createCronJobAction(data: { name: string; interval: string; targetAction: string; assignedAgentId?: string; associatedTaskId?: string }) {
   try {
     const id = `cr-${Date.now()}`;
     const sql = `
-      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
-      VALUES (?, ?, ?, ?, NULL, 'Active')
+      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status, assigned_agent_id, associated_task_id)
+      VALUES (?, ?, ?, ?, NULL, 'Active', ?, ?)
     `;
-    await dbClient.execute(sql, [id, data.name, data.interval, data.targetAction]);
+    await dbClient.execute(sql, [id, data.name, data.interval, data.targetAction, data.assignedAgentId || null, data.associatedTaskId || null]);
     return { success: true, id };
   } catch (error) {
     console.error("Failed to create cron job:", error);
@@ -338,12 +340,12 @@ export async function createCronJobAction(data: { name: string; interval: string
   }
 }
 
-export async function updateCronJobAction(id: string, data: { name: string; interval: string; targetAction: string }) {
+export async function updateCronJobAction(id: string, data: { name: string; interval: string; targetAction: string; assignedAgentId?: string; associatedTaskId?: string }) {
   try {
     const sql = `
-      UPDATE Cron_Jobs SET name = ?, interval = ?, target_action = ? WHERE id = ?
+      UPDATE Cron_Jobs SET name = ?, interval = ?, target_action = ?, assigned_agent_id = ?, associated_task_id = ? WHERE id = ?
     `;
-    await dbClient.execute(sql, [data.name, data.interval, data.targetAction, id]);
+    await dbClient.execute(sql, [data.name, data.interval, data.targetAction, data.assignedAgentId || null, data.associatedTaskId || null, id]);
     return { success: true };
   } catch (error) {
     console.error("Failed to update cron job:", error);
@@ -368,8 +370,8 @@ export async function deleteCronJobAction(id: string) {
 export async function fetchOrchestrationFeed(projectId?: string) {
   try {
     const sql = projectId
-      ? `SELECT * FROM Event_Log WHERE mission_id = ? AND event_type IN ('delegation','handoff','review','approval','escalation','governance') ORDER BY timestamp DESC`
-      : `SELECT * FROM Event_Log WHERE event_type IN ('delegation','handoff','review','approval','escalation','governance') ORDER BY timestamp DESC`;
+      ? `SELECT * FROM Event_Log WHERE mission_id = ? ORDER BY timestamp DESC`
+      : `SELECT * FROM Event_Log ORDER BY timestamp DESC`;
     const rows = projectId
       ? await dbClient.query(sql, [projectId])
       : await dbClient.query(sql);
@@ -838,13 +840,13 @@ export async function sendChatMessageAction(
     return { 
       success: true,
       shadow: shadow.active,
-      message: shadow.active ? {
-        id: `shadow-${Date.now()}`,
+      message: {
+        id: shadow.active ? `shadow-${Date.now()}` : `chat-${Date.now() + 2}`,
         sender: 'supr' as const,
         content: finalContent,
         file: null,
         createdAt: new Date().toISOString()
-      } : undefined
+      }
     };
   } catch (error) {
     console.error("Failed to send chat message:", error);
@@ -928,11 +930,18 @@ export async function executeCodeAction(filename: string, language: string) {
       return { success: false, error: `Language/file type for ${filename} is not supported for sandbox execution.` };
     }
 
-    const { stdout, stderr } = await execAsync(cmd, { cwd: path.resolve(process.cwd(), 'supr_workspaces') });
-    return { success: true, stdout, stderr };
+    const { LocalNodeSandbox } = require('@/lib/providers/sandbox');
+    const sandbox = new LocalNodeSandbox();
+    const result = await sandbox.executeCommand('', cmd);
+    return { 
+      success: result.exitCode === 0, 
+      stdout: result.stdout, 
+      stderr: result.stderr,
+      error: result.error 
+    };
   } catch (error: any) {
-    console.error("Failed to execute code file:", error);
-    return { success: false, error: error.message, stdout: error.stdout, stderr: error.stderr };
+    console.error("Failed to execute code file in sandbox:", error);
+    return { success: false, error: error.message };
   }
 }
 

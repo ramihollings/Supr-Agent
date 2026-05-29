@@ -2,32 +2,55 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-// Initialize the local SQLite database
-const dbPath = process.env.SQLITE_DB_PATH 
-  ? path.resolve(process.env.SQLITE_DB_PATH) 
-  : path.resolve(process.cwd(), 'supr_local.db');
+const isPostgres = !!(process.env.DATABASE_URL || process.env.PGHOST);
 
-// Ensure database directory exists
-const dbDir = path.dirname(dbPath);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+// Lazily-initialized SQLite instance — never null after first access
+let db: any = null;
+let _initialized = false;
+
+function getSqliteDb(): any {
+  if (isPostgres) {
+    throw new Error('[init.ts] getSqliteDb() called in Postgres mode. This is a bug — check db_client.ts routing.');
+  }
+  if (!db) {
+    const dbPath = process.env.SQLITE_DB_PATH
+      ? path.resolve(process.env.SQLITE_DB_PATH)
+      : path.resolve(process.cwd(), 'supr_local.db');
+
+    // Ensure the parent directory exists
+    const dbDir = path.dirname(dbPath);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+
+    db = new Database(dbPath);
+    console.log(`[init.ts] SQLite database opened at: ${dbPath}`);
+  }
+  return db;
 }
 
-const db = new Database(dbPath, { verbose: console.log });
-
 export function initDatabase() {
-  console.log('Initializing Supr local database...');
+  if (_initialized) return; // Idempotent — safe to call multiple times
+  if (isPostgres) return;  // Nothing to initialize in Postgres mode
 
-  // Enable WAL mode for better performance
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('temp_store = MEMORY');
-  db.pragma('cache_size = -2000');
+  const dbInstance = getSqliteDb();
+  console.log('[init.ts] Initializing Supr local database...');
+
+  // Enable WAL mode for better performance outside container, use DELETE mode inside Docker mounts
+  const isDocker = fs.existsSync('/.dockerenv');
+  if (isDocker) {
+    dbInstance.pragma('journal_mode = DELETE');
+  } else {
+    dbInstance.pragma('journal_mode = WAL');
+  }
+  dbInstance.pragma('foreign_keys = ON');
+  dbInstance.pragma('busy_timeout = 5000');
+  dbInstance.pragma('synchronous = NORMAL');
+  dbInstance.pragma('temp_store = MEMORY');
+  dbInstance.pragma('cache_size = -2000');
 
   // 1. Missions Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Missions (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -43,7 +66,7 @@ export function initDatabase() {
   `);
 
   // 2. Glidepaths Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Glidepaths (
       id TEXT PRIMARY KEY,
       mission_id TEXT NOT NULL,
@@ -62,7 +85,7 @@ export function initDatabase() {
   `);
 
   // 3. Agents Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Agents (
       id TEXT PRIMARY KEY,
       workspace_id TEXT,
@@ -79,7 +102,7 @@ export function initDatabase() {
   `);
 
   // 4. Tasks Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Tasks (
       id TEXT PRIMARY KEY,
       mission_id TEXT NOT NULL,
@@ -96,7 +119,7 @@ export function initDatabase() {
   `);
 
   // 5. Approvals Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Approvals (
       id TEXT PRIMARY KEY,
       mission_id TEXT NOT NULL,
@@ -115,7 +138,7 @@ export function initDatabase() {
   `);
 
   // 6. Artifacts Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Artifacts (
       id TEXT PRIMARY KEY,
       mission_id TEXT NOT NULL,
@@ -133,7 +156,7 @@ export function initDatabase() {
   `);
 
   // 7. Memory_Items Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Memory_Items (
       id TEXT PRIMARY KEY,
       workspace_id TEXT,
@@ -149,7 +172,7 @@ export function initDatabase() {
   `);
 
   // 8. Event_Log Table (For event-sourced trace replays)
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Event_Log (
       id TEXT PRIMARY KEY,
       mission_id TEXT NOT NULL,
@@ -164,7 +187,7 @@ export function initDatabase() {
   `);
 
   // 9. Failure_Events Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Failure_Events (
       id TEXT PRIMARY KEY,
       mission_id TEXT NOT NULL,
@@ -183,7 +206,7 @@ export function initDatabase() {
   `);
 
   // 10. Skills Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Skills (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -195,7 +218,7 @@ export function initDatabase() {
   `);
 
   // 11. Cron_Jobs Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Cron_Jobs (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -203,12 +226,22 @@ export function initDatabase() {
       target_action TEXT,
       last_run DATETIME,
       status TEXT, -- Active, Paused
+      assigned_agent_id TEXT,
+      associated_task_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
+  try {
+    dbInstance.exec(`ALTER TABLE Cron_Jobs ADD COLUMN assigned_agent_id TEXT`);
+  } catch (e) {}
+
+  try {
+    dbInstance.exec(`ALTER TABLE Cron_Jobs ADD COLUMN associated_task_id TEXT`);
+  } catch (e) {}
+
   // 12. Settings Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -217,7 +250,7 @@ export function initDatabase() {
   `);
 
   // 13. Supr_Chat_Messages Table
-  db.exec(`
+  dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Supr_Chat_Messages (
       id TEXT PRIMARY KEY,
       sender TEXT NOT NULL,
@@ -229,11 +262,54 @@ export function initDatabase() {
     )
   `);
 
+  // 14. Capabilities Table
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Capabilities (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL, -- direct, mcp, skill
+      required_permission TEXT NOT NULL,
+      risk_level TEXT NOT NULL,
+      input_schema TEXT DEFAULT '{}',
+      output_schema TEXT DEFAULT '{}',
+      description TEXT
+    )
+  `);
+
+  // 15. Agent_Capabilities Table
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Agent_Capabilities (
+      agent_id TEXT NOT NULL,
+      capability_id TEXT NOT NULL,
+      allowed INTEGER DEFAULT 1,
+      constraints TEXT DEFAULT '{}',
+      PRIMARY KEY(agent_id, capability_id),
+      FOREIGN KEY(agent_id) REFERENCES Agents(id) ON DELETE CASCADE,
+      FOREIGN KEY(capability_id) REFERENCES Capabilities(id) ON DELETE CASCADE
+    )
+  `);
+
+  // 16. Policy_Decisions Table
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Policy_Decisions (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      agent_id TEXT,
+      capability_id TEXT,
+      decision TEXT NOT NULL, -- Approved, Denied, RequiresApproval
+      reason TEXT,
+      approval_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Seed default settings
-  const insertSetting = db.prepare(`
+  const insertSetting = dbInstance.prepare(`
     INSERT OR IGNORE INTO Settings (key, value)
     VALUES (?, ?)
   `);
+  
+  insertSetting.run('sandbox_allow_api_keys', 'false');
   
   insertSetting.run('operating_mode', 'guided');
   insertSetting.run('permission_boundary', 'governed');
@@ -252,10 +328,10 @@ export function initDatabase() {
   insertSetting.run('integrations_gmail', '');
 
   // Seed initial coordinator message in Supr-Chat if empty
-  const chatMessagesCount = db.prepare(`SELECT COUNT(*) as cnt FROM Supr_Chat_Messages`).get() as { cnt: number };
+  const chatMessagesCount = dbInstance.prepare(`SELECT COUNT(*) as cnt FROM Supr_Chat_Messages`).get() as { cnt: number };
   if (chatMessagesCount.cnt === 0) {
-    db.prepare(`
-      INSERT INTO Supr_Chat_Messages (id, sender, content)
+    dbInstance.prepare(`
+      INSERT OR IGNORE INTO Supr_Chat_Messages (id, sender, content)
       VALUES (?, ?, ?)
     `).run(
       'init-chat-msg',
@@ -265,10 +341,10 @@ export function initDatabase() {
   }
 
   // Seed default Skills if table is empty
-  const skillsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Skills`).get() as { cnt: number };
+  const skillsCount = dbInstance.prepare(`SELECT COUNT(*) as cnt FROM Skills`).get() as { cnt: number };
   if (skillsCount.cnt === 0) {
-    const insertSkill = db.prepare(`
-      INSERT INTO Skills (id, name, description, provider, tools)
+    const insertSkill = dbInstance.prepare(`
+      INSERT OR IGNORE INTO Skills (id, name, description, provider, tools)
       VALUES (?, ?, ?, ?, ?)
     `);
     insertSkill.run(
@@ -281,38 +357,38 @@ export function initDatabase() {
     insertSkill.run(
       'sk-2',
       'CloakBrowser Integration',
-      'Stealth crawler enabling play-by-play internet exploration without bot-fingerprint blocks.',
+      'Automated web browser helper for gathering internet data.',
       'Composio',
       JSON.stringify(['stealth_scrape', 'javascript_render'])
     );
     insertSkill.run(
       'sk-3',
-      'AST Sandbox Self-Healer',
-      'Diagnoses code compiler failures and performs single-line replacements within docker nodes.',
+      'Code Self-Healer',
+      'Finds syntax and runtime errors in code and automatically applies fixes.',
       'Anthropic',
       JSON.stringify(['compile_sandbox', 'fix_syntax_lint'])
     );
     insertSkill.run(
       'sk-4',
-      'Chrome DevTools Browser Automation',
-      'High-fidelity, ultra-fast headless browser control, screenshot capturing, JS execution, emulation, and Lighthouse diagnostics.',
+      'Web Browser Automation',
+      'Automates a web browser to read pages, take screenshots, run scripts, and check page loading diagnostics.',
       'MCP',
       JSON.stringify(['navigate', 'screenshot', 'execute_javascript', 'lighthouse_audit'])
     );
   }
 
   // Seed default Cron Jobs if table is empty
-  const cronsCount = db.prepare(`SELECT COUNT(*) as cnt FROM Cron_Jobs`).get() as { cnt: number };
+  const cronsCount = dbInstance.prepare(`SELECT COUNT(*) as cnt FROM Cron_Jobs`).get() as { cnt: number };
   if (cronsCount.cnt === 0) {
-    const insertCron = db.prepare(`
-      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
+    const insertCron = dbInstance.prepare(`
+      INSERT OR IGNORE INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
     insertCron.run(
       'cr-1',
       'Signal Aggregator Sync',
       'Every 5 minutes',
-      'Scrape competitor product signals & feature releases via CloakBrowser.',
+      'Find competitor product signals & feature releases using the automated browser.',
       new Date(Date.now() - 3 * 60000).toISOString(),
       'Active'
     );
@@ -320,7 +396,7 @@ export function initDatabase() {
       'cr-2',
       'Workspace Log Sanitizer',
       'Daily at midnight',
-      'Clean temporary docker assets & compile cache objects inside local sandboxes.',
+      'Clean temporary workspace files and cache files.',
       new Date(Date.now() - 14 * 3600000).toISOString(),
       'Active'
     );
@@ -328,19 +404,31 @@ export function initDatabase() {
       'cr-3',
       'Semantic Index Compiler',
       'Hourly',
-      'Trigger full recursive embedding update for vectorized RRF memory sync.',
+      'Refresh AI memory with recent project files.',
       new Date(Date.now() - 45 * 60000).toISOString(),
       'Paused'
     );
   }
 
   // Seed orchestration events for the Observance Hub
-  const orchCount = db.prepare(`SELECT COUNT(*) as cnt FROM Event_Log WHERE event_type IN ('delegation','handoff','review','approval','escalation','governance')`).get() as { cnt: number };
+  const orchCount = dbInstance.prepare(`SELECT COUNT(*) as cnt FROM Event_Log WHERE event_type IN ('delegation','handoff','review','approval','escalation','governance')`).get() as { cnt: number };
   if (orchCount.cnt === 0) {
-    const missionRow = db.prepare(`SELECT id FROM Missions LIMIT 1`).get() as { id: string } | undefined;
-    const mid = missionRow?.id || 'm1';
-    const insertEvent = db.prepare(`
-      INSERT INTO Event_Log (id, mission_id, event_type, actor_type, actor_id, summary, metadata, timestamp)
+    const missionRow = dbInstance.prepare(`SELECT id FROM Missions LIMIT 1`).get() as { id: string } | undefined;
+    let mid = missionRow?.id;
+    if (!mid) {
+      mid = 'm1';
+      dbInstance.prepare(`
+        INSERT OR IGNORE INTO Missions (id, title, goal, status)
+        VALUES (?, ?, ?, ?)
+      `).run('m1', 'Production Migration v4.0', 'Hardening cloud-native architecture', 'Active');
+      
+      dbInstance.prepare(`
+        INSERT OR IGNORE INTO Glidepaths (id, mission_id, phases, tasks, readiness_score)
+        VALUES (?, ?, ?, ?, ?)
+      `).run('gp-m1', 'm1', '[]', '[]', 0.87);
+    }
+    const insertEvent = dbInstance.prepare(`
+      INSERT OR IGNORE INTO Event_Log (id, mission_id, event_type, actor_type, actor_id, summary, metadata, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const now = Date.now();
@@ -369,10 +457,64 @@ export function initDatabase() {
     }
   }
 
-  console.log('Database initialization complete.');
+  // Seed default capabilities if table is empty
+  const capCount = dbInstance.prepare(`SELECT COUNT(*) as cnt FROM Capabilities`).get() as { cnt: number };
+  if (capCount.cnt === 0) {
+    // Seed default agents first to satisfy foreign key constraints
+    const insertAgent = dbInstance.prepare(`
+      INSERT OR IGNORE INTO Agents (id, name, role, type, permission_tier, status)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertAgent.run('a1', 'Supr', 'Supervisor', 'permanent', 'Root', 'Idle');
+    insertAgent.run('a2', 'Research Agent', 'Research', 'permanent', 'Observe', 'Idle');
+    insertAgent.run('a3', 'Code Agent', 'Code', 'permanent', 'Execute', 'Idle');
+    insertAgent.run('a4', 'QA Agent', 'QA', 'permanent', 'Execute', 'Idle');
+    insertAgent.run('a5', 'Signal Agent', 'Signal', 'permanent', 'External_Act', 'Idle');
+
+    const insertCap = dbInstance.prepare(`
+      INSERT OR IGNORE INTO Capabilities (id, name, type, required_permission, risk_level, description)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    
+    insertCap.run('web_scrape', 'web_scrape', 'direct', 'Observe', 'Low', 'Scrapes text content and HTML from a URL using headless browser.');
+    insertCap.run('execute_command', 'execute_command', 'direct', 'Execute', 'High', 'Runs a shell command inside the Docker sandbox.');
+    insertCap.run('slack_send_message', 'slack_send_message', 'direct', 'External_Act', 'Medium', 'Posts a notification message directly to Slack channel.');
+    insertCap.run('github_create_issue', 'github_create_issue', 'direct', 'External_Act', 'Medium', 'Creates a new bug report or task issue on GitHub repository.');
+    insertCap.run('obra_superpowers', 'obra_superpowers', 'direct', 'Root', 'Critical', 'Executes highly-privileged system administration modifications.');
+
+    // Seed agent capability bindings
+    const insertAgentCap = dbInstance.prepare(`
+      INSERT OR IGNORE INTO Agent_Capabilities (agent_id, capability_id, allowed)
+      VALUES (?, ?, 1)
+    `);
+
+    // Supr (a1) gets all
+    insertAgentCap.run('a1', 'web_scrape');
+    insertAgentCap.run('a1', 'execute_command');
+    insertAgentCap.run('a1', 'slack_send_message');
+    insertAgentCap.run('a1', 'github_create_issue');
+    insertAgentCap.run('a1', 'obra_superpowers');
+
+    // Research Agent (a2) gets web_scrape
+    insertAgentCap.run('a2', 'web_scrape');
+
+    // Code Agent (a3) gets execute_command and github_create_issue
+    insertAgentCap.run('a3', 'execute_command');
+    insertAgentCap.run('a3', 'github_create_issue');
+
+    // QA Agent (a4) gets web_scrape and execute_command
+    insertAgentCap.run('a4', 'web_scrape');
+    insertAgentCap.run('a4', 'execute_command');
+
+    // Sub-Supr (a5) gets execute_command and slack_send_message
+    insertAgentCap.run('a5', 'execute_command');
+    insertAgentCap.run('a5', 'slack_send_message');
+  }
+
+  _initialized = true;
+  console.log('[init.ts] Database initialization complete.');
 }
 
-// Run database initialization synchronously on import to guarantee all tables exist in SQLite
-initDatabase();
-
-export default db;
+// Export the lazy getter so db_client.ts can get the live instance after init
+export { getSqliteDb };
+export default getSqliteDb;

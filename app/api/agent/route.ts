@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
 
           // 2. LLM Generation
           try {
-            const provider = getActiveProvider('supr');
+            const provider = await getActiveProvider('supr');
             const systemContext = mission ? `Active Mission: ${mission.name}. Objective: ${mission.objective}` : 'No active mission.';
             
             const responseText = await provider.generateContent(prompt, {

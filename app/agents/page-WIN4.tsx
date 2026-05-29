@@ -14,17 +14,46 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [viewMode, setViewMode] = useState<'active' | 'archived'>('active');
 
+  // Agent Custom LLM & Capability state override mocks
+  const [agentSettings, setAgentSettings] = useState<Record<string, {
+    model: string;
+    temperature: number;
+    maxTokens: number;
+    capabilities: string[];
+  }>>({});
+
   const loadAgents = async () => {
     const data = await fetchAgentsState();
-    if (data) setAgents(data);
+    if (data) {
+      setAgents(data);
+      // Initialize configurations if empty
+      const initialSettings: typeof agentSettings = {};
+      data.forEach(a => {
+        const isHighTier = ['Root', 'Execute', 'External_Act'].includes(a.permissionTier);
+        initialSettings[a.id] = {
+          model: a.name.toLowerCase() === 'supr' ? 'gemini-1.5-pro' : 'gemini-1.5-flash',
+          temperature: a.permissionTier === 'Edit' ? 0.3 : 0.7,
+          maxTokens: isHighTier ? 8192 : 4096,
+          capabilities: getDefaultsForTier(a.permissionTier)
+        };
+      });
+      setAgentSettings(prev => ({ ...initialSettings, ...prev }));
+    }
+  };
+
+  const getDefaultsForTier = (tier: string): string[] => {
+    switch (tier) {
+      case 'Root': return ['read', 'write', 'sandbox', 'network', 'webhook'];
+      case 'External_Act': return ['read', 'write', 'sandbox', 'network'];
+      case 'Execute': return ['read', 'write', 'sandbox'];
+      case 'Edit': return ['read', 'write'];
+      case 'Draft': return ['read'];
+      default: return [];
+    }
   };
 
   useEffect(() => {
-    let active = true;
-    fetchAgentsState().then(data => {
-      if (active && data) setAgents(data);
-    });
-    return () => { active = false; };
+    loadAgents();
   }, []);
 
   const showToast = (msg: string) => {
@@ -32,17 +61,48 @@ export default function AgentsPage() {
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  // The database `status` column determines if they are active or archived
-  // Note: in our Agent type it may not have `status` explicitly typed, so we filter by `isActive`.
-  // Wait, in lib/db.ts, extendAgent updates status='active', archiveAgent updates status='archived'.
-  // However, getAgents() currently returns isActive = true for all loaded if not mapped correctly.
-  // Actually, getAgents() in lib/db.ts maps status === 'active' to isActive.
+  const handleUpdateCapability = (agentId: string, cap: string) => {
+    setAgentSettings(prev => {
+      const currentCaps = prev[agentId]?.capabilities || [];
+      const updatedCaps = currentCaps.includes(cap)
+        ? currentCaps.filter(c => c !== cap)
+        : [...currentCaps, cap];
+      showToast(`Capabilities re-aligned for sub-agent.`);
+      return {
+        ...prev,
+        [agentId]: {
+          ...prev[agentId],
+          capabilities: updatedCaps
+        }
+      };
+    });
+  };
+
+  const handleUpdateLLM = (agentId: string, field: 'model' | 'temperature' | 'maxTokens', value: any) => {
+    setAgentSettings(prev => ({
+      ...prev,
+      [agentId]: {
+        ...prev[agentId],
+        [field]: value
+      }
+    }));
+  };
+
   const activeAgents = agents.filter(a => a.isActive);
   const archivedAgents = agents.filter(a => !a.isActive);
 
+  // Helper mock metrics
+  const getMetrics = (name: string) => {
+    const lname = name.toLowerCase();
+    if (lname === 'supr') return { tasks: 48, time: '18.4h', tokens: '4.8M' };
+    if (lname === 'research') return { tasks: 22, time: '8.1h', tokens: '2.1M' };
+    if (lname.includes('crawler')) return { tasks: 12, time: '3.6h', tokens: '890k' };
+    return { tasks: 5, time: '1.2h', tokens: '240k' };
+  };
+
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
-      <TopNav title="Agent Team Manager" />
+      <TopNav title="AI Team Manager" />
       
       {toastMessage && (
         <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
@@ -53,15 +113,17 @@ export default function AgentsPage() {
       <main className="flex-1 p-6 md:p-12 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-6 border-b-4 border-primary pb-6">
           <div>
-            <h1 className="font-headline text-5xl md:text-7xl font-black uppercase tracking-tighter text-primary">Task Force Roster</h1>
-            <p className="font-body text-lg font-bold mt-2 text-on-surface-variant max-w-2xl border-l-4 border-secondary pl-4">Manage autonomous and temporary agents. Allocate permissions, monitor statuses, and instantiate new operational units.</p>
+            <h1 className="font-headline text-5xl md:text-6xl font-black uppercase tracking-tighter text-primary">AI Agents Roster</h1>
+            <p className="font-body text-lg font-bold mt-2 text-on-surface-variant max-w-2xl border-l-4 border-secondary pl-4">
+              Allocate model weights, configure capability policies, and inspect historical tokens consumed by autonomous subagents.
+            </p>
           </div>
           <button 
             onClick={() => setShowWizard(true)}
-            className="bg-primary text-on-primary neo-border font-headline font-bold uppercase text-xl py-4 px-8 hover:bg-background hover:text-primary neo-shadow transition-all active:translate-x-1 active:translate-y-1 flex items-center gap-3 shrink-0"
+            className="bg-primary text-on-primary neo-border font-headline font-bold uppercase text-lg py-3.5 px-6 hover:bg-background hover:text-primary neo-shadow transition-all active:translate-x-1 active:translate-y-1 flex items-center gap-3 shrink-0"
           >
             <span className="material-symbols-outlined">add_circle</span>
-            Create New Agent
+            Deploy New Agent
           </button>
         </header>
 
@@ -69,124 +131,177 @@ export default function AgentsPage() {
         <div className="flex gap-4 mb-8">
           <button 
             onClick={() => setViewMode('active')}
-            className={`font-headline font-black uppercase tracking-tight text-xl py-2 px-6 border-4 border-primary transition-colors neo-shadow ${
+            className={`font-headline font-black uppercase tracking-tight text-lg py-2 px-6 border-4 border-primary transition-colors neo-shadow ${
               viewMode === 'active' ? 'bg-primary text-on-primary' : 'bg-surface hover:bg-primary-container'
             }`}
           >
-            Active Task Force
+            Active Squad
           </button>
           <button 
             onClick={() => setViewMode('archived')}
-            className={`font-headline font-black uppercase tracking-tight text-xl py-2 px-6 border-4 border-primary transition-colors neo-shadow flex items-center gap-2 ${
+            className={`font-headline font-black uppercase tracking-tight text-lg py-2 px-6 border-4 border-primary transition-colors neo-shadow flex items-center gap-2 ${
               viewMode === 'archived' ? 'bg-primary text-on-primary' : 'bg-surface hover:bg-primary-container'
             }`}
           >
-            <span className="material-symbols-outlined">inventory_2</span>
-            Onboarding Registry
+            <span className="material-symbols-outlined text-sm">inventory_2</span>
+            Agent Archive ({archivedAgents.length})
           </button>
         </div>
 
         {viewMode === 'active' ? (
-          <>
-            {/* Permanent Agents Section */}
-            <section className="mb-16">
-              <div className="flex items-center gap-4 mb-8">
-                <h2 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">Permanent Units</h2>
-                <div className="h-1 flex-1 bg-primary"></div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-                {activeAgents.filter(a => a.isPermanent).map(agent => (
-                  <article key={agent.id} className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] flex flex-col relative overflow-hidden">
-                    <div className={`border-b-4 border-primary p-4 flex justify-between items-center ${agent.name.toLowerCase() === 'supr' ? 'bg-primary-container' : agent.name.toLowerCase() === 'research' ? 'bg-tertiary-container' : 'bg-inverse-primary'}`}>
-                      <div className="flex items-center gap-3">
-                        <span className="material-symbols-outlined text-3xl text-primary font-black">
-                          {agent.name.toLowerCase() === 'supr' ? 'admin_panel_settings' : agent.name.toLowerCase() === 'research' ? 'travel_explore' : 'terminal'}
-                        </span>
-                        <h3 className="font-headline text-2xl font-black uppercase tracking-tight text-primary">{agent.name}</h3>
-                      </div>
-                      <span className="bg-primary text-primary-container px-3 py-1 font-body text-xs font-bold uppercase neo-border">Active</span>
-                    </div>
-                    <div className="p-6 flex-1 flex flex-col gap-6">
-                      <div>
-                        <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-1">Role</p>
-                        <p className="font-headline text-xl font-bold uppercase text-primary border-l-4 border-primary pl-3">{agent.role}</p>
-                      </div>
-                      <div>
-                        <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-2">Permission Tier</p>
-                        <div className="flex gap-2 font-headline text-sm font-bold uppercase">
-                          <span className="bg-primary text-on-primary px-2 py-1">{agent.permissionTier}</span>
-                        </div>
-                      </div>
-                      <div className="mt-auto">
-                        <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-2 border-b-2 border-primary pb-1">Context Integration</p>
-                        <p className="font-body text-sm font-medium italic text-primary bg-surface-container p-3 border-l-4 border-primary">Core persistent unit integrated via workspace SQLite context loops.</p>
-                      </div>
-                    </div>
-                    <div className="border-t-4 border-primary flex">
-                      <button 
-                        onClick={() => router.push('/settings')}
-                        className="flex-1 py-3 font-headline font-bold uppercase border-r-4 border-primary hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2"
-                      >
-                        <span className="material-symbols-outlined">settings</span> Configure
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            {activeAgents.map(agent => {
+              const settings = agentSettings[agent.id] || { model: 'gemini-1.5-flash', temperature: 0.7, maxTokens: 4096, capabilities: [] };
+              const metrics = getMetrics(agent.name);
+              const isSupr = agent.name.toLowerCase() === 'supr';
 
-            {/* Temporary Agents Section */}
-            <section>
-              <div className="flex items-center gap-4 mb-8">
-                <h2 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">Temporary Units</h2>
-                <div className="h-1 flex-1 bg-secondary border-t-2 border-b-2 border-primary border-dashed"></div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-                {activeAgents.filter(a => !a.isPermanent).map(agent => (
-                  <article key={agent.id} className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(230,59,46,1)] flex flex-col relative overflow-hidden">
-                    <div className="border-b-4 border-primary p-4 bg-surface-variant flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <span className="material-symbols-outlined text-3xl text-secondary font-black">sensors</span>
+              return (
+                <article key={agent.id} className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] flex flex-col relative overflow-hidden">
+                  {/* Card Header */}
+                  <div className={`border-b-4 border-primary p-4 flex justify-between items-center ${
+                    isSupr ? 'bg-primary-container' : 'bg-surface-variant'
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <span className="material-symbols-outlined text-3xl text-primary font-black">
+                        {isSupr ? 'admin_panel_settings' : 'smart_toy'}
+                      </span>
+                      <div>
                         <h3 className="font-headline text-2xl font-black uppercase tracking-tight text-primary">{agent.name}</h3>
+                        <p className="font-body text-xs font-bold text-on-surface-variant uppercase">{agent.role}</p>
                       </div>
-                      <span className="bg-primary text-primary-fixed px-3 py-1 font-body text-xs font-bold uppercase neo-border">Deployed</span>
                     </div>
-                    <div className="p-6 flex-1 flex flex-col gap-6">
-                      <div>
-                        <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-1">Role</p>
-                        <p className="font-headline text-xl font-bold uppercase text-primary border-l-4 border-primary pl-3">{agent.role}</p>
-                      </div>
-                      <div>
-                        <p className="font-body text-xs font-bold uppercase text-on-surface-variant mb-2">Permission Tier</p>
-                        <div className="flex gap-2 font-headline text-sm font-bold uppercase flex-wrap">
-                          <span className="bg-primary text-on-primary px-2 py-1">{agent.permissionTier}</span>
+                    <div className="flex gap-2">
+                      <span className="bg-primary text-on-primary px-2.5 py-0.5 font-body text-[10px] font-bold uppercase neo-border">{agent.isPermanent ? 'Permanent' : 'Temporary'}</span>
+                      <span className="bg-surface text-primary border-2 border-primary px-2.5 py-0.5 font-body text-[10px] font-bold uppercase">{agent.permissionTier}</span>
+                    </div>
+                  </div>
+
+                  {/* Settings and Options Grid */}
+                  <div className="p-6 flex-1 flex flex-col gap-6">
+                    
+                    {/* Part 1: LLM Configuration Panel */}
+                    <div className="border-2 border-primary p-4 bg-surface-container">
+                      <h4 className="font-headline font-bold text-xs uppercase text-primary mb-3 flex items-center gap-1.5 border-b border-primary/20 pb-1.5">
+                        <span className="material-symbols-outlined text-xs">tune</span> LLM Weights & Parameters
+                      </h4>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-body font-bold uppercase text-on-surface-variant">Active Model</span>
+                          <select 
+                            value={settings.model} 
+                            onChange={(e) => handleUpdateLLM(agent.id, 'model', e.target.value)}
+                            className="bg-background border-2 border-primary px-2 py-1 font-mono font-bold uppercase text-[10px]"
+                          >
+                            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Balanced)</option>
+                            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast)</option>
+                            <option value="gemini-2.0-experimental">Gemini 2.0 Experimental</option>
+                          </select>
+                        </div>
+
+                        <div className="text-xs">
+                          <div className="flex justify-between font-body font-bold uppercase text-on-surface-variant mb-1">
+                            <span>Temperature</span>
+                            <span className="font-mono">{settings.temperature}</span>
+                          </div>
+                          <input 
+                            type="range" 
+                            min="0" 
+                            max="1" 
+                            step="0.1" 
+                            value={settings.temperature} 
+                            onChange={(e) => handleUpdateLLM(agent.id, 'temperature', parseFloat(e.target.value))}
+                            className="w-full cursor-pointer accent-primary" 
+                          />
+                        </div>
+
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-body font-bold uppercase text-on-surface-variant">Max Response Tokens</span>
+                          <select 
+                            value={settings.maxTokens} 
+                            onChange={(e) => handleUpdateLLM(agent.id, 'maxTokens', parseInt(e.target.value))}
+                            className="bg-background border-2 border-primary px-2 py-1 font-mono font-bold text-[10px]"
+                          >
+                            <option value="2048">2048 Tokens</option>
+                            <option value="4096">4096 Tokens</option>
+                            <option value="8192">8192 Tokens</option>
+                            <option value="16384">16384 Tokens</option>
+                          </select>
                         </div>
                       </div>
                     </div>
-                    <div className="border-t-4 border-primary flex">
+
+                    {/* Part 2: Granular Capability Safeguards */}
+                    <div>
+                      <h4 className="font-headline font-bold text-xs uppercase text-primary mb-2.5 tracking-wider">Capability Policies</h4>
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-headline font-bold uppercase">
+                        {[
+                          { key: 'read', label: 'File System Read' },
+                          { key: 'write', label: 'File System Write' },
+                          { key: 'sandbox', label: 'Sandbox Execution' },
+                          { key: 'network', label: 'Network Access' },
+                          { key: 'webhook', label: 'Webhook Dispatches' }
+                        ].map(cap => {
+                          const isAllowed = settings.capabilities.includes(cap.key);
+                          return (
+                            <label 
+                              key={cap.key} 
+                              className={`flex items-center gap-2 p-2 border-2 cursor-pointer transition-colors ${
+                                isAllowed ? 'bg-primary-container border-primary text-primary' : 'bg-surface border-outline-variant text-on-surface-variant'
+                              }`}
+                            >
+                              <input 
+                                type="checkbox" 
+                                checked={isAllowed} 
+                                onChange={() => handleUpdateCapability(agent.id, cap.key)}
+                                className="w-3.5 h-3.5 border-2 border-primary accent-primary"
+                              />
+                              <span>{cap.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Part 3: Operational Metrics */}
+                    <div className="grid grid-cols-3 gap-2 border-t-2 border-outline-variant pt-4 bg-surface-container-low p-3">
+                      <div className="text-center">
+                        <span className="font-headline font-bold text-[8px] uppercase text-on-surface-variant block">Tasks Run</span>
+                        <span className="font-headline font-black text-base text-primary">{metrics.tasks}</span>
+                      </div>
+                      <div className="text-center border-x-2 border-outline-variant">
+                        <span className="font-headline font-bold text-[8px] uppercase text-on-surface-variant block">Time Active</span>
+                        <span className="font-headline font-black text-base text-secondary">{metrics.time}</span>
+                      </div>
+                      <div className="text-center">
+                        <span className="font-headline font-bold text-[8px] uppercase text-on-surface-variant block">Tokens Spent</span>
+                        <span className="font-headline font-black text-base text-tertiary">{metrics.tokens}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions Bar */}
+                  {!isSupr && (
+                    <div className="border-t-4 border-primary flex bg-surface-container-high">
                       <button 
                         onClick={async () => {
-                          showToast(`Deactivating & Archiving ${agent.name}...`);
+                          showToast(`Archiving and shutting down ${agent.name}...`);
                           await archiveAgentAction(agent.id);
                           loadAgents();
                         }}
-                        className="flex-1 py-3 font-headline font-bold uppercase hover:bg-secondary hover:text-on-error transition-colors flex items-center justify-center gap-2"
+                        className="flex-1 py-3 font-headline font-bold text-xs uppercase hover:bg-secondary hover:text-on-error transition-colors flex items-center justify-center gap-2 text-primary"
                       >
-                        <span className="material-symbols-outlined">inventory_2</span> Deactivate
+                        <span className="material-symbols-outlined text-sm">inventory_2</span> Archive Agent
                       </button>
                     </div>
-                  </article>
-                ))}
-                {activeAgents.filter(a => !a.isPermanent).length === 0 && (
-                  <p className="font-body text-sm font-bold text-on-surface-variant italic p-4 bg-surface-container border-l-4 border-primary neo-border">No temporary units currently deployed.</p>
-                )}
-              </div>
-            </section>
-          </>
+                  )}
+                </article>
+              );
+            })}
+          </div>
         ) : (
           <section>
             <div className="flex items-center gap-4 mb-8">
-              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter text-on-surface-variant">Evaluation Sandbox</h2>
+              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter text-on-surface-variant">Central Agent Archive</h2>
               <div className="h-1 flex-1 bg-outline-variant"></div>
             </div>
             
@@ -196,20 +311,27 @@ export default function AgentsPage() {
                   <div className="border-b-4 border-outline p-4 bg-surface-variant flex justify-between items-center">
                     <div className="flex items-center gap-3 text-on-surface-variant">
                       <span className="material-symbols-outlined text-3xl font-black">archive</span>
-                      <h3 className="font-headline text-2xl font-black uppercase tracking-tight">{agent.name}</h3>
+                      <div>
+                        <h3 className="font-headline text-2xl font-black uppercase tracking-tight">{agent.name}</h3>
+                        <p className="font-body text-[9px] text-on-surface-variant font-bold uppercase">{agent.role}</p>
+                      </div>
                     </div>
                     <span className="bg-surface text-on-surface-variant px-3 py-1 font-body text-xs font-bold uppercase neo-border border-outline">Archived</span>
                   </div>
                   <div className="p-6 flex-1 flex flex-col gap-4 text-on-surface-variant">
                     <div>
-                      <p className="font-body text-xs font-bold uppercase mb-1">Historical Role</p>
-                      <p className="font-headline text-lg font-bold uppercase border-l-4 border-outline pl-3">{agent.role}</p>
+                      <p className="font-body text-xs font-bold uppercase mb-1">Historical Permission</p>
+                      <p className="font-headline text-sm font-bold uppercase border-l-4 border-outline pl-3">{agent.permissionTier}</p>
+                    </div>
+                    <div className="bg-surface p-3 text-[10px] font-mono leading-relaxed border border-outline">
+                      Tasks executed: {getMetrics(agent.name).tasks}<br/>
+                      Total Tokens: {getMetrics(agent.name).tokens}
                     </div>
                   </div>
                   <div className="border-t-4 border-outline flex bg-surface">
                     <button 
                       onClick={async () => {
-                        showToast(`Reactivating ${agent.name}...`);
+                        showToast(`Restoring ${agent.name} back to active squad...`);
                         await extendAgentAction(agent.id);
                         loadAgents();
                       }}
@@ -234,8 +356,8 @@ export default function AgentsPage() {
               {archivedAgents.length === 0 && (
                 <div className="col-span-full flex flex-col items-center justify-center p-12 text-on-surface-variant text-center bg-surface-container border-4 border-dashed border-outline-variant">
                   <span className="material-symbols-outlined text-6xl mb-4 text-outline">inventory_2</span>
-                  <h3 className="font-headline font-bold uppercase text-xl">Sandbox Empty</h3>
-                  <p className="font-body text-sm mt-2 max-w-sm">When external agents are added under a zero-trust model, they must be audited in the evaluation sandbox before deployment.</p>
+                  <h3 className="font-headline font-bold uppercase text-xl">Archive Registry Empty</h3>
+                  <p className="font-body text-sm mt-2 max-w-sm">There are no deactivated sub-agents. Deactivating an agent moves them into the secure archive.</p>
                 </div>
               )}
             </div>
@@ -249,7 +371,7 @@ export default function AgentsPage() {
           onAgentCreated={() => {
             showToast("Agent Profile Synthesized and Deployed.");
             loadAgents();
-          }} 
+          }}
         />
       )}
     </div>

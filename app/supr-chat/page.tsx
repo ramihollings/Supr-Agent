@@ -11,7 +11,9 @@ import {
   deleteWorkspaceFileAction,
   executeCodeAction,
   fetchSettingsAction,
-  updateSettingAction
+  updateSettingAction,
+  fetchAgentStatuses,
+  fetchMissionsAction
 } from '@/app/actions';
 
 interface ChatMessage {
@@ -33,16 +35,30 @@ interface WorkspaceFile {
   type: string;
 }
 
+interface AgentStatus {
+  id: string;
+  name: string;
+  role: string;
+  permissionTier: string;
+  isPermanent: boolean;
+  currentTask: string | null;
+  currentProject: string | null;
+  status: string;
+}
+
 export default function SuprChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
 
   // Settings states (Toggles saved to Settings DB)
   const [activeModel, setActiveModel] = useState('gemini');
   const [temperature, setTemperature] = useState('0.7');
   const [autonomyMode, setAutonomyMode] = useState('guided');
+  const [sandboxAllowKeys, setSandboxAllowKeys] = useState(false);
+
+  // Agent Statuses Roster
+  const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
 
   // File Upload states
   const [selectedFile, setSelectedFile] = useState<{ name: string; type: string; content: string } | null>(null);
@@ -50,8 +66,8 @@ export default function SuprChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Side-Canvas Workspace States
-  const [canvasOpen, setCanvasOpen] = useState(false);
+  // Right-Pane Workspace Canvas States
+  const [canvasOpen, setCanvasOpen] = useState(true); // default open for 3-pane layout
   const [canvasTab, setCanvasTab] = useState<'preview' | 'run' | 'explorer'>('explorer');
   const [canvasFile, setCanvasFile] = useState<{ filename: string; content: string } | null>(null);
   
@@ -63,8 +79,12 @@ export default function SuprChatPage() {
   useEffect(() => {
     loadData();
     loadWorkspace();
-    const interval = setInterval(loadWorkspace, 5000);
-    return () => clearInterval(interval);
+    const wsInterval = setInterval(loadWorkspace, 10000);
+    const agentInterval = setInterval(loadAgents, 5000);
+    return () => {
+      clearInterval(wsInterval);
+      clearInterval(agentInterval);
+    };
   }, []);
 
   useEffect(() => {
@@ -72,18 +92,62 @@ export default function SuprChatPage() {
   }, [messages]);
 
   const loadData = async () => {
-    const [msgs, settings] = await Promise.all([
+    const [msgs, settings, projectsList, filesList, statuses] = await Promise.all([
       fetchChatMessagesAction(),
-      fetchSettingsAction()
+      fetchSettingsAction(),
+      fetchMissionsAction(),
+      fetchWorkspaceFilesAction(),
+      fetchAgentStatuses()
     ]);
-    setMessages(msgs);
+
+    setAgentStatuses(statuses);
     if (settings.llm_provider_supr) setActiveModel(settings.llm_provider_supr);
     if (settings.operating_mode) setAutonomyMode(settings.operating_mode);
+    if (settings.llm_temperature_supr) setTemperature(settings.llm_temperature_supr);
+    if (settings.sandbox_allow_api_keys) setSandboxAllowKeys(settings.sandbox_allow_api_keys === 'true');
+
+    let processedMsgs = [...msgs];
+    if (processedMsgs.length <= 1) {
+      const activeProjCount = projectsList.filter(p => p.status === 'Active').length;
+      const fileCount = filesList.length;
+      
+      const welcomeText = `Hello Manager! I am Supr, your central coordinator. 
+I have initialized our secure session. 
+
+**Current System Telemetry:**
+*   **Active Projects:** ${activeProjCount} project(s) currently under management.
+*   **Sandbox Workspace:** ${fileCount} file(s) available in local Docker sandbox.
+*   **Auth Clearance:** ${settings.permission_boundary || 'governed'} tier enabled.
+*   **LLM Provider Priority:** ${settings.llm_provider_supr || 'Gemini'} active.
+
+How can I assist you today? You can query data, ask me to draft/run code files in our isolated sandbox, or dispatch agent actions directly.`;
+
+      if (processedMsgs.length === 0) {
+        processedMsgs = [{
+          id: 'init-msg',
+          sender: 'supr',
+          content: welcomeText,
+          file: null,
+          createdAt: new Date().toISOString()
+        }];
+      } else {
+        processedMsgs[0] = {
+          ...processedMsgs[0],
+          content: welcomeText
+        };
+      }
+    }
+    setMessages(processedMsgs);
   };
 
   const loadWorkspace = async () => {
     const files = await fetchWorkspaceFilesAction();
     setWsFiles(files);
+  };
+
+  const loadAgents = async () => {
+    const statuses = await fetchAgentStatuses();
+    setAgentStatuses(statuses);
   };
 
   const handleFileUploadClick = () => {
@@ -97,7 +161,6 @@ export default function SuprChatPage() {
     setUploadLoading(true);
     const reader = new FileReader();
 
-    // Check if the file is text or image/binary
     const isText = file.type.startsWith('text/') || 
                    file.name.endsWith('.js') || 
                    file.name.endsWith('.ts') || 
@@ -118,7 +181,7 @@ export default function SuprChatPage() {
     if (isText) {
       reader.readAsText(file);
     } else {
-      reader.readAsDataURL(file); // Image/PDF read as base64 DataURL
+      reader.readAsDataURL(file);
     }
   };
 
@@ -133,7 +196,6 @@ export default function SuprChatPage() {
     setInputText('');
     setSelectedFile(null);
 
-    // Refresh immediately to show user message
     setMessages(prev => [
       ...prev,
       {
@@ -155,12 +217,19 @@ export default function SuprChatPage() {
     setChatLoading(false);
   };
 
+  const handleToggleSandboxKeys = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const checked = e.target.checked;
+    setSandboxAllowKeys(checked);
+    await updateSettingAction('sandbox_allow_api_keys', checked ? 'true' : 'false');
+  };
+
   const handleApplyChatSettings = async () => {
     await Promise.all([
       updateSettingAction('llm_provider_supr', activeModel),
-      updateSettingAction('operating_mode', autonomyMode)
+      updateSettingAction('operating_mode', autonomyMode),
+      updateSettingAction('llm_temperature_supr', temperature)
     ]);
-    setShowSettings(false);
+    alert("Controls applied successfully.");
   };
 
   // Open Canvas File
@@ -202,7 +271,6 @@ export default function SuprChatPage() {
         loadWorkspace();
         if (canvasFile?.filename === filename) {
           setCanvasFile(null);
-          setCanvasOpen(false);
         }
       }
     }
@@ -235,10 +303,110 @@ export default function SuprChatPage() {
   return (
     <div className="flex-1 md:ml-64 flex min-h-screen bg-surface-container relative overflow-hidden">
       
-      {/* Main Chat Area */}
+      {/* Pane 1: Left Settings and Squad Pane */}
+      <aside className="w-[280px] border-r-4 border-primary bg-background shrink-0 flex flex-col h-screen overflow-y-auto custom-scrollbar z-10 p-5 space-y-6">
+        <div>
+          <h3 className="font-headline font-black uppercase text-xs text-primary border-b-2 border-primary pb-1.5 mb-3 flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-sm">settings</span>
+            Chat Controls
+          </h3>
+          <div className="space-y-4 text-xs">
+            <div>
+              <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Model Provider</label>
+              <select 
+                value={activeModel} 
+                onChange={(e) => setActiveModel(e.target.value)}
+                className="w-full bg-surface neo-border p-1.5 font-bold focus:outline-none"
+              >
+                <option value="default">Default (Global Flow)</option>
+                <option value="gemini">Gemini 2.0 Flash</option>
+                <option value="minimax">MiniMax M2.7</option>
+                <option value="openai_compat">OpenAI-Compatible</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Autonomy Clearance</label>
+              <select 
+                value={autonomyMode} 
+                onChange={(e) => setAutonomyMode(e.target.value)}
+                className="w-full bg-surface neo-border p-1.5 font-bold focus:outline-none"
+              >
+                <option value="guided">Guided (Confirm Steps)</option>
+                <option value="supervisor">Supervisor (Managed)</option>
+                <option value="autonomous">Full Autonomy</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Temperature ({temperature})</label>
+              <input 
+                type="range" 
+                min="0.1" 
+                max="1.0" 
+                step="0.1" 
+                value={temperature}
+                onChange={(e) => setTemperature(e.target.value)}
+                className="w-full accent-primary" 
+              />
+            </div>
+
+            {/* Sandbox keys allow toggle */}
+            <div className="pt-2 border-t border-primary/20 flex items-center gap-2">
+              <input 
+                type="checkbox" 
+                id="sandbox_allow_keys"
+                checked={sandboxAllowKeys}
+                onChange={handleToggleSandboxKeys}
+                className="w-4 h-4 accent-primary cursor-pointer border-2 border-primary" 
+              />
+              <label htmlFor="sandbox_allow_keys" className="font-bold text-[10px] uppercase text-primary cursor-pointer select-none">
+                Allow API keys in Sandbox
+              </label>
+            </div>
+
+            <button 
+              onClick={handleApplyChatSettings}
+              className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border hover:bg-tertiary transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
+            >
+              Apply Controls
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="font-headline font-black uppercase text-xs text-primary border-b-2 border-primary pb-1.5 mb-3 flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-sm">groups</span>
+            Agent Squad
+          </h3>
+          <div className="space-y-2 text-xs">
+            {agentStatuses.map((agent) => (
+              <div key={agent.id} className="p-2 border-2 border-primary bg-surface flex flex-col gap-1 text-on-surface">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold uppercase text-[10px]">{agent.name}</span>
+                  <span className={`px-1.5 py-0.5 text-[8px] font-black uppercase neo-border ${
+                    agent.status === 'Working' ? 'bg-secondary text-on-secondary animate-pulse' : 'bg-surface-variant text-on-surface-variant'
+                  }`}>
+                    {agent.status}
+                  </span>
+                </div>
+                <div className="flex justify-between text-[9px] text-on-surface-variant font-mono">
+                  <span>Role: {agent.role}</span>
+                  <span className="font-bold text-primary">{agent.permissionTier}</span>
+                </div>
+                {agent.currentProject && (
+                  <div className="text-[8px] text-secondary font-bold truncate mt-0.5 uppercase border-t border-dashed border-primary/20 pt-1">
+                    Project: {agent.currentProject}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside>
+
+      {/* Pane 2: Center Chat Feed Pane */}
       <div className="flex-1 flex flex-col h-screen min-w-0 bg-surface-container relative">
-        
-        {/* Unobtrusive Topnav / Custom Header */}
         <header className="flex-none h-16 border-b-4 border-primary bg-background flex justify-between items-center px-4 lg:px-6 relative z-30">
           <div className="flex items-center space-x-4">
             <span className="material-symbols-outlined text-primary text-2xl">chat</span>
@@ -256,71 +424,6 @@ export default function SuprChatPage() {
             >
               <span className="material-symbols-outlined text-sm">side_navigation</span>
             </button>
-
-            {/* Quick-Settings Header Dropdown (Afterthought Settings) */}
-            <div className="relative">
-              <button 
-                onClick={() => setShowSettings(!showSettings)}
-                className="p-2 border-2 border-primary bg-background flex items-center justify-center hover:bg-surface-container"
-              >
-                <span className="material-symbols-outlined text-sm">settings</span>
-              </button>
-              
-              {showSettings && (
-                <div className="absolute right-0 mt-2 w-80 bg-background border-4 border-primary p-4 neo-shadow-lg z-50 text-xs">
-                  <h4 className="font-headline font-black uppercase text-primary border-b-2 border-primary pb-2 mb-3">Chat Controls</h4>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Model Provider</label>
-                      <select 
-                        value={activeModel} 
-                        onChange={(e) => setActiveModel(e.target.value)}
-                        className="w-full bg-surface neo-border p-1.5 font-bold"
-                      >
-                        <option value="default">Default (Global Flow)</option>
-                        <option value="gemini">Gemini 2.0 Flash</option>
-                        <option value="minimax">MiniMax M2.7</option>
-                        <option value="openai_compat">OpenAI-Compatible</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Autonomy clearance</label>
-                      <select 
-                        value={autonomyMode} 
-                        onChange={(e) => setAutonomyMode(e.target.value)}
-                        className="w-full bg-surface neo-border p-1.5 font-bold"
-                      >
-                        <option value="guided">Guided (Confirm Steps)</option>
-                        <option value="supervisor">Supervisor (Managed)</option>
-                        <option value="autonomous">Full Autonomy</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Temperature ({temperature})</label>
-                      <input 
-                        type="range" 
-                        min="0.1" 
-                        max="1.0" 
-                        step="0.1" 
-                        value={temperature}
-                        onChange={(e) => setTemperature(e.target.value)}
-                        className="w-full accent-primary" 
-                      />
-                    </div>
-
-                    <button 
-                      onClick={handleApplyChatSettings}
-                      className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border hover:bg-tertiary transition-colors"
-                    >
-                      Apply Controls
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </header>
 
@@ -349,9 +452,9 @@ export default function SuprChatPage() {
                 {/* 2. Simulation / Telemetry Log Console (Inside the bubble flow) */}
                 {logs && (
                   <div className="w-full max-w-lg mb-3 neo-border bg-black text-green-400 font-mono text-[10px] leading-relaxed p-4 shadow-[3px_3px_0px_0px_var(--color-primary)]">
-                    <div className="flex items-center gap-2 mb-2 border-b border-green-950 pb-1.5 text-green-500 font-bold uppercase text-[9px]">
+                    <div className="flex items-center gap-2 mb-2 border-b border-green-955 pb-1.5 text-green-500 font-bold uppercase text-[9px]">
                       <span className="material-symbols-outlined animate-spin text-[12px]">sync</span>
-                      Task Force Telemetry Logs
+                      Task Telemetry Logs (Docker Sandbox)
                     </div>
                     <pre className="whitespace-pre-wrap">{logs}</pre>
                   </div>
@@ -456,13 +559,11 @@ export default function SuprChatPage() {
             </div>
           </form>
         </div>
-
       </div>
 
-      {/* Side-Canvas Workspace Drawer */}
+      {/* Pane 3: Right Sandbox Pane */}
       {canvasOpen && (
-        <aside className="w-[450px] md:w-[500px] border-l-4 border-primary bg-background shrink-0 flex flex-col h-screen z-20 relative">
-          
+        <aside className="w-[450px] md:w-[480px] border-l-4 border-primary bg-background shrink-0 flex flex-col h-screen z-20 relative">
           {/* Tab Selector Headers */}
           <div className="flex-none flex border-b-4 border-primary bg-surface-variant">
             {[
@@ -513,7 +614,7 @@ export default function SuprChatPage() {
                     {wsFiles.map((file) => (
                       <div 
                         key={file.filename}
-                        className="p-2.5 border-2 border-primary bg-background hover:bg-primary-container hover:text-on-primary-container transition-colors flex items-center justify-between group"
+                        className="p-2.5 border-2 border-primary bg-background hover:bg-primary-container hover:text-on-primary-container transition-colors flex items-center justify-between group text-on-surface"
                       >
                         <div 
                           onClick={() => handleOpenFile(file.filename)}
@@ -598,50 +699,44 @@ export default function SuprChatPage() {
                     {runOutput.success ? (
                       <div className="text-green-500 font-bold uppercase text-[9px] flex items-center gap-1 border-b border-green-950 pb-1">
                         <span className="material-symbols-outlined text-xs">check_circle</span>
-                        Script Completed Successfully (Exit: 0)
+                        Execution Succeeded
                       </div>
                     ) : (
-                      <div className="text-red-500 font-bold uppercase text-[9px] flex items-center gap-1 border-b border-red-950 pb-1">
+                      <div className="text-red-500 font-bold uppercase text-[9px] flex items-center gap-1 border-b border-red-955 pb-1">
                         <span className="material-symbols-outlined text-xs">error</span>
-                        Script Failed (Error Returned)
+                        Execution Failed (Code {runOutput.error ? 1 : 0})
                       </div>
                     )}
                     
                     {runOutput.stdout && (
                       <div>
-                        <span className="text-gray-500 uppercase text-[8px] font-bold block mb-1">STDOUT:</span>
-                        <pre className="whitespace-pre-wrap">{runOutput.stdout}</pre>
+                        <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">STDOUT:</span>
+                        <pre className="text-green-400 whitespace-pre-wrap">{runOutput.stdout}</pre>
                       </div>
                     )}
-                    
+
                     {runOutput.stderr && (
                       <div>
-                        <span className="text-red-500 uppercase text-[8px] font-bold block mb-1">STDERR:</span>
-                        <pre className="whitespace-pre-wrap text-red-400">{runOutput.stderr}</pre>
+                        <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">STDERR:</span>
+                        <pre className="text-red-400 whitespace-pre-wrap">{runOutput.stderr}</pre>
                       </div>
                     )}
 
                     {runOutput.error && (
                       <div>
-                        <span className="text-red-500 uppercase text-[8px] font-bold block mb-1">EXCEPTION:</span>
-                        <pre className="whitespace-pre-wrap text-red-400">{runOutput.error}</pre>
+                        <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">SYSTEM EXCEPTION:</span>
+                        <pre className="text-red-500 whitespace-pre-wrap">{runOutput.error}</pre>
                       </div>
                     )}
                   </div>
                 ) : (
                   <p className="text-on-surface-variant text-[10px] italic text-center p-6 bg-background border border-dashed border-primary">
-                    Awaiting execution parameters. Select a script in the Editor and click &quot;Execute Code&quot;.
+                    No active script execution has been initialized. Run a script inside Editor Preview!
                   </p>
                 )}
               </div>
             )}
-
           </div>
-
-          <footer className="flex-none h-10 border-t-4 border-primary flex items-center px-4 justify-between bg-primary text-on-primary font-mono text-[10px]">
-            <span>Workspace: ./supr_workspaces/</span>
-            <span className="font-bold uppercase">Files: {wsFiles.length}</span>
-          </footer>
         </aside>
       )}
 

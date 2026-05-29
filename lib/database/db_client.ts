@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import sqliteDb from './init';
+import { getSqliteDb, initDatabase } from './init';
 
 const isPostgres = !!(process.env.DATABASE_URL || process.env.PGHOST);
 
@@ -22,6 +22,14 @@ if (isPostgres) {
   console.log('[db_client] Falling back to SQLite.');
 }
 
+let isSqliteInitialized = false;
+function ensureSqliteInitialized() {
+  if (!isPostgres && !isSqliteInitialized) {
+    initDatabase(); // Idempotent — safe to call multiple times
+    isSqliteInitialized = true;
+  }
+}
+
 /**
  * Helper to translate SQLite query placeholders (?) to PostgreSQL placeholders ($1, $2, ...)
  */
@@ -40,7 +48,9 @@ export const dbClient = {
       const res = await pgPool.query(pgSql, params);
       return res.rows;
     } else {
-      return sqliteDb.prepare(sql).all(params) as T[];
+      ensureSqliteInitialized();
+      const db = getSqliteDb();
+      return db.prepare(sql).all(params) as T[];
     }
   },
 
@@ -50,7 +60,9 @@ export const dbClient = {
       const res = await pgPool.query(pgSql, params);
       return res.rows[0];
     } else {
-      return sqliteDb.prepare(sql).get(params) as T | undefined;
+      ensureSqliteInitialized();
+      const db = getSqliteDb();
+      return db.prepare(sql).get(params) as T | undefined;
     }
   },
 
@@ -59,7 +71,9 @@ export const dbClient = {
       const pgSql = translateQuery(sql);
       await pgPool.query(pgSql, params);
     } else {
-      sqliteDb.prepare(sql).run(params);
+      ensureSqliteInitialized();
+      const db = getSqliteDb();
+      db.prepare(sql).run(params);
     }
   },
 
@@ -81,9 +95,11 @@ export const dbClient = {
         client.release();
       }
     } else {
-      const transaction = sqliteDb.transaction((ops: typeof operations) => {
+      ensureSqliteInitialized();
+      const db = getSqliteDb();
+      const transaction = db.transaction((ops: typeof operations) => {
         for (const op of ops) {
-          sqliteDb.prepare(op.sql).run(op.params);
+          db.prepare(op.sql).run(op.params);
         }
       });
       transaction(operations);

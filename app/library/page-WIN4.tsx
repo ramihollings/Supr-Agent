@@ -1,218 +1,409 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { TopNav } from '@/components/TopNav';
-import { fetchAllArtifactsAction } from '@/app/actions';
+import { 
+  fetchWorkspaceFilesAction, 
+  readWorkspaceFileAction, 
+  writeWorkspaceFileAction,
+  fetchAllArtifactsAction,
+  sendChatMessageAction
+} from '@/app/actions';
 
-interface UnifiedArtifact {
-  id: string;
-  missionId: string;
-  missionTitle: string;
-  filename: string;
+interface FileNode {
+  name: string;
+  path: string;
+  size?: number;
   type: string;
+  content?: string;
+  origin: 'workspace' | 'deliverable';
+  missionTitle?: string;
+  updatedAt?: string;
+}
+
+interface ChatMessage {
+  id: string;
+  sender: 'user' | 'supr';
   content: string;
-  createdAt: string;
 }
 
 export default function LibraryPage() {
-  const [artifacts, setArtifacts] = useState<UnifiedArtifact[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('all');
-  const [filterProject, setFilterProject] = useState('all');
-  const [selectedArtifact, setSelectedArtifact] = useState<UnifiedArtifact | null>(null);
+  const [workspaceFiles, setWorkspaceFiles] = useState<FileNode[]>([]);
+  const [deliverableFiles, setDeliverableFiles] = useState<FileNode[]>([]);
+  const [selectedFile, setSelectedFile] = useState<FileNode | null>(null);
   const [loading, setLoading] = useState(true);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  
+  // Tree collapse state
+  const [wsExpanded, setWsExpanded] = useState(true);
+  const [delExpanded, setDelExpanded] = useState(true);
+
+  // Chat state
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { id: 'welcome', sender: 'supr', content: 'Hello! Select a file from the list, and ask me to explain, summarize, or help you edit it.' }
+  ]);
+  const [isSending, setIsSending] = useState(false);
+  
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const loadLibrary = async () => {
+    setLoading(true);
+    try {
+      // 1. Load workspace files
+      const wsData = await fetchWorkspaceFilesAction();
+      const wsNodes: FileNode[] = wsData.map(f => ({
+        name: f.filename,
+        path: `/workspace/${f.filename}`,
+        size: f.size,
+        type: f.type,
+        origin: 'workspace',
+        updatedAt: f.updatedAt
+      }));
+      setWorkspaceFiles(wsNodes);
+
+      // 2. Load deliverables/artifacts from DB
+      const delData = await fetchAllArtifactsAction();
+      const delNodes: FileNode[] = delData.map(a => ({
+        name: a.filename,
+        path: `/deliverables/${a.filename}`,
+        size: a.content.length, // bytes approximate
+        type: a.type,
+        content: a.content,
+        origin: 'deliverable',
+        missionTitle: a.missionTitle,
+        updatedAt: a.createdAt
+      }));
+      setDeliverableFiles(delNodes);
+    } catch (err) {
+      console.error("Failed to load library resources:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadArtifacts() {
-      try {
-        const data = await fetchAllArtifactsAction();
-        setArtifacts(data);
-      } catch (err) {
-        console.error("Error loading library artifacts:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadArtifacts();
+    loadLibrary();
   }, []);
 
-  const handleDownload = (art: UnifiedArtifact) => {
-    const blob = new Blob([art.content], { type: 'text/plain' });
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  const selectFile = async (node: FileNode) => {
+    if (node.origin === 'workspace') {
+      const content = await readWorkspaceFileAction(node.name);
+      setSelectedFile({ ...node, content });
+    } else {
+      setSelectedFile(node);
+    }
+  };
+
+  const handleDownload = (file: FileNode) => {
+    if (!file.content) return;
+    const blob = new Blob([file.content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = art.filename;
+    a.download = file.name;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    showToast(`Downloaded ${file.name} ✓`);
   };
 
-  // Get unique project names for filters
-  const projects = Array.from(new Set(artifacts.map(a => a.missionTitle)));
+  const handleCopyToClipboard = (content?: string) => {
+    if (!content) return;
+    navigator.clipboard.writeText(content);
+    showToast("Copied to clipboard! ✓");
+  };
 
-  // Filter logic
-  const filteredArtifacts = artifacts.filter(art => {
-    const matchesSearch = art.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          art.content.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = filterType === 'all' || art.type === filterType;
-    const matchesProject = filterProject === 'all' || art.missionTitle === filterProject;
-    return matchesSearch && matchesType && matchesProject;
-  });
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const content = event.target?.result as string;
+      const res = await writeWorkspaceFileAction(file.name, content || '');
+      if (res.success) {
+        showToast(`Uploaded ${file.name} to workspace!`);
+        await loadLibrary();
+      } else {
+        showToast(`Upload failed: ${res.error}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSendChat = async () => {
+    if (!chatInput.trim() || isSending) return;
+    const query = chatInput.trim();
+    setChatInput('');
+    setIsSending(true);
+
+    const userMsgId = `usr-${Date.now()}`;
+    setChatMessages(prev => [...prev, { id: userMsgId, sender: 'user', content: query }]);
+
+    try {
+      const fileCtx = selectedFile ? {
+        name: selectedFile.name,
+        type: selectedFile.type,
+        content: selectedFile.content || ''
+      } : undefined;
+
+      const res = await sendChatMessageAction(query, fileCtx);
+      if (res.success && res.message) {
+        setChatMessages(prev => [...prev, { id: `supr-${Date.now()}`, sender: 'supr', content: res.message?.content || '' }]);
+      } else {
+        setChatMessages(prev => [...prev, { id: `supr-err-${Date.now()}`, sender: 'supr', content: `Error: ${res.error || 'Failed to generate response.'}` }]);
+      }
+    } catch (e: any) {
+      setChatMessages(prev => [...prev, { id: `supr-err-${Date.now()}`, sender: 'supr', content: `Error: ${e.message}` }]);
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   return (
-    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
-      <TopNav title="Universal Artifact Library" />
+    <div className="flex-1 md:ml-64 flex flex-col h-screen bg-surface-container overflow-hidden relative">
+      <TopNav title="Universal Library Explorer" />
 
-      <main className="flex-1 overflow-y-auto max-w-7xl mx-auto w-full p-4 md:p-8 flex flex-col gap-6">
+      {toastMessage && (
+        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
+          {toastMessage}
+        </div>
+      )}
+
+      {/* 3-Pane Layout */}
+      <div className="flex-1 flex overflow-hidden w-full relative">
         
-        {/* Page Header */}
-        <header className="border-b-4 border-primary pb-4 mb-2">
-          <h1 className="font-headline text-4xl font-black uppercase tracking-tighter text-primary">Universal Library</h1>
-          <p className="font-body text-sm font-semibold text-on-surface-variant border-l-4 border-tertiary pl-3 mt-1">
-            Browse, search, and download all generated briefs, scripts, designs, and workspace artifacts.
-          </p>
-        </header>
-
-        {/* Filters Toolbar */}
-        <section className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-background neo-border shadow-[4px_4px_0px_0px_var(--color-primary)]">
-          <div className="md:col-span-2">
-            <label className="block text-[10px] font-black uppercase text-primary mb-1.5">Search Files</label>
-            <div className="flex gap-2">
-              <input 
-                type="text" 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search file name or contents..."
-                className="w-full bg-surface neo-border p-2 text-xs focus:outline-none focus:border-tertiary"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-[10px] font-black uppercase text-primary mb-1.5">File Type</label>
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="w-full bg-surface neo-border p-2 text-xs font-bold"
-            >
-              <option value="all">All Formats</option>
-              <option value="markdown">Markdown (.md)</option>
-              <option value="code">Code Scripts (.py, .js)</option>
-              <option value="json">JSON Configs</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] font-black uppercase text-primary mb-1.5">Project Tag</label>
-            <select
-              value={filterProject}
-              onChange={(e) => setFilterProject(e.target.value)}
-              className="w-full bg-surface neo-border p-2 text-xs font-bold"
-            >
-              <option value="all">All Projects</option>
-              {projects.map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </div>
-        </section>
-
-        {/* Artifacts List Grid */}
-        <section className="flex-1">
-          {loading ? (
-            <div className="p-8 text-center bg-background neo-border font-mono text-sm">
-              Analyzing central storage logs...
-            </div>
-          ) : filteredArtifacts.length === 0 ? (
-            <div className="p-12 text-center bg-background neo-border text-on-surface-variant font-bold text-sm">
-              No artifacts found matching the current search parameters.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredArtifacts.map((art) => (
-                <div key={art.id} className="bg-background neo-border neo-shadow p-5 flex flex-col justify-between min-h-[180px] group hover:bg-surface-bright transition-colors">
-                  <div>
-                    <div className="flex justify-between items-start gap-2 mb-2">
-                      <span className={`material-symbols-outlined text-3xl ${
-                        art.type === 'code' ? 'text-secondary' : 'text-tertiary'
-                      }`}>
-                        {art.type === 'code' ? 'terminal' : 'description'}
-                      </span>
-                      <span className="text-[9px] font-bold uppercase px-2 py-0.5 border border-primary bg-primary-container text-on-primary-container truncate max-w-[70%]">
-                        {art.missionTitle}
-                      </span>
-                    </div>
-                    <h3 className="font-headline font-bold text-lg uppercase truncate mb-1" title={art.filename}>{art.filename}</h3>
-                    <span className="text-[9px] text-on-surface-variant block uppercase font-bold tracking-wider mb-3">
-                      Type: {art.type} • {new Date(art.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 border-t-2 border-primary pt-3 gap-2 mt-4">
-                    <button 
-                      onClick={() => setSelectedArtifact(art)}
-                      className="p-2 border border-primary bg-surface hover:bg-primary hover:text-on-primary font-bold uppercase text-[9px] text-center transition-colors"
-                    >
-                      View Details
-                    </button>
-                    <button 
-                      onClick={() => handleDownload(art)}
-                      className="p-2 border border-primary bg-primary text-on-primary hover:bg-tertiary hover:text-on-tertiary font-bold uppercase text-[9px] text-center transition-colors flex justify-center items-center gap-1"
-                    >
-                      <span className="material-symbols-outlined text-xs">download</span> Download
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
-
-      {/* Artifact Viewer Modal */}
-      {selectedArtifact && (
-        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-background border-4 border-primary max-w-3xl w-full max-h-[85vh] flex flex-col shadow-[8px_8px_0px_0px_var(--color-primary)]">
-            <div className="p-4 border-b-4 border-primary bg-surface-container flex justify-between items-center">
-              <h3 className="font-headline font-black uppercase text-sm text-primary flex items-center gap-2 truncate">
-                <span className="material-symbols-outlined">description</span>
-                File Inspector: {selectedArtifact.filename}
-              </h3>
-              <button 
-                onClick={() => setSelectedArtifact(null)}
-                className="w-8 h-8 neo-border bg-background flex items-center justify-center hover:bg-secondary hover:text-on-error transition-colors"
-              >
-                <span className="material-symbols-outlined">close</span>
+        {/* Left Pane: Explorer Tree */}
+        <aside className="w-64 flex-none border-r-4 border-primary bg-background flex flex-col justify-between">
+          <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+            <div className="p-3 border-b-4 border-primary bg-surface-variant flex justify-between items-center shrink-0">
+              <span className="font-headline font-bold uppercase text-sm tracking-widest">Library Tree</span>
+              <button onClick={loadLibrary} className="hover:text-primary" title="Refresh">
+                <span className="material-symbols-outlined text-[18px]">refresh</span>
               </button>
             </div>
             
-            <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-surface-container-lowest">
-              <div className="font-mono text-xs p-4 border-2 border-primary bg-background whitespace-pre-wrap leading-relaxed overflow-x-auto text-on-background">
-                {selectedArtifact.content}
-              </div>
-            </div>
+            <div className="p-4 space-y-4 font-body text-xs text-on-surface-variant">
+              {loading ? (
+                <div className="text-center p-4 font-mono uppercase animate-pulse">Scanning central storage...</div>
+              ) : (
+                <div className="space-y-2">
+                  
+                  {/* Folder 1: Workspace */}
+                  <div>
+                    <div 
+                      onClick={() => setWsExpanded(!wsExpanded)} 
+                      className="flex items-center gap-2 py-1 px-2 font-bold text-primary cursor-pointer hover:bg-surface-container-low"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {wsExpanded ? 'folder_open' : 'folder'}
+                      </span>
+                      <span>/workspace</span>
+                      <span className="text-[9px] bg-primary-container text-primary border border-primary px-1.5 ml-auto">
+                        {workspaceFiles.length}
+                      </span>
+                    </div>
 
-            <div className="p-4 border-t-4 border-primary bg-surface-container flex justify-between items-center">
-              <span className="text-[10px] font-bold uppercase text-on-surface-variant">
-                Project: {selectedArtifact.missionTitle}
-              </span>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => handleDownload(selectedArtifact)}
-                  className="bg-primary text-on-primary neo-border px-4 py-2 font-headline font-bold uppercase text-xs hover:bg-tertiary hover:text-on-tertiary transition-colors"
-                >
-                  Download File
-                </button>
-                <button 
-                  onClick={() => setSelectedArtifact(null)}
-                  className="bg-background text-primary neo-border px-4 py-2 font-headline font-bold uppercase text-xs hover:bg-surface-container"
-                >
-                  Close
-                </button>
-              </div>
+                    {wsExpanded && (
+                      <ul className="ml-4 pl-2 border-l border-primary/20 space-y-1 mt-1">
+                        {workspaceFiles.map(file => (
+                          <li key={file.path}>
+                            <div 
+                              onClick={() => selectFile(file)}
+                              className={`flex items-center gap-1.5 py-1 px-2 cursor-pointer border ${selectedFile?.path === file.path ? 'bg-primary-container border-primary font-bold shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' : 'border-transparent hover:bg-surface-container'}`}
+                            >
+                              <span className="material-symbols-outlined text-sm">description</span>
+                              <span className="truncate max-w-[120px]">{file.name}</span>
+                            </div>
+                          </li>
+                        ))}
+                        {workspaceFiles.length === 0 && (
+                          <li className="text-[10px] text-on-surface-variant italic p-2">Empty</li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Folder 2: Deliverables */}
+                  <div>
+                    <div 
+                      onClick={() => setDelExpanded(!delExpanded)} 
+                      className="flex items-center gap-2 py-1 px-2 font-bold text-primary cursor-pointer hover:bg-surface-container-low"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {delExpanded ? 'folder_open' : 'folder'}
+                      </span>
+                      <span>/deliverables</span>
+                      <span className="text-[9px] bg-secondary-container text-secondary border border-secondary px-1.5 ml-auto">
+                        {deliverableFiles.length}
+                      </span>
+                    </div>
+
+                    {delExpanded && (
+                      <ul className="ml-4 pl-2 border-l border-primary/20 space-y-1 mt-1">
+                        {deliverableFiles.map(file => (
+                          <li key={file.path}>
+                            <div 
+                              onClick={() => selectFile(file)}
+                              className={`flex items-center gap-1.5 py-1 px-2 cursor-pointer border ${selectedFile?.path === file.path ? 'bg-secondary-container border-secondary font-bold shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' : 'border-transparent hover:bg-surface-container'}`}
+                            >
+                              <span className="material-symbols-outlined text-sm">draft</span>
+                              <span className="truncate max-w-[120px]" title={file.name}>{file.name}</span>
+                            </div>
+                          </li>
+                        ))}
+                        {deliverableFiles.length === 0 && (
+                          <li className="text-[10px] text-on-surface-variant italic p-2">Empty</li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
+
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
+
+          {/* Upload Box Area */}
+          <div className="p-4 border-t-4 border-primary bg-surface-container-high shrink-0 space-y-2">
+            <p className="font-headline font-bold text-[10px] uppercase text-primary">Upload File to Workspace</p>
+            <input 
+              type="file" 
+              ref={uploadInputRef}
+              onChange={handleFileUpload}
+              className="hidden"
+              accept=".py,.js,.json,.txt,.md,.csv"
+            />
+            <button
+              onClick={() => uploadInputRef.current?.click()}
+              className="w-full bg-primary text-on-primary neo-border py-2 px-3 font-headline font-bold uppercase text-[10px] hover:bg-tertiary transition-colors neo-shadow active:translate-x-0.5 active:translate-y-0.5"
+            >
+              <span className="material-symbols-outlined text-sm align-middle mr-1.5">upload</span>
+              Choose File
+            </button>
+            <p className="text-[9px] text-on-surface-variant text-center font-mono">Accepts txt, py, js, md, csv</p>
+          </div>
+        </aside>
+
+        {/* Center Pane: File Viewer */}
+        <section className="flex-1 min-w-0 bg-background flex flex-col justify-between border-r-4 border-primary">
+          {selectedFile ? (
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              <header className="p-4 border-b-4 border-primary bg-surface-variant shrink-0 flex justify-between items-center">
+                <div>
+                  <h3 className="font-headline font-black text-xl uppercase truncate max-w-lg">{selectedFile.name}</h3>
+                  <p className="text-[10px] text-on-surface-variant uppercase font-mono font-bold mt-1">
+                    Path: {selectedFile.path} • Size: {selectedFile.size || 0} bytes 
+                    {selectedFile.missionTitle ? ` • Project: ${selectedFile.missionTitle}` : ''}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => handleCopyToClipboard(selectedFile.content)}
+                    className="bg-background text-primary border-2 border-primary py-1 px-3 text-xs font-headline font-bold uppercase hover:bg-surface-container transition-colors"
+                  >
+                    Copy
+                  </button>
+                  <button 
+                    onClick={() => handleDownload(selectedFile)}
+                    className="bg-primary text-on-primary border-2 border-primary py-1 px-3 text-xs font-headline font-bold uppercase hover:bg-tertiary transition-colors"
+                  >
+                    Download
+                  </button>
+                </div>
+              </header>
+              <div className="flex-1 p-6 overflow-y-auto custom-scrollbar bg-surface-container-lowest">
+                <pre className="font-mono text-xs p-5 border-2 border-primary bg-background whitespace-pre-wrap leading-relaxed overflow-x-auto text-on-background shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
+                  {selectedFile.content || '# Selected file is empty'}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col justify-center items-center p-8 bg-surface-container-lowest text-center">
+              <span className="material-symbols-outlined text-6xl text-primary/30 mb-4 animate-bounce">folder_open</span>
+              <h3 className="font-headline text-lg font-black uppercase text-primary mb-2">No File Selected</h3>
+              <p className="font-body text-xs text-on-surface-variant max-w-sm">Select a document, script, or dataset from the left panel to preview it.</p>
+            </div>
+          )}
+        </section>
+
+        {/* Right Pane: Ask Supr Chat Assistant */}
+        <aside className="w-80 lg:w-96 flex-none bg-background flex flex-col h-full justify-between">
+          <div className="p-3 border-b-4 border-primary bg-surface-variant shrink-0 flex items-center justify-between">
+            <span className="font-headline font-bold uppercase text-xs tracking-wider flex items-center gap-1.5 text-primary">
+              <span className="material-symbols-outlined text-[18px]">chat</span>
+              Ask Supr Assistant
+            </span>
+            {selectedFile && (
+              <span className="bg-primary-container text-primary border-2 border-primary px-2 py-0.5 text-[9px] font-bold uppercase truncate max-w-[120px]">
+                {selectedFile.name}
+              </span>
+            )}
+          </div>
+
+          {/* Chat Messages */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 bg-surface-container-low">
+            {chatMessages.map(msg => (
+              <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] p-3 border-2 border-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] ${
+                  msg.sender === 'user' 
+                    ? 'bg-primary-container text-on-primary-container' 
+                    : 'bg-background text-on-surface'
+                }`}>
+                  <p className="font-mono text-[9px] font-black uppercase tracking-wider mb-1 text-primary">
+                    {msg.sender === 'user' ? 'Manager' : 'Supr Coordinator'}
+                  </p>
+                  <p className="font-body text-xs whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                </div>
+              </div>
+            ))}
+            {isSending && (
+              <div className="flex justify-start">
+                <div className="max-w-[85%] p-3 border-2 border-primary bg-background text-on-surface shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] flex items-center gap-2">
+                  <span className="material-symbols-outlined animate-spin text-sm">sync</span>
+                  <span className="font-mono text-[10px] uppercase font-bold text-on-surface-variant">Thinking...</span>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Chat Input */}
+          <div className="p-3 border-t-4 border-primary bg-surface-container-high shrink-0">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSendChat(); }}
+                placeholder={selectedFile ? `Ask about ${selectedFile.name}...` : "Ask Supr about this library..."}
+                className="flex-1 bg-background neo-border p-2.5 text-xs focus:outline-none focus:border-tertiary"
+                disabled={isSending}
+              />
+              <button
+                onClick={handleSendChat}
+                disabled={isSending || !chatInput.trim()}
+                className="bg-primary text-on-primary neo-border px-4 hover:bg-tertiary transition-colors disabled:opacity-50 flex items-center justify-center active:translate-x-0.5 active:translate-y-0.5 shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]"
+              >
+                <span className="material-symbols-outlined text-base">send</span>
+              </button>
+            </div>
+          </div>
+        </aside>
+
+      </div>
     </div>
   );
 }

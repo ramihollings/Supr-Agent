@@ -27,7 +27,9 @@ import {
   Artifact, 
   MemoryItem, 
   Mission, 
-  Agent 
+  Agent,
+  Phase,
+  Task
 } from '@/types';
 import { 
   ActivityEventSchema, 
@@ -85,6 +87,8 @@ export async function fetchAgentsState(): Promise<Agent[]> {
 
 export async function logActivityAction(missionId: string, event: Omit<ActivityEvent, 'id' | 'timestamp'>) {
   try {
+    const shadow = await checkShadowModeAction();
+    if (shadow.active) return;
     // Partial validation for Omit types
     const schema = ActivityEventSchema.omit({ id: true, timestamp: true });
     schema.parse(event);
@@ -96,6 +100,8 @@ export async function logActivityAction(missionId: string, event: Omit<ActivityE
 
 export async function recordFailureAction(missionId: string, failure: Omit<FailureEvent, 'id' | 'resolved'>) {
   try {
+    const shadow = await checkShadowModeAction();
+    if (shadow.active) return;
     const schema = FailureEventSchema.omit({ id: true, resolved: true });
     schema.parse(failure);
     await recordFailure(missionId, failure);
@@ -106,6 +112,8 @@ export async function recordFailureAction(missionId: string, failure: Omit<Failu
 
 export async function resolveFailureAction(missionId: string, failureId: string, guidance: string) {
   try {
+    const shadow = await checkShadowModeAction();
+    if (shadow.active) return;
     z.string().parse(missionId);
     z.string().parse(failureId);
     z.string().parse(guidance);
@@ -128,6 +136,8 @@ export async function updateTaskStatusAction(missionId: string, taskId: string, 
 
 export async function addArtifactAction(missionId: string, artifact: Omit<Artifact, 'id'>) {
   try {
+    const shadow = await checkShadowModeAction();
+    if (shadow.active) return;
     const schema = ArtifactSchema.omit({ id: true });
     schema.parse(artifact);
     await addArtifact(missionId, artifact);
@@ -138,6 +148,8 @@ export async function addArtifactAction(missionId: string, artifact: Omit<Artifa
 
 export async function updateArtifactAction(missionId: string, filename: string, content: string) {
   try {
+    const shadow = await checkShadowModeAction();
+    if (shadow.active) return;
     z.string().parse(missionId);
     z.string().parse(filename);
     z.string().parse(content);
@@ -149,6 +161,8 @@ export async function updateArtifactAction(missionId: string, filename: string, 
 
 export async function addMemoryItemAction(missionId: string, item: Omit<MemoryItem, 'id'>) {
   try {
+    const shadow = await checkShadowModeAction();
+    if (shadow.active) return;
     const schema = MemoryItemSchema.omit({ id: true });
     schema.parse(item);
     await addMemoryItem(missionId, item);
@@ -227,11 +241,11 @@ export async function extendAgentAction(agentId: string) {
 // ----------------------------------------------------
 // ENTERPRISE SKILLS & CRON AUTOMATION ACTIONS
 // ----------------------------------------------------
-import db from '@/lib/database/init';
+import dbClient from '@/lib/database/db_client';
 
 export async function fetchSkillsState() {
   try {
-    const rows = db.prepare(`SELECT * FROM Skills ORDER BY created_at DESC`).all() as any[];
+    const rows = await dbClient.query(`SELECT * FROM Skills ORDER BY created_at DESC`);
     return rows.map(r => ({
       id: r.id,
       name: r.name,
@@ -248,11 +262,11 @@ export async function fetchSkillsState() {
 export async function createSkillAction(skill: { name: string, description: string, provider: string, tools: string[] }) {
   try {
     const id = `sk-${Date.now()}`;
-    const stmt = db.prepare(`
+    const sql = `
       INSERT INTO Skills (id, name, description, provider, tools)
       VALUES (?, ?, ?, ?, ?)
-    `);
-    stmt.run(id, skill.name, skill.description, skill.provider, JSON.stringify(skill.tools));
+    `;
+    await dbClient.execute(sql, [id, skill.name, skill.description, skill.provider, JSON.stringify(skill.tools)]);
     return { success: true, id };
   } catch (error) {
     console.error("Failed to create skill:", error);
@@ -262,7 +276,7 @@ export async function createSkillAction(skill: { name: string, description: stri
 
 export async function deleteSkillAction(id: string) {
   try {
-    db.prepare(`DELETE FROM Skills WHERE id = ?`).run(id);
+    await dbClient.execute(`DELETE FROM Skills WHERE id = ?`, [id]);
     return { success: true };
   } catch (error) {
     console.error("Failed to delete skill:", error);
@@ -272,14 +286,16 @@ export async function deleteSkillAction(id: string) {
 
 export async function fetchCronJobsState() {
   try {
-    const rows = db.prepare(`SELECT * FROM Cron_Jobs ORDER BY created_at DESC`).all() as any[];
+    const rows = await dbClient.query(`SELECT * FROM Cron_Jobs ORDER BY created_at DESC`);
     return rows.map(r => ({
       id: r.id,
       name: r.name,
       interval: r.interval,
       targetAction: r.target_action,
       lastRun: r.last_run,
-      status: r.status
+      status: r.status,
+      assignedAgentId: r.assigned_agent_id || null,
+      associatedTaskId: r.associated_task_id || null
     }));
   } catch (error) {
     console.error("Failed to fetch cron jobs:", error);
@@ -290,7 +306,7 @@ export async function fetchCronJobsState() {
 export async function toggleCronJobAction(id: string, currentStatus: string) {
   try {
     const newStatus = currentStatus === 'Active' ? 'Paused' : 'Active';
-    db.prepare(`UPDATE Cron_Jobs SET status = ? WHERE id = ?`).run(newStatus, id);
+    await dbClient.execute(`UPDATE Cron_Jobs SET status = ? WHERE id = ?`, [newStatus, id]);
     return { success: true, newStatus };
   } catch (error) {
     console.error("Failed to toggle cron job:", error);
@@ -301,7 +317,7 @@ export async function toggleCronJobAction(id: string, currentStatus: string) {
 export async function triggerCronJobAction(id: string) {
   try {
     const timeNow = new Date().toISOString();
-    db.prepare(`UPDATE Cron_Jobs SET last_run = ? WHERE id = ?`).run(timeNow, id);
+    await dbClient.execute(`UPDATE Cron_Jobs SET last_run = ? WHERE id = ?`, [timeNow, id]);
     return { success: true, lastRun: timeNow };
   } catch (error) {
     console.error("Failed to trigger cron job:", error);
@@ -309,13 +325,14 @@ export async function triggerCronJobAction(id: string) {
   }
 }
 
-export async function createCronJobAction(data: { name: string; interval: string; targetAction: string }) {
+export async function createCronJobAction(data: { name: string; interval: string; targetAction: string; assignedAgentId?: string; associatedTaskId?: string }) {
   try {
     const id = `cr-${Date.now()}`;
-    db.prepare(`
-      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status)
-      VALUES (?, ?, ?, ?, NULL, 'Active')
-    `).run(id, data.name, data.interval, data.targetAction);
+    const sql = `
+      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status, assigned_agent_id, associated_task_id)
+      VALUES (?, ?, ?, ?, NULL, 'Active', ?, ?)
+    `;
+    await dbClient.execute(sql, [id, data.name, data.interval, data.targetAction, data.assignedAgentId || null, data.associatedTaskId || null]);
     return { success: true, id };
   } catch (error) {
     console.error("Failed to create cron job:", error);
@@ -323,11 +340,12 @@ export async function createCronJobAction(data: { name: string; interval: string
   }
 }
 
-export async function updateCronJobAction(id: string, data: { name: string; interval: string; targetAction: string }) {
+export async function updateCronJobAction(id: string, data: { name: string; interval: string; targetAction: string; assignedAgentId?: string; associatedTaskId?: string }) {
   try {
-    db.prepare(`
-      UPDATE Cron_Jobs SET name = ?, interval = ?, target_action = ? WHERE id = ?
-    `).run(data.name, data.interval, data.targetAction, id);
+    const sql = `
+      UPDATE Cron_Jobs SET name = ?, interval = ?, target_action = ?, assigned_agent_id = ?, associated_task_id = ? WHERE id = ?
+    `;
+    await dbClient.execute(sql, [data.name, data.interval, data.targetAction, data.assignedAgentId || null, data.associatedTaskId || null, id]);
     return { success: true };
   } catch (error) {
     console.error("Failed to update cron job:", error);
@@ -337,7 +355,7 @@ export async function updateCronJobAction(id: string, data: { name: string; inte
 
 export async function deleteCronJobAction(id: string) {
   try {
-    db.prepare(`DELETE FROM Cron_Jobs WHERE id = ?`).run(id);
+    await dbClient.execute(`DELETE FROM Cron_Jobs WHERE id = ?`, [id]);
     return { success: true };
   } catch (error) {
     console.error("Failed to delete cron job:", error);
@@ -351,12 +369,12 @@ export async function deleteCronJobAction(id: string) {
 
 export async function fetchOrchestrationFeed(projectId?: string) {
   try {
-    const query = projectId
-      ? `SELECT * FROM Event_Log WHERE mission_id = ? AND event_type IN ('delegation','handoff','review','approval','escalation','governance') ORDER BY timestamp DESC`
-      : `SELECT * FROM Event_Log WHERE event_type IN ('delegation','handoff','review','approval','escalation','governance') ORDER BY timestamp DESC`;
+    const sql = projectId
+      ? `SELECT * FROM Event_Log WHERE mission_id = ? ORDER BY timestamp DESC`
+      : `SELECT * FROM Event_Log ORDER BY timestamp DESC`;
     const rows = projectId
-      ? db.prepare(query).all(projectId) as any[]
-      : db.prepare(query).all() as any[];
+      ? await dbClient.query(sql, [projectId])
+      : await dbClient.query(sql);
     return rows.map(r => {
       let detail = '', targetAgent = '';
       try { const m = JSON.parse(r.metadata); detail = m.detail || ''; targetAgent = m.targetAgent || ''; } catch(e){}
@@ -379,13 +397,13 @@ export async function fetchOrchestrationFeed(projectId?: string) {
 
 export async function fetchAgentStatuses() {
   try {
-    const agents = db.prepare(`SELECT * FROM Agents WHERE status = 'active'`).all() as any[];
-    return agents.map(a => {
+    const agents = await dbClient.query(`SELECT * FROM Agents WHERE status = 'active'`);
+    return await Promise.all(agents.map(async (a) => {
       // Find if agent has an active task
-      const task = db.prepare(`SELECT title, status, mission_id FROM Tasks WHERE owner_agent_id = ? AND status = 'Active' LIMIT 1`).get(a.id) as any;
+      const task = await dbClient.queryOne<any>(`SELECT title, status, mission_id FROM Tasks WHERE owner_agent_id = ? AND status = 'Active' LIMIT 1`, [a.id]);
       let missionName = '';
       if (task) {
-        const m = db.prepare(`SELECT title FROM Missions WHERE id = ?`).get(task.mission_id) as any;
+        const m = await dbClient.queryOne<any>(`SELECT title FROM Missions WHERE id = ?`, [task.mission_id]);
         missionName = m?.title || '';
       }
       return {
@@ -398,7 +416,7 @@ export async function fetchAgentStatuses() {
         currentProject: missionName || null,
         status: task ? 'Working' : 'Idle',
       };
-    });
+    }));
   } catch (error) {
     console.error("Failed to fetch agent statuses:", error);
     return [];
@@ -411,7 +429,7 @@ export async function fetchAgentStatuses() {
 
 export async function fetchSettingsAction() {
   try {
-    const rows = db.prepare(`SELECT * FROM Settings`).all() as { key: string; value: string }[];
+    const rows = await dbClient.query(`SELECT * FROM Settings`);
     const settingsObj: Record<string, string> = {};
     for (const r of rows) {
       settingsObj[r.key] = r.value;
@@ -425,14 +443,75 @@ export async function fetchSettingsAction() {
 
 export async function updateSettingAction(key: string, value: string) {
   try {
-    db.prepare(`
+    const sql = `
       INSERT INTO Settings (key, value, updated_at)
       VALUES (?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    `).run(key, value);
+    `;
+    await dbClient.execute(sql, [key, value]);
     return { success: true };
   } catch (error) {
     console.error(`Failed to update setting ${key}:`, error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function checkShadowModeAction(): Promise<{ active: boolean; expiresAt: string | null }> {
+  try {
+    const rows = await dbClient.query(`SELECT * FROM Settings WHERE key IN ('shadow_mode_active', 'shadow_mode_expires_at')`);
+    const settings: Record<string, string> = {};
+    for (const r of rows) {
+      settings[r.key] = r.value;
+    }
+    const active = settings.shadow_mode_active === 'true';
+    const expiresAt = settings.shadow_mode_expires_at || null;
+    
+    if (active && expiresAt) {
+      if (new Date().getTime() > new Date(expiresAt).getTime()) {
+        // Expired! Auto-deactivate
+        await updateSettingAction('shadow_mode_active', 'false');
+        return { active: false, expiresAt: null };
+      }
+      return { active: true, expiresAt };
+    }
+    return { active: false, expiresAt: null };
+  } catch (error) {
+    console.error("Failed to check shadow mode:", error);
+    return { active: false, expiresAt: null };
+  }
+}
+
+export async function toggleShadowModeAction(active: boolean, durationMinutes: number = 5) {
+  try {
+    if (active) {
+      const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
+      await Promise.all([
+        updateSettingAction('shadow_mode_active', 'true'),
+        updateSettingAction('shadow_mode_expires_at', expiresAt)
+      ]);
+      return { success: true, active: true, expiresAt };
+    } else {
+      await Promise.all([
+        updateSettingAction('shadow_mode_active', 'false'),
+        updateSettingAction('shadow_mode_expires_at', '')
+      ]);
+      return { success: true, active: false, expiresAt: null };
+    }
+  } catch (error) {
+    console.error("Failed to toggle shadow mode:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function updateGlidepathAction(missionId: string, phases: Phase[], tasks: Task[]) {
+  try {
+    const shadow = await checkShadowModeAction();
+    if (shadow.active) return { success: true };
+    const sql = `UPDATE Glidepaths SET phases = ?, tasks = ? WHERE mission_id = ?`;
+    await dbClient.execute(sql, [JSON.stringify(phases), JSON.stringify(tasks), missionId]);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to update glidepath:", error);
     return { success: false, error: String(error) };
   }
 }
@@ -443,7 +522,7 @@ export async function updateSettingAction(key: string, value: string) {
 
 export async function fetchMemoryItemsAction() {
   try {
-    const rows = db.prepare(`SELECT * FROM Memory_Items ORDER BY created_at DESC`).all() as any[];
+    const rows = await dbClient.query(`SELECT * FROM Memory_Items ORDER BY created_at DESC`);
     return rows.map(r => {
       let key = r.scope || 'General';
       let value = r.content || '';
@@ -471,9 +550,9 @@ export async function fetchMemoryItemsAction() {
 export async function purgeMemoryItemsAction(scope: string) {
   try {
     if (scope === 'all') {
-      db.prepare(`DELETE FROM Memory_Items`).run();
+      await dbClient.execute(`DELETE FROM Memory_Items`);
     } else {
-      db.prepare(`DELETE FROM Memory_Items WHERE scope = ? OR type = ?`).run(scope, scope.toLowerCase());
+      await dbClient.execute(`DELETE FROM Memory_Items WHERE scope = ? OR type = ?`, [scope, scope.toLowerCase()]);
     }
     return { success: true };
   } catch (error) {
@@ -484,18 +563,18 @@ export async function purgeMemoryItemsAction(scope: string) {
 
 export async function addGlobalMemoryItemAction(key: string, value: string, importance: string, scope: string = 'User') {
   try {
-    const stmt = db.prepare(`
+    const sql = `
       INSERT INTO Memory_Items (id, scope, type, content, importance)
       VALUES (?, ?, ?, ?, ?)
-    `);
+    `;
     const impVal = importance === 'High' ? 0.8 : importance === 'Medium' ? 0.5 : 0.2;
-    stmt.run(
+    await dbClient.execute(sql, [
       `mem-${Date.now()}`,
       scope,
       'semantic',
       JSON.stringify({ key, value }),
       impVal
-    );
+    ]);
     return { success: true };
   } catch (error) {
     console.error("Failed to add memory item:", error);
@@ -546,7 +625,7 @@ function buildChatPrompt(history: any[], currentMessage: string, file?: any) {
 
 export async function fetchChatMessagesAction() {
   try {
-    const rows = db.prepare(`SELECT * FROM Supr_Chat_Messages ORDER BY created_at ASC`).all() as any[];
+    const rows = await dbClient.query(`SELECT * FROM Supr_Chat_Messages ORDER BY created_at ASC`);
     return rows.map(r => ({
       id: r.id,
       sender: r.sender,
@@ -607,26 +686,30 @@ export async function sendChatMessageAction(
   file?: { name: string; type: string; content: string }
 ) {
   try {
-    // 1. Insert User Message
-    const userMsgId = `chat-${Date.now()}`;
-    const insertMsg = db.prepare(`
-      INSERT INTO Supr_Chat_Messages (id, sender, content, file_name, file_type, file_content)
-      VALUES (?, 'user', ?, ?, ?, ?)
-    `);
-    insertMsg.run(userMsgId, content, file?.name || null, file?.type || null, file?.content || null);
+    const shadow = await checkShadowModeAction();
+
+    // 1. Insert User Message (only if NOT in shadow mode)
+    if (!shadow.active) {
+      const userMsgId = `chat-${Date.now()}`;
+      const insertMsgSql = `
+        INSERT INTO Supr_Chat_Messages (id, sender, content, file_name, file_type, file_content)
+        VALUES (?, 'user', ?, ?, ?, ?)
+      `;
+      await dbClient.execute(insertMsgSql, [userMsgId, content, file?.name || null, file?.type || null, file?.content || null]);
+    }
 
     // 2. Fetch recent chat history
-    const history = db.prepare(`
+    const history = await dbClient.query(`
       SELECT * FROM Supr_Chat_Messages 
       ORDER BY created_at ASC 
       LIMIT 20
-    `).all() as any[];
+    `);
 
     // 3. Build Prompt for LLM
     const prompt = buildChatPrompt(history, content, file);
 
     // 4. Call Provider
-    const provider = getActiveProvider('supr');
+    const provider = await getActiveProvider('supr');
     let suprResponse = '';
     let simulationLogs: string[] = [];
 
@@ -640,12 +723,26 @@ export async function sendChatMessageAction(
       try {
         const imagePrompt = content.replace(/(generate|create|draw|make)\s+(an\s+)?image\s+(of\s+)?/gi, '').trim();
         const base64Image = await generateImagenImageAction(imagePrompt);
-        const suprMsgId = `chat-${Date.now() + 1}`;
-        db.prepare(`
-          INSERT INTO Supr_Chat_Messages (id, sender, content, file_name, file_type, file_content)
-          VALUES (?, 'supr', ?, ?, 'image/png', ?)
-        `).run(suprMsgId, `I've generated the image for: "${imagePrompt}"`, 'generated_image.png', base64Image);
-        return { success: true };
+        
+        if (!shadow.active) {
+          const suprMsgId = `chat-${Date.now() + 1}`;
+          const insertImgSql = `
+            INSERT INTO Supr_Chat_Messages (id, sender, content, file_name, file_type, file_content)
+            VALUES (?, 'supr', ?, ?, 'image/png', ?)
+          `;
+          await dbClient.execute(insertImgSql, [suprMsgId, `I've generated the image for: "${imagePrompt}"`, 'generated_image.png', base64Image]);
+        }
+        return { 
+          success: true,
+          shadow: shadow.active,
+          message: shadow.active ? {
+            id: `shadow-${Date.now()}`,
+            sender: 'supr' as const,
+            content: `I've generated the image for: "${imagePrompt}"`,
+            file: { name: 'generated_image.png', type: 'image/png', content: base64Image },
+            createdAt: new Date().toISOString()
+          } : undefined
+        };
       } catch (err: any) {
         simulationLogs.push(`[ERROR] Imagen generation failed: ${err.message}. Falling back to text response.`);
       }
@@ -720,7 +817,7 @@ export async function sendChatMessageAction(
       try {
         suprResponse = await provider.generateContent(prompt, {
           systemInstruction: chatSystemInstruction(settings),
-          temperature: 0.7,
+          temperature: parseFloat(settings.llm_temperature_supr || '0.7'),
         });
       } catch (err: any) {
         suprResponse = `[FALLBACK] I acknowledge your request. Error generating response: ${err.message}`;
@@ -731,13 +828,26 @@ export async function sendChatMessageAction(
     const logPrefix = simulationLogs.length > 0 ? `\`\`\`telemetry\n${simulationLogs.join('\n')}\n\`\`\`\n\n` : '';
     const finalContent = logPrefix + suprResponse;
 
-    const suprMsgId = `chat-${Date.now() + 2}`;
-    db.prepare(`
-      INSERT INTO Supr_Chat_Messages (id, sender, content)
-      VALUES (?, 'supr', ?)
-    `).run(suprMsgId, finalContent);
+    if (!shadow.active) {
+      const suprMsgId = `chat-${Date.now() + 2}`;
+      const insertSuprSql = `
+        INSERT INTO Supr_Chat_Messages (id, sender, content)
+        VALUES (?, 'supr', ?)
+      `;
+      await dbClient.execute(insertSuprSql, [suprMsgId, finalContent]);
+    }
 
-    return { success: true };
+    return { 
+      success: true,
+      shadow: shadow.active,
+      message: {
+        id: shadow.active ? `shadow-${Date.now()}` : `chat-${Date.now() + 2}`,
+        sender: 'supr' as const,
+        content: finalContent,
+        file: null,
+        createdAt: new Date().toISOString()
+      }
+    };
   } catch (error) {
     console.error("Failed to send chat message:", error);
     return { success: false, error: String(error) };
@@ -820,22 +930,29 @@ export async function executeCodeAction(filename: string, language: string) {
       return { success: false, error: `Language/file type for ${filename} is not supported for sandbox execution.` };
     }
 
-    const { stdout, stderr } = await execAsync(cmd, { cwd: path.resolve(process.cwd(), 'supr_workspaces') });
-    return { success: true, stdout, stderr };
+    const { LocalNodeSandbox } = require('@/lib/providers/sandbox');
+    const sandbox = new LocalNodeSandbox();
+    const result = await sandbox.executeCommand('', cmd);
+    return { 
+      success: result.exitCode === 0, 
+      stdout: result.stdout, 
+      stderr: result.stderr,
+      error: result.error 
+    };
   } catch (error: any) {
-    console.error("Failed to execute code file:", error);
-    return { success: false, error: error.message, stdout: error.stdout, stderr: error.stderr };
+    console.error("Failed to execute code file in sandbox:", error);
+    return { success: false, error: error.message };
   }
 }
 
 export async function fetchAllArtifactsAction() {
   try {
-    const rows = db.prepare(`
+    const rows = await dbClient.query(`
       SELECT a.*, m.title as mission_title 
       FROM Artifacts a
       JOIN Missions m ON a.mission_id = m.id
       ORDER BY a.created_at DESC
-    `).all() as any[];
+    `);
     return rows.map(r => ({
       id: r.id,
       missionId: r.mission_id,

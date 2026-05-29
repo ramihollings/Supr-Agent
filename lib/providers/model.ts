@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import db from '@/lib/database/init';
+import dbClient from '@/lib/database/db_client';
 
 export interface ModelOptions {
   model?: string;
@@ -199,10 +199,10 @@ export class FallbackProvider extends ModelProvider {
   }
 }
 
-// Helper to query SQLite settings synchronously
-function getSetting(key: string): string | null {
+// Helper to query settings asynchronously
+async function getSetting(key: string): Promise<string | null> {
   try {
-    const row = db.prepare('SELECT value FROM Settings WHERE key = ?').get(key) as { value: string } | undefined;
+    const row = await dbClient.queryOne<{ value: string }>('SELECT value FROM Settings WHERE key = ?', [key]);
     return row ? row.value : null;
   } catch (err) {
     console.error(`[model.ts] Failed to query setting ${key}:`, err);
@@ -215,16 +215,16 @@ function getSetting(key: string): string | null {
 //
 // Singleton/factory. Dynamically returns the provider configured for the
 // requested agent role, checking SQLite overrides first, then falling back to
-// global SQLite keys, and finally process.env.
+// global settings, and finally process.env.
 // ─────────────────────────────────────────────────────────────────────────────
-export function getActiveProvider(agentRole?: 'supr' | 'code' | 'research' | 'sub'): ModelProvider {
+export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research' | 'sub'): Promise<ModelProvider> {
   // 1. Resolve Global Keys (SQLite overrides first, then process.env)
-  const minimaxKey  = getSetting('global_minimax_key')  || process.env.MINIMAX_API_KEY;
-  const geminiKey   = getSetting('global_gemini_key')   || process.env.GEMINI_API_KEY;
-  const backupKey   = getSetting('global_backup_key')   || process.env.BACKUP_LLM_API_KEY;
-  const backupUrl   = getSetting('global_backup_url')   || process.env.BACKUP_LLM_BASE_URL || 'https://api.openai.com/v1';
-  const backupModel = getSetting('global_backup_model') || process.env.BACKUP_LLM_MODEL   || 'gpt-4o-mini';
-  const backupName  = getSetting('global_backup_name')  || process.env.BACKUP_LLM_NAME    || 'OpenAI';
+  const minimaxKey  = await getSetting('global_minimax_key')  || process.env.MINIMAX_API_KEY;
+  const geminiKey   = await getSetting('global_gemini_key')   || process.env.GEMINI_API_KEY;
+  const backupKey   = await getSetting('global_backup_key')   || process.env.BACKUP_LLM_API_KEY;
+  const backupUrl   = await getSetting('global_backup_url')   || process.env.BACKUP_LLM_BASE_URL || 'https://api.openai.com/v1';
+  const backupModel = await getSetting('global_backup_model') || process.env.BACKUP_LLM_MODEL   || 'gpt-4o-mini';
+  const backupName  = await getSetting('global_backup_name')  || process.env.BACKUP_LLM_NAME    || 'OpenAI';
 
   // 2. Helper builders
   const buildMinimax = (key: string, model: string = 'MiniMax-M2.7') => new OpenAICompatibleProvider({
@@ -245,10 +245,10 @@ export function getActiveProvider(agentRole?: 'supr' | 'code' | 'research' | 'su
 
   // 3. Resolve role-specific custom settings if provided
   if (agentRole) {
-    const roleProvider = getSetting(`llm_provider_${agentRole}`) || 'default';
-    const roleKey      = getSetting(`llm_key_${agentRole}`);
-    const roleModel    = getSetting(`llm_model_${agentRole}`);
-    const roleUrl      = getSetting(`llm_url_${agentRole}`);
+    const roleProvider = await getSetting(`llm_provider_${agentRole}`) || 'default';
+    const roleKey      = await getSetting(`llm_key_${agentRole}`);
+    const roleModel    = await getSetting(`llm_model_${agentRole}`);
+    const roleUrl      = await getSetting(`llm_url_${agentRole}`);
 
     if (roleProvider !== 'default') {
       if (roleProvider === 'gemini') {

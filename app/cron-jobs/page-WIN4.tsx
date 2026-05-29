@@ -2,7 +2,17 @@
 
 import { TopNav } from '@/components/TopNav';
 import { useState, useEffect } from 'react';
-import { fetchCronJobsState, toggleCronJobAction, triggerCronJobAction, createCronJobAction, updateCronJobAction, deleteCronJobAction } from '@/app/actions';
+import { 
+  fetchCronJobsState, 
+  toggleCronJobAction, 
+  triggerCronJobAction, 
+  createCronJobAction, 
+  updateCronJobAction, 
+  deleteCronJobAction,
+  fetchAgentsState,
+  fetchMissionsAction
+} from '@/app/actions';
+import { Agent } from '@/types';
 
 interface CronJob {
   id: string;
@@ -11,6 +21,8 @@ interface CronJob {
   targetAction: string;
   lastRun: string | null;
   status: string;
+  assignedAgentId?: string | null;
+  associatedTaskId?: string | null;
 }
 
 const INTERVAL_OPTIONS = [
@@ -32,16 +44,30 @@ const INTERVAL_OPTIONS = [
 
 export default function CronJobsPage() {
   const [crons, setCrons] = useState<CronJob[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [tasks, setTasks] = useState<{ id: string; title: string; missionName: string }[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Create modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newCron, setNewCron] = useState({ name: '', interval: 'Hourly', targetAction: '' });
+  const [newCron, setNewCron] = useState({ 
+    name: '', 
+    interval: 'Hourly', 
+    targetAction: '', 
+    assignedAgentId: '', 
+    associatedTaskId: '' 
+  });
 
   // Edit modal state
   const [editingCron, setEditingCron] = useState<CronJob | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', interval: '', targetAction: '' });
+  const [editForm, setEditForm] = useState({ 
+    name: '', 
+    interval: '', 
+    targetAction: '', 
+    assignedAgentId: '', 
+    associatedTaskId: '' 
+  });
 
   // Delete confirmation state
   const [deletingCron, setDeletingCron] = useState<CronJob | null>(null);
@@ -55,12 +81,34 @@ export default function CronJobsPage() {
 
   useEffect(() => {
     let active = true;
+    
     fetchCronJobsState().then(data => {
       if (active) {
         if (data) setCrons(data);
         setIsLoading(false);
       }
     });
+
+    fetchAgentsState().then(data => {
+      if (active && data) {
+        setAgents(data);
+      }
+    });
+
+    fetchMissionsAction().then(data => {
+      if (active && data) {
+        const allTasks: { id: string; title: string; missionName: string }[] = [];
+        data.forEach(m => {
+          if (m.tasks) {
+            m.tasks.forEach(t => {
+              allTasks.push({ id: t.id, title: t.title, missionName: m.name });
+            });
+          }
+        });
+        setTasks(allTasks);
+      }
+    });
+
     return () => { active = false; };
   }, []);
 
@@ -95,23 +143,19 @@ export default function CronJobsPage() {
       showToast('Please fill in all fields.');
       return;
     }
-    try {
-      const res = await fetch('/api/cron', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newCron)
-      });
-      // If the API route doesn't exist yet, fall back to a direct action import
-    } catch (e) {
-      // Fallback: use the createCronJobAction if available
-    }
-    // Direct DB action via server action
-    const { createCronJobAction } = await import('@/app/actions');
-    const res = await createCronJobAction(newCron);
+    
+    const res = await createCronJobAction({
+      name: newCron.name,
+      interval: newCron.interval,
+      targetAction: newCron.targetAction,
+      assignedAgentId: newCron.assignedAgentId || undefined,
+      associatedTaskId: newCron.associatedTaskId || undefined
+    });
+    
     if (res.success) {
       showToast(`Schedule "${newCron.name}" created! ✓`);
       setShowCreateModal(false);
-      setNewCron({ name: '', interval: 'Hourly', targetAction: '' });
+      setNewCron({ name: '', interval: 'Hourly', targetAction: '', assignedAgentId: '', associatedTaskId: '' });
       loadCrons();
     } else {
       showToast(`Error: ${res.error}`);
@@ -123,8 +167,15 @@ export default function CronJobsPage() {
       showToast('Please fill in all fields.');
       return;
     }
-    const { updateCronJobAction } = await import('@/app/actions');
-    const res = await updateCronJobAction(editingCron.id, editForm);
+    
+    const res = await updateCronJobAction(editingCron.id, {
+      name: editForm.name,
+      interval: editForm.interval,
+      targetAction: editForm.targetAction,
+      assignedAgentId: editForm.assignedAgentId || undefined,
+      associatedTaskId: editForm.associatedTaskId || undefined
+    });
+    
     if (res.success) {
       showToast(`Schedule "${editForm.name}" updated! ✓`);
       setEditingCron(null);
@@ -136,7 +187,6 @@ export default function CronJobsPage() {
 
   const handleDelete = async () => {
     if (!deletingCron) return;
-    const { deleteCronJobAction } = await import('@/app/actions');
     const res = await deleteCronJobAction(deletingCron.id);
     if (res.success) {
       showToast(`Schedule "${deletingCron.name}" permanently removed.`);
@@ -149,7 +199,13 @@ export default function CronJobsPage() {
 
   const openEdit = (job: CronJob) => {
     setEditingCron(job);
-    setEditForm({ name: job.name, interval: job.interval, targetAction: job.targetAction });
+    setEditForm({ 
+      name: job.name, 
+      interval: job.interval, 
+      targetAction: job.targetAction,
+      assignedAgentId: job.assignedAgentId || '',
+      associatedTaskId: job.associatedTaskId || ''
+    });
   };
 
   return (
@@ -234,6 +290,24 @@ export default function CronJobsPage() {
                       <p className="font-body text-sm text-on-surface-variant border-l-4 border-primary pl-3 mt-1">
                         {job.targetAction}
                       </p>
+
+                      {/* Relational Bindings display */}
+                      {(job.assignedAgentId || job.associatedTaskId) && (
+                        <div className="flex gap-3 mt-2 flex-wrap">
+                          {job.assignedAgentId && (
+                            <span className="bg-primary-container border-2 border-primary px-2.5 py-0.5 font-headline text-[11px] text-primary flex items-center gap-1 font-bold">
+                              <span className="material-symbols-outlined text-xs">smart_toy</span>
+                              Agent: {agents.find(a => a.id === job.assignedAgentId)?.name || job.assignedAgentId}
+                            </span>
+                          )}
+                          {job.associatedTaskId && (
+                            <span className="bg-secondary-container border-2 border-secondary px-2.5 py-0.5 font-headline text-[11px] text-secondary flex items-center gap-1 font-bold">
+                              <span className="material-symbols-outlined text-xs">task</span>
+                              Task: {tasks.find(t => t.id === job.associatedTaskId)?.title || job.associatedTaskId}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       <div className="flex items-center gap-1.5 mt-2 font-mono text-xs text-primary">
                         <span className="material-symbols-outlined text-sm">history</span>
@@ -326,6 +400,34 @@ export default function CronJobsPage() {
                   autoFocus
                 />
               </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-headline font-bold uppercase text-primary mb-2 text-sm">Assign Agent (Optional)</label>
+                  <select
+                    value={newCron.assignedAgentId}
+                    onChange={e => setNewCron({ ...newCron, assignedAgentId: e.target.value })}
+                    className="w-full bg-background neo-border p-3 font-body focus:outline-none focus:border-tertiary"
+                  >
+                    <option value="">-- No Assigned Agent --</option>
+                    {agents.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.role})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-headline font-bold uppercase text-primary mb-2 text-sm">Associate Task (Optional)</label>
+                  <select
+                    value={newCron.associatedTaskId}
+                    onChange={e => setNewCron({ ...newCron, associatedTaskId: e.target.value })}
+                    className="w-full bg-background neo-border p-3 font-body focus:outline-none focus:border-tertiary"
+                  >
+                    <option value="">-- No Associated Task --</option>
+                    {tasks.map(t => (
+                      <option key={t.id} value={t.id}>[{t.missionName}] {t.title}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <div>
                 <label className="block font-headline font-bold uppercase text-primary mb-2 text-sm">Interval / Frequency</label>
                 <select
@@ -388,6 +490,34 @@ export default function CronJobsPage() {
                   className="w-full bg-background neo-border p-3 font-body focus:outline-none focus:border-tertiary"
                   autoFocus
                 />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-headline font-bold uppercase text-primary mb-2 text-sm">Assign Agent (Optional)</label>
+                  <select
+                    value={editForm.assignedAgentId}
+                    onChange={e => setEditForm({ ...editForm, assignedAgentId: e.target.value })}
+                    className="w-full bg-background neo-border p-3 font-body focus:outline-none focus:border-tertiary"
+                  >
+                    <option value="">-- No Assigned Agent --</option>
+                    {agents.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.role})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-headline font-bold uppercase text-primary mb-2 text-sm">Associate Task (Optional)</label>
+                  <select
+                    value={editForm.associatedTaskId}
+                    onChange={e => setEditForm({ ...editForm, associatedTaskId: e.target.value })}
+                    className="w-full bg-background neo-border p-3 font-body focus:outline-none focus:border-tertiary"
+                  >
+                    <option value="">-- No Associated Task --</option>
+                    {tasks.map(t => (
+                      <option key={t.id} value={t.id}>[{t.missionName}] {t.title}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="block font-headline font-bold uppercase text-primary mb-2 text-sm">Interval / Frequency</label>

@@ -9,11 +9,9 @@ import { MissionWizard } from './MissionWizard';
 const navItems = [
   { href: '/', icon: 'dashboard', label: 'Dashboard' },
   { href: '/supr-chat', icon: 'chat', label: 'Supr-Chat' },
-  { href: '/mission-control', icon: 'insights', label: 'Control Center' },
   { href: '/orchestration', icon: 'visibility', label: 'Observance Hub' },
-  { href: '/activity', icon: 'history', label: 'Updates' },
-  { href: '/agents', icon: 'smart_toy', label: 'Task Force' },
-  { href: '/reasoning', icon: 'psychology', label: 'Strategic Plan' },
+  { href: '/agents', icon: 'smart_toy', label: 'Agents' },
+  { href: '/reasoning', icon: 'psychology', label: 'Reasoning Core' },
   { href: '/skills', icon: 'construction', label: 'Skills' },
   { href: '/cron-jobs', icon: 'schedule', label: 'Cron Jobs' },
 ];

@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supr-orchestrator
+  namespace: supr
+  labels:
+    app: supr-orchestrator
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+  selector:
+    matchLabels:
+      app: supr-orchestrator
+  template:
+    metadata:
+      labels:
+        app: supr-orchestrator
+      annotations:
+        # Enable Google Cloud Storage FUSE CSI driver volume mounting
+        gke-gcsfuse/volumes: "true"
+    spec:
+      # Enforce secure user-space kernel via gVisor runtime class
+      runtimeClassName: gvisor
+
+      # Allow service account token automounting for GCS FUSE CSI driver and Kubernetes API access
+      automountServiceAccountToken: true
+
+      containers:
+      - name: supr-app
+        image: us-central1-docker.pkg.dev/project-cc5e59a9-05a9-4613-9db/supr-repo/supr-agent:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3001
+          name: http
+        
+        env:
+        - name: PORT
+          value: "3001"
+        - name: NODE_ENV
+          value: "production"
+        
+        # Inject secrets from Cloud Secret Manager via pre-created k8s secrets
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: supr-secrets
+              key: DATABASE_URL
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supr-secrets
+              key: GEMINI_API_KEY
+        - name: APP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supr-secrets
+              key: APP_PASSWORD
+
+        resources:
+          limits:
+            cpu: "2"
+            memory: 2Gi
+          requests:
+            cpu: "500m"
+            memory: 512Mi
+
+        volumeMounts:
+        # Mount the persistent Agent states and workspaces using FUSE
+        - name: supr-gcs-fuse
+          mountPath: /app/.agents
+          subPath: .agents
+        - name: supr-gcs-fuse
+          mountPath: /app/supr_workspaces
+          subPath: supr_workspaces
+
+      volumes:
+      # CSI Driver volume details referencing the state bucket
+      - name: supr-gcs-fuse
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: project-cc5e59a9-05a9-4613-9db-supr-state
+            mountOptions: "implicit-dirs,temp-dir=/tmp"

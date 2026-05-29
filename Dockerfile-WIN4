@@ -29,6 +29,31 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Pre-install Chromium runtime libraries, bash, and curl for CloakBrowser caching
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    bash \
+    curl \
+    docker-cli
+
+# Pre-cache/Pre-install CloakBrowser C++ stealth Chromium binary.
+# Fetch from secure storage release bucket. Falls back to system Chromium wrapper if offline/unavailable.
+RUN mkdir -p /usr/bin && \
+    curl -L -o /usr/bin/cloakbrowser https://storage.googleapis.com/supr-build-assets/cloakbrowser-linux-amd64 || true && \
+    if [ ! -s /usr/bin/cloakbrowser ]; then \
+      echo '#!/bin/bash' > /usr/bin/cloakbrowser && \
+      echo 'exec chromium-browser --disable-blink-features=AutomationControlled "$@"' >> /usr/bin/cloakbrowser; \
+    fi && \
+    chmod +x /usr/bin/cloakbrowser
+
+# Configure CloakBrowser path environment variable
+ENV CLOAKBROWSER_PATH="/usr/bin/cloakbrowser"
+
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 

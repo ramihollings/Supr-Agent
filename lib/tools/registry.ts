@@ -25,9 +25,19 @@ class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
-  async executeTool(name: string, params: any): Promise<any> {
+  async executeTool(name: string, params: any, agentId?: string, missionId?: string): Promise<any> {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`Tool ${name} not found in registry.`);
+    
+    if (agentId) {
+      const { PermissionEngine } = require('../services/governance');
+      const decision = await PermissionEngine.evaluateActionDynamic(agentId, name, missionId || null);
+      if (decision.status === 'Denied') {
+        throw new Error(`Governance Denied: Agent ${agentId} is not permitted to execute capability ${name}. Reason: ${decision.reason}`);
+      } else if (decision.status === 'RequiresApproval') {
+        throw new Error(`Governance Intercepted: Capability ${name} requires explicit human approval. Reason: ${decision.reason}`);
+      }
+    }
     
     // Validate parameters
     const parsedParams = tool.parameters.parse(params);
