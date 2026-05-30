@@ -3,7 +3,7 @@ import { getActiveProvider } from '@/lib/providers/model';
 import { PermissionEngine } from '@/lib/services/governance';
 import { addActivityLog, getActiveMission } from '@/lib/db';
 import { requireApiAuth } from '@/lib/auth';
-import dbClient from '@/lib/database/db_client';
+import { createAgentAction, executeAgentAction } from '@/lib/runtime/agent-actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,27 +41,43 @@ export async function POST(req: NextRequest) {
         try {
           const mission = await getActiveMission();
           
-          // 1. Governance Interception Check
+          // 1. Structured runtime action + governance interception
           const requestedAction = extractRequestedAction(prompt);
-          if (requestedAction) {
-            const decision = PermissionEngine.evaluateAction(
-              { id: 'a1', name: 'Supr', permissionTier: 'Execute', isPermanent: true },
-              requestedAction
-            );
+          const missionId = mission?.id || 'm1';
+          const capability = requestedAction?.requiredTier === 'Root'
+            ? 'obra_superpowers'
+            : requestedAction?.requiredTier === 'External_Act'
+              ? 'slack_send_message'
+              : requestedAction?.requiredTier === 'Execute'
+                ? 'execute_command'
+                : 'supr_response';
+          const action = await createAgentAction({
+            missionId,
+            agentId: 'a1',
+            capability,
+            intent: prompt,
+            inputs: { prompt },
+            riskLevel: requestedAction?.riskLevel || 'Low',
+            requiredPermission: requestedAction?.requiredTier || 'Draft',
+            metadata: { route: '/api/agent', requestedAction: requestedAction?.name },
+          });
 
-            if (decision.status === 'RequiresApproval') {
-              const approvalId = `gate-${Date.now()}`;
-              if (mission) {
-                await dbClient.execute(
-                  `INSERT INTO Approvals (id, mission_id, requesting_agent_id, action, required_permission, risk_level, reason, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [approvalId, mission.id, 'a1', requestedAction.name, requestedAction.requiredTier, requestedAction.riskLevel, decision.reason, 'pending']
-                );
-              }
+          const decision = requestedAction
+            ? PermissionEngine.evaluateAction(
+                { id: 'a1', name: 'Supr', permissionTier: 'Execute', isPermanent: true },
+                requestedAction
+              )
+            : { status: 'Approved', reason: 'Normal response generation.' };
+
+          if (decision.status === 'RequiresApproval') {
+            if (!requestedAction) throw new Error('Approval requested without a structured action.');
+            const execution = await executeAgentAction(action.id, async () => ({ deferred: true }));
+            if (execution.status === 'pending_approval') {
               sendJSON({
                 type: 'message',
                 approvalRequest: {
-                  id: approvalId,
+                  id: execution.approvalId,
+                  actionId: action.id,
                   requestingAgent: 'Supr',
                   action: requestedAction.name,
                   riskLevel: requestedAction.riskLevel,
@@ -88,14 +104,16 @@ export async function POST(req: NextRequest) {
 
           // 2. LLM Generation
           try {
-            const provider = await getActiveProvider('supr');
-            const systemContext = mission ? `Active Mission: ${mission.name}. Objective: ${mission.objective}` : 'No active mission.';
-            
-            const responseText = await provider.generateContent(prompt, {
-              systemInstruction: `You are Supr, the lead orchestrator AI. Respond concisely. Be direct and analytical. Use a neo-brutalist, pragmatic tone. ${systemContext}`
+            const execution = await executeAgentAction(action.id, async () => {
+              const provider = await getActiveProvider('supr');
+              const systemContext = mission ? `Active Mission: ${mission.name}. Objective: ${mission.objective}` : 'No active mission.';
+              return provider.generateContent(prompt, {
+                systemInstruction: `You are Supr, the lead orchestrator AI. Respond concisely. Be direct and analytical. Use a neo-brutalist, pragmatic tone. ${systemContext}`
+              });
             });
+            const responseText = execution.result as string;
 
-            sendJSON({ type: 'message', content: responseText });
+            sendJSON({ type: 'message', content: responseText, actionId: action.id, traceId: action.traceId });
           } catch (llmError: any) {
             console.error("LLM Generation Error:", llmError);
             sendJSON({ 

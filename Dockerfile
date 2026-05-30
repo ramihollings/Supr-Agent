@@ -29,7 +29,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Pre-install Chromium runtime libraries, bash, and curl for CloakBrowser caching
+# Pre-install Chromium runtime libraries, bash, and optional download tooling.
 RUN apk add --no-cache \
     chromium \
     nss \
@@ -39,12 +39,20 @@ RUN apk add --no-cache \
     ttf-freefont \
     bash \
     curl \
+    openssl \
     docker-cli
 
-# Pre-cache/Pre-install CloakBrowser C++ stealth Chromium binary.
-# Fetch from secure storage release bucket. Falls back to system Chromium wrapper if offline/unavailable.
+# CloakBrowser can be supplied as a verified build argument. By default, use the
+# packaged Chromium wrapper so production builds never fetch unsigned binaries.
+ARG CLOAKBROWSER_DOWNLOAD_URL=""
+ARG CLOAKBROWSER_SHA256=""
 RUN mkdir -p /usr/bin && \
-    curl -L -o /usr/bin/cloakbrowser https://storage.googleapis.com/supr-build-assets/cloakbrowser-linux-amd64 || true && \
+    if [ -n "$CLOAKBROWSER_DOWNLOAD_URL" ]; then \
+      curl -fsSL -o /usr/bin/cloakbrowser "$CLOAKBROWSER_DOWNLOAD_URL" && \
+      if [ -n "$CLOAKBROWSER_SHA256" ]; then \
+        echo "$CLOAKBROWSER_SHA256  /usr/bin/cloakbrowser" | sha256sum -c -; \
+      fi; \
+    fi && \
     if [ ! -s /usr/bin/cloakbrowser ]; then \
       echo '#!/bin/bash' > /usr/bin/cloakbrowser && \
       echo 'exec chromium-browser --disable-blink-features=AutomationControlled "$@"' >> /usr/bin/cloakbrowser; \

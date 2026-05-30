@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ToolDefinition, toolRegistry } from './registry';
-import { LocalNodeSandbox } from '../providers/sandbox';
+import { LocalNodeSandbox } from '../providers/local-node-sandbox';
 
 // The Superpowers concept relies on giving the agent full CLI capabilities.
 // We proxy this through our LocalNodeSandbox to ensure path-traversal security.

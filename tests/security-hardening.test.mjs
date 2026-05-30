@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 function gitFiles() {
@@ -22,6 +22,13 @@ test('auth routes do not issue literal boolean auth cookies', () => {
   assert.equal(/supr_auth_token['"]\s*,\s*['"]true/.test(loginRoute + setupRoute), false);
   assert.match(loginRoute, /createSessionToken/);
   assert.match(setupRoute, /hashPassword/);
+});
+
+test('global auth gate uses the Next proxy convention', () => {
+  const proxyRoute = readFileSync('proxy.ts', 'utf8');
+  assert.match(proxyRoute, /export async function proxy/);
+  assert.match(proxyRoute, /verifySessionToken/);
+  assert.equal(existsSync('middleware.ts'), false);
 });
 
 test('non-auth API routes use the shared auth guard', () => {
@@ -74,8 +81,53 @@ test('governance and research routes expose real status labels instead of silent
   const researchRoute = readFileSync('app/api/research/route.ts', 'utf8');
 
   assert.match(agentRoute, /extractRequestedAction/);
-  assert.match(agentRoute, /INSERT INTO Approvals/);
+  assert.match(agentRoute, /createAgentAction/);
+  assert.match(agentRoute, /executeAgentAction/);
   assert.match(researchRoute, /fetchResearchSource/);
   assert.match(researchRoute, /Mode/);
   assert.match(researchRoute, /mode = 'Live'/);
+});
+
+test('agent runtime orchestration is backed by shared tables and modules', () => {
+  const initSql = readFileSync('lib/database/init.ts', 'utf8');
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+  const runtime = readFileSync('lib/runtime/agent-actions.ts', 'utf8');
+  const glidepath = readFileSync('lib/runtime/glidepath.ts', 'utf8');
+  const codeRoute = readFileSync('app/api/code-agent/route.ts', 'utf8');
+  const researchRoute = readFileSync('app/api/research/route.ts', 'utf8');
+
+  for (const table of ['Agent_Actions', 'Provider_Health', 'Computers', 'Plugin_Registry', 'Knowledge_Pages', 'Roles', 'Audit_Log']) {
+    assert.match(initSql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+  assert.ok(pkg.dependencies['@langchain/langgraph']);
+  assert.match(runtime, /resumeAgentActionFromApproval/);
+  assert.match(runtime, /humanGateRequired/);
+  assert.match(glidepath, /@langchain\/langgraph/);
+  assert.match(codeRoute, /evaluateAgentAction/);
+  assert.match(researchRoute, /executeAgentAction/);
+});
+
+test('timeline, approvals, and connector health read runtime state', () => {
+  const actions = readFileSync('app/actions.ts', 'utf8');
+
+  assert.match(actions, /fetchAgentActionsForMission/);
+  assert.match(actions, /resumeAgentActionFromApproval/);
+  assert.match(actions, /Provider_Health/);
+  assert.match(actions, /recordProviderSuccess/);
+  assert.match(actions, /recordProviderFailure/);
+});
+
+test('docker build context and runtime image avoid common secret leaks', () => {
+  const dockerignore = readFileSync('.dockerignore', 'utf8');
+  const dockerfile = readFileSync('Dockerfile', 'utf8');
+  const compose = readFileSync('docker-compose.yml', 'utf8');
+
+  assert.match(dockerignore, /^\.env$/m);
+  assert.match(dockerignore, /^\.env\.\*$/m);
+  assert.match(dockerignore, /^\*\.db$/m);
+  assert.match(dockerignore, /^\*-WIN4\*$/m);
+  assert.match(dockerfile, /CLOAKBROWSER_DOWNLOAD_URL/);
+  assert.match(dockerfile, /sha256sum -c/);
+  assert.doesNotMatch(dockerfile, /storage\.googleapis\.com\/supr-build-assets\/cloakbrowser-linux-amd64/);
+  assert.doesNotMatch(compose, /^version:/m);
 });

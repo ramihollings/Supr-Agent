@@ -348,6 +348,125 @@ export function initDatabase() {
     dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN reason TEXT`);
   } catch (e) {}
 
+  try {
+    dbInstance.exec(`ALTER TABLE Approvals ADD COLUMN agent_action_id TEXT`);
+  } catch (e) {}
+
+  // 19. Agent Actions Table - shared runtime queue for all agent/tool work
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Agent_Actions (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      task_id TEXT,
+      agent_id TEXT,
+      capability TEXT NOT NULL,
+      intent TEXT,
+      inputs TEXT DEFAULT '{}',
+      risk_level TEXT DEFAULT 'Low',
+      required_permission TEXT DEFAULT 'Observe',
+      status TEXT NOT NULL DEFAULT 'draft',
+      approval_id TEXT,
+      result TEXT,
+      error TEXT,
+      trace_id TEXT,
+      metadata TEXT DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id),
+      FOREIGN KEY(task_id) REFERENCES Tasks(id),
+      FOREIGN KEY(agent_id) REFERENCES Agents(id),
+      FOREIGN KEY(approval_id) REFERENCES Approvals(id)
+    )
+  `);
+
+  // 20. Provider Health Table - failover/cooldown state for models and connectors
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Provider_Health (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      provider_type TEXT DEFAULT 'llm',
+      status TEXT NOT NULL DEFAULT 'unknown',
+      failure_count INTEGER DEFAULT 0,
+      last_success DATETIME,
+      last_error TEXT,
+      cooldown_until DATETIME,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 21. Computers Table - runtime/computer separation for local, Docker, VM, E2B, Kubernetes
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Computers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      status TEXT DEFAULT 'available',
+      allowed_scopes TEXT DEFAULT '[]',
+      config_ref TEXT,
+      last_health_check DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 22. Plugin Registry Table - stable extension API surface
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Plugin_Registry (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      version TEXT,
+      status TEXT DEFAULT 'disabled',
+      manifest TEXT DEFAULT '{}',
+      permissions TEXT DEFAULT '[]',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 23. Knowledge Pages Table - cited LLM wiki/project knowledge
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Knowledge_Pages (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      mission_id TEXT,
+      title TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      content TEXT,
+      citations TEXT DEFAULT '[]',
+      status TEXT DEFAULT 'draft',
+      created_by_agent_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id),
+      FOREIGN KEY(created_by_agent_id) REFERENCES Agents(id)
+    )
+  `);
+
+  // 24. RBAC + Audit tables - governance console foundation
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Roles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      permissions TEXT DEFAULT '[]',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Audit_Log (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      actor_type TEXT,
+      actor_id TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id TEXT,
+      risk_level TEXT,
+      metadata TEXT DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Seed default settings
   const insertSetting = dbInstance.prepare(`
     INSERT OR IGNORE INTO Settings (key, value)
@@ -372,6 +491,42 @@ export function initDatabase() {
   insertSetting.run('integrations_github', '');
   insertSetting.run('integrations_slack', '');
   insertSetting.run('integrations_gmail', '');
+
+  const insertProviderHealth = dbInstance.prepare(`
+    INSERT OR IGNORE INTO Provider_Health (id, name, provider_type, status)
+    VALUES (?, ?, ?, ?)
+  `);
+  [
+    ['gemini', 'Gemini', 'llm', 'unknown'],
+    ['minimax', 'MiniMax', 'llm', 'unknown'],
+    ['backup', 'Backup LLM', 'llm', 'unknown'],
+    ['github', 'GitHub', 'connector', 'unknown'],
+    ['slack', 'Slack', 'connector', 'unknown'],
+    ['gmail', 'Gmail', 'connector', 'unknown'],
+    ['composio', 'Composio', 'connector', 'unknown'],
+  ].forEach(([id, name, type, status]) => insertProviderHealth.run(id, name, type, status));
+
+  const insertComputer = dbInstance.prepare(`
+    INSERT OR IGNORE INTO Computers (id, name, type, status, allowed_scopes)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  [
+    ['local', 'Local Process', 'local', 'available', ['workspace']],
+    ['docker', 'Docker Sandbox', 'docker', 'available', ['workspace', 'temp']],
+    ['vm', 'VM Sandbox', 'vm', 'requires_config', []],
+    ['e2b', 'E2B Sandbox', 'e2b', 'requires_config', []],
+    ['kubernetes', 'Kubernetes Sandbox', 'kubernetes', 'requires_config', []],
+  ].forEach(([id, name, type, status, scopes]) => insertComputer.run(id, name, type, status, JSON.stringify(scopes)));
+
+  const insertRole = dbInstance.prepare(`
+    INSERT OR IGNORE INTO Roles (id, name, permissions)
+    VALUES (?, ?, ?)
+  `);
+  [
+    ['owner', 'Owner', ['Root', 'External_Act', 'Execute', 'Edit', 'Draft', 'Observe']],
+    ['operator', 'Operator', ['External_Act', 'Execute', 'Edit', 'Draft', 'Observe']],
+    ['reviewer', 'Reviewer', ['Draft', 'Observe']],
+  ].forEach(([id, name, permissions]) => insertRole.run(id, name, JSON.stringify(permissions)));
 
   // Seed initial coordinator message in Supr-Chat if empty
   const chatMessagesCount = dbInstance.prepare(`SELECT COUNT(*) as cnt FROM Supr_Chat_Messages`).get() as { cnt: number };

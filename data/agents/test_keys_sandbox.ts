@@ -1,4 +1,4 @@
-import { LocalNodeSandbox } from '../../lib/providers/sandbox';
+import { LocalNodeSandbox } from '../../lib/providers/local-node-sandbox';
 import { getSqliteDb, initDatabase } from '../../lib/database/init';
 
 async function testKeysSandbox() {

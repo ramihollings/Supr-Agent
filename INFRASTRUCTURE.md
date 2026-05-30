@@ -28,7 +28,7 @@ By default, Supr runs in open-development mode. For public production deployment
 ```bash
 APP_PASSWORD=your_secure_master_password
 ```
-* When this variable is set, Next.js global middleware (`middleware.ts`) intercepts requests and enforces cookie-based session verification.
+* When this variable is set, the Next.js proxy gate (`proxy.ts`) intercepts requests and enforces cookie-based session verification.
 * Users must authenticate through a high-fidelity, neo-brutalist `/login` page using the master password.
 * Secure session tokens are written as `HttpOnly`, `SameSite=Lax` cookies.
 
@@ -127,7 +127,8 @@ sudo apt-get install -y docker.io docker-compose-v2
 Create a `.env` file in the root folder of the project on your VPS:
 ```env
 # Required for agent orchestration
-GEMINI_API_KEY=AIzaSy...
+GEMINI_API_KEY=your_gemini_api_key_here
+AUTH_SECRET=generate_a_long_random_value
 
 # Highly Recommended for public VPS
 APP_PASSWORD=a_highly_secure_admin_password

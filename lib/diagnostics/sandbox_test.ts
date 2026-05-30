@@ -1,4 +1,4 @@
-import { LocalNodeSandbox } from '../providers/sandbox';
+import { LocalNodeSandbox } from '../providers/local-node-sandbox';
 
 async function runSandboxDiagnostic() {
   console.log('--- DIAGNOSTIC 6: Local Node Sandbox Integration ---');

@@ -650,13 +650,16 @@ export async function updateMemoryReviewAction(id: string, updates: { pinned?: b
 // ─────────────────────────────────────────────────────────────────────────────
 import fs from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { getActiveProvider } from '@/lib/providers/model';
 import { GoogleGenAI } from '@google/genai';
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
+import { fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
+import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const MAX_WORKSPACE_FILE_BYTES = 512 * 1024;
 const MAX_CHAT_FILE_BYTES = 256 * 1024;
 const EXECUTION_WINDOW_MS = 60 * 1000;
@@ -813,8 +816,32 @@ export async function fetchMissionTimelineAction(projectId?: string) {
   try {
     const mission = projectId ? await getMissionById(projectId) : await getActiveMission();
     if (!mission) return [];
+    const [agentActions, approvals] = await Promise.all([
+      fetchAgentActionsForMission(mission.id),
+      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid DESC`, [mission.id]),
+    ]);
 
     const events = [
+      ...agentActions.map((item) => ({
+        id: item.id,
+        type: `agent_action_${item.status}`,
+        title: `${item.capability} (${item.status})`,
+        detail: item.error || item.intent || item.result || '',
+        actor: item.agentId || 'Agent Runtime',
+        timestamp: item.updatedAt || item.createdAt || new Date().toISOString(),
+        source: 'agent-actions',
+        mode: 'Live',
+      })),
+      ...approvals.map((item) => ({
+        id: item.id,
+        type: 'approval',
+        title: `${item.action || 'Approval'} (${item.status || 'pending'})`,
+        detail: item.reason || item.decision || '',
+        actor: item.requesting_agent_id || 'Supr',
+        timestamp: new Date().toISOString(),
+        source: 'approvals',
+        mode: 'Live',
+      })),
       ...(mission.activityLog || []).map((item) => ({
         id: item.id,
         type: item.eventType,
@@ -879,6 +906,7 @@ export async function fetchApprovalCenterAction(projectId?: string) {
       permission: row.required_permission || 'Execute',
       reason: row.reason || 'Human review required before continuing.',
       status: row.status || 'pending',
+      agentActionId: row.agent_action_id || null,
       source: 'approval-table',
     }));
 
@@ -893,6 +921,7 @@ export async function fetchApprovalCenterAction(projectId?: string) {
         permission: 'Root',
         reason: 'API key sharing is enabled but has not been explicitly approved.',
         status: 'pending',
+        agentActionId: null,
         source: 'settings',
       });
     }
@@ -912,6 +941,7 @@ export async function decideApprovalAction(id: string, decision: 'approved' | 'r
     }
 
     await dbClient.execute(`UPDATE Approvals SET status = ?, decision = ? WHERE id = ?`, [decision, decision, id]);
+    await resumeAgentActionFromApproval(id, decision);
     return { success: true };
   } catch (error) {
     console.error('Failed to decide approval:', error);
@@ -951,6 +981,11 @@ export async function fetchMissionQualityAction(projectId?: string) {
 export async function fetchConnectorHealthAction() {
   try {
     const settings = await fetchSettingsAction();
+    const healthRows = await dbClient.query<any>(`SELECT * FROM Provider_Health`);
+    const healthById = healthRows.reduce((acc: Record<string, any>, row) => {
+      acc[row.id] = row;
+      return acc;
+    }, {});
     const connectors = [
       { id: 'gemini', name: 'Gemini', configured: settings.global_gemini_key_configured === 'true' || !!process.env.GEMINI_API_KEY, mode: 'Live' },
       { id: 'slack', name: 'Slack', configured: settings.integrations_slack_configured === 'true', mode: 'Partially Connected' },
@@ -960,8 +995,11 @@ export async function fetchConnectorHealthAction() {
     ];
     return connectors.map((connector) => ({
       ...connector,
-      status: settings[`connector_${connector.id}_last_status`] || (connector.configured ? connector.mode : 'Offline'),
-      lastChecked: settings[`connector_${connector.id}_last_checked`] || new Date().toISOString(),
+      status: healthById[connector.id]?.status || settings[`connector_${connector.id}_last_status`] || (connector.configured ? connector.mode : 'Offline'),
+      lastChecked: healthById[connector.id]?.updated_at || settings[`connector_${connector.id}_last_checked`] || new Date().toISOString(),
+      lastSuccess: healthById[connector.id]?.last_success || null,
+      lastError: healthById[connector.id]?.last_error || null,
+      cooldownUntil: healthById[connector.id]?.cooldown_until || null,
     }));
   } catch (error) {
     console.error('Failed to fetch connector health:', error);
@@ -1017,9 +1055,15 @@ export async function testConnectorAction(connectorId: string) {
       updateSettingAction(`connector_${connectorId}_last_status`, status),
       updateSettingAction(`connector_${connectorId}_last_checked`, new Date().toISOString()),
     ]);
+    if (status === 'Live' || status === 'Partially Connected') {
+      await recordProviderSuccess(connectorId, connectorId, 'connector');
+    } else {
+      await recordProviderFailure(connectorId, detail, connectorId, 'connector');
+    }
     return { success: true, configured, status, detail };
   } catch (error) {
     console.error('Failed to test connector:', error);
+    await recordProviderFailure(connectorId, String(error), connectorId, 'connector').catch(() => {});
     return { success: false, configured: false, status: 'Offline', detail: String(error) };
   }
 }
@@ -1498,27 +1542,52 @@ export async function executeCodeAction(filename: string, language: string) {
       return { success: false, error: `File ${filename} does not exist.` };
     }
 
-    let cmd = '';
+    let executable = '';
+    let image = '';
     if ((language === 'python' || filename.endsWith('.py')) && filename.endsWith('.py')) {
-      cmd = `python "${filePath}"`;
+      executable = 'python';
+      image = 'python:3.10-alpine';
     } else if ((language === 'javascript' || filename.endsWith('.js')) && filename.endsWith('.js')) {
-      cmd = `node "${filePath}"`;
+      executable = 'node';
+      image = 'node:18-alpine';
     } else {
       return { success: false, error: `Language/file type for ${filename} is not supported for sandbox execution.` };
     }
 
-    const { LocalNodeSandbox } = require('@/lib/providers/sandbox');
-    const sandbox = new LocalNodeSandbox();
-    const result = await sandbox.executeCommand('', cmd);
-    return { 
-      success: result.exitCode === 0, 
-      stdout: result.stdout, 
-      stderr: result.stderr,
-      error: result.error 
-    };
+    const workspaceDir = path.dirname(filePath).replace(/\\/g, '/');
+    const dockerArgs = [
+      'run',
+      '--rm',
+      '-v',
+      `${workspaceDir}:/workspace`,
+      '-w',
+      '/workspace',
+    ];
+
+    const settings = await fetchSettingsAction();
+    const allowKeys = settings.sandbox_allow_api_keys === 'true' && settings.sandbox_api_key_approval === 'approved';
+    if (allowKeys) {
+      if (process.env.GEMINI_API_KEY) dockerArgs.push('-e', 'GEMINI_API_KEY');
+      if (process.env.MINIMAX_API_KEY) dockerArgs.push('-e', 'MINIMAX_API_KEY');
+    }
+
+    dockerArgs.push(image, executable, path.basename(filePath));
+
+    const { stdout, stderr } = await execFileAsync('docker', dockerArgs, {
+      timeout: 30000,
+      maxBuffer: 512 * 1024,
+      windowsHide: true,
+    });
+
+    return { success: true, stdout, stderr };
   } catch (error: any) {
     console.error("Failed to execute code file in sandbox:", error);
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      stdout: error.stdout || '',
+      stderr: error.stderr || '',
+      error: error.message,
+    };
   }
 }
 

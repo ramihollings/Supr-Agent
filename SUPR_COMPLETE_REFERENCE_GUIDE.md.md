@@ -296,7 +296,7 @@ export async function executeCodeAction(filename: string, language: string) {
 
 ## 7. Security Controls
 
-1. **Authentication Gate Middleware:** If the `APP_PASSWORD` environment variable is set, the global `middleware.ts` intercepts all App Router requests. It verifies the presence of the `supr_auth_token` cookie. Unauthenticated traffic is seamlessly redirected to the `/login` route.
+1. **Authentication Gate Proxy:** If the `APP_PASSWORD` environment variable is set, the global `proxy.ts` intercepts all App Router requests. It verifies the presence of the `supr_auth_token` cookie. Unauthenticated traffic is seamlessly redirected to the `/login` route.
 2. **SSRF Scraper Proxy Security:** To allow research scrapers to crawl websites without CORS blocks, `/api/proxy` forwards request content. To prevent SSRF (Server-Side Request Forgery) attacks targeting local systems (like the GCP metadata server or local router keys):
    * Requests targeting loopbacks or local IPs are rejected.
    * A DNS lookup resolves the domain name, checking the IP against all RFC 1918 subnets (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`). If a matches is found, the connection is instantly closed.
@@ -312,7 +312,8 @@ export async function executeCodeAction(filename: string, language: string) {
 Create a `.env.local` file:
 ```env
 # Google Gemini API Access (Required)
-GEMINI_API_KEY=AIzaSyYourGeminiApiKeyHere
+GEMINI_API_KEY=your_gemini_api_key_here
+AUTH_SECRET=generate_a_long_random_value
 
 # Access authentication (Optional)
 # APP_PASSWORD=your_secure_password

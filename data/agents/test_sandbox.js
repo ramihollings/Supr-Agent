@@ -1,4 +1,4 @@
-const { LocalNodeSandbox } = require('../lib/providers/sandbox');
+const { LocalNodeSandbox } = require('../../lib/providers/local-node-sandbox');
 const sandbox = new LocalNodeSandbox();
 
 async function runTest() {

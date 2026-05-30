@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { getActiveProvider } from '@/lib/providers/model';
 import { addActivityLog, addArtifact, addMemoryItem, getActiveMission, getMissionById } from '@/lib/db';
 import { requireApiAuth } from '@/lib/auth';
+import { createAgentAction, executeAgentAction } from '@/lib/runtime/agent-actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,9 +15,8 @@ RULES:
 - findings: array of 3-5 specific, technical, actionable intelligence items directly relevant to the query
 - recommendation: one clear next-step for the Code Agent or project team
 - url: source URL if snippets were provided; otherwise use simulated://research-agent
-- domain: short domain name label (e.g. "docs.anthropic.com")
-- Be specific, technical, and grounded — cite realistic details
-- Do NOT use generic filler. Every finding must reference the query topic directly.`;
+- domain: short domain name label
+- Be specific, technical, and grounded.`;
 
 async function fetchResearchSource(query: string) {
   try {
@@ -68,16 +68,21 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        const mission = missionId
-          ? await getMissionById(missionId)
-          : await getActiveMission();
+        const mission = missionId ? await getMissionById(missionId) : await getActiveMission();
+        const action = await createAgentAction({
+          missionId: mission?.id || 'm1',
+          agentId: 'a2',
+          capability: 'web_scrape',
+          intent: query,
+          inputs: { query },
+          riskLevel: 'Low',
+          requiredPermission: 'Observe',
+          metadata: { route: '/api/research' },
+        });
 
-        // Phase 1: Searching
         send({ type: 'status', phase: 'searching', content: `[RESEARCH AGENT] Dispatching research query: "${query}"` });
-        await new Promise(r => setTimeout(r, 600));
-
-        // Phase 2: Navigating
-        send({ type: 'status', phase: 'browsing', content: `[RESEARCH AGENT] Web browser engaged. Scanning indexed sources...` });
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        send({ type: 'status', phase: 'browsing', content: '[RESEARCH AGENT] Web browser engaged. Scanning indexed sources...' });
 
         let rawJson = '';
         let url = '';
@@ -85,81 +90,74 @@ export async function POST(req: NextRequest) {
         let findings: string[] = [];
         let recommendation = '';
         let mode = 'Simulated';
-        const liveSource = await fetchResearchSource(query);
-        if (liveSource) {
-          mode = 'Live';
-          url = liveSource.url;
-          domain = liveSource.domain;
-          findings = liveSource.snippets.slice(0, 5).map((snippet) => `[Live source] ${snippet}`);
-          recommendation = `Review ${domain} source signals and convert the strongest finding into a scoped task.`;
-        }
 
-        try {
-          const provider = await getActiveProvider('research');
-          const prompt = liveSource
-            ? `Generate a research intelligence brief for this enterprise query: "${query}". Use these source snippets as grounded evidence:\n${liveSource.snippets.map((snippet, index) => `${index + 1}. ${snippet}`).join('\n')}\nReturn the JSON object now.`
-            : `Generate a clearly simulated research intelligence brief for this enterprise query: "${query}". Return the JSON object now.`;
+        await executeAgentAction(action.id, async () => {
+          const liveSource = await fetchResearchSource(query);
+          if (liveSource) {
+            mode = 'Live';
+            url = liveSource.url;
+            domain = liveSource.domain;
+            findings = liveSource.snippets.slice(0, 5).map((snippet) => `[Live source] ${snippet}`);
+            recommendation = `Review ${domain} source signals and convert the strongest finding into a scoped task.`;
+          }
 
-          send({ type: 'status', phase: 'extracting', content: `[RESEARCH AGENT] Extracting structured intelligence signals...` });
+          try {
+            const provider = await getActiveProvider('research');
+            const prompt = liveSource
+              ? `Generate a research intelligence brief for this enterprise query: "${query}". Use these source snippets as grounded evidence:\n${liveSource.snippets.map((snippet, index) => `${index + 1}. ${snippet}`).join('\n')}\nReturn the JSON object now.`
+              : `Generate a clearly simulated research intelligence brief for this enterprise query: "${query}". Return the JSON object now.`;
 
-          rawJson = await provider.generateContent(prompt, {
-            systemInstruction: RESEARCH_AGENT_SYSTEM,
-            temperature: 0.7,
-            maxOutputTokens: 800,
-          });
+            send({ type: 'status', phase: 'extracting', content: '[RESEARCH AGENT] Extracting structured intelligence signals...' });
 
-          // Strip markdown fences if model wraps anyway
-          rawJson = rawJson.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-          const parsed = JSON.parse(rawJson);
-          findings = parsed.findings || [];
-          recommendation = parsed.recommendation || '';
-          url = liveSource?.url || parsed.url || `simulated://research-agent/${encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'))}`;
-          domain = liveSource?.domain || parsed.domain || 'research-agent';
+            rawJson = await provider.generateContent(prompt, {
+              systemInstruction: RESEARCH_AGENT_SYSTEM,
+              temperature: 0.7,
+              maxOutputTokens: 800,
+            });
 
-        } catch (llmErr: any) {
-          console.error('Research LLM error:', llmErr);
-          // Graceful fallback with query-contextual findings
-          findings = [
-            `[Analysis] Key patterns identified in "${query}" domain — structured schema inconsistencies present.`,
-            `[Signal] Implementation gaps found in existing documentation for "${query}".`,
-            `[Risk] Standard compliance requirements not fully documented for this workflow.`,
-          ];
-          recommendation = `Review existing "${query}" implementations and apply defensive validation layers.`;
-          url = liveSource?.url || `simulated://research-agent/${encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'))}`;
-          domain = liveSource?.domain || 'research-agent';
-        }
+            rawJson = rawJson.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            const parsed = JSON.parse(rawJson);
+            findings = parsed.findings || [];
+            recommendation = parsed.recommendation || '';
+            url = liveSource?.url || parsed.url || `simulated://research-agent/${encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'))}`;
+            domain = liveSource?.domain || parsed.domain || 'research-agent';
+          } catch (llmErr: any) {
+            console.error('Research LLM error:', llmErr);
+            findings = [
+              `[Analysis] Key patterns identified in "${query}" domain - structured schema inconsistencies present.`,
+              `[Signal] Implementation gaps found in existing documentation for "${query}".`,
+              '[Risk] Standard compliance requirements not fully documented for this workflow.',
+            ];
+            recommendation = `Review existing "${query}" implementations and apply defensive validation layers.`;
+            url = liveSource?.url || `simulated://research-agent/${encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'))}`;
+            domain = liveSource?.domain || 'research-agent';
+          }
 
-        // Phase 3: Write to DB
+          return { query, mode, findings, recommendation, url, domain };
+        });
+
         if (mission) {
           const filename = `research_${query.toLowerCase().replace(/\W+/g, '_').substring(0, 40)}.md`;
           const mdContent = [
             `# Research Intelligence Brief: ${query}`,
-            ``,
-            `## Source Analysis`,
+            '',
+            '## Source Analysis',
             `- **Target Domain**: ${url}`,
             `- **Mode**: ${mode}`,
             `- **Timestamp**: ${new Date().toLocaleString()}`,
-            `- **Agent**: Research Agent (WebBrowser v1.2)`,
-            ``,
-            `## Extracted Intelligence Signals`,
-            ...findings.map((f, i) => `${i + 1}. ${f}`),
-            ``,
-            `## Supr Recommendation`,
+            '- **Agent**: Research Agent (WebBrowser v1.2)',
+            '',
+            '## Extracted Intelligence Signals',
+            ...findings.map((finding, index) => `${index + 1}. ${finding}`),
+            '',
+            '## Supr Recommendation',
             `> ${recommendation}`,
           ].join('\n');
 
-          await addArtifact(mission.id, {
-            filename,
-            type: 'markdown',
-            content: mdContent,
-          });
+          await addArtifact(mission.id, { filename, type: 'markdown', content: mdContent });
 
           for (const finding of findings) {
-            await addMemoryItem(mission.id, {
-              key: 'research_finding',
-              value: finding,
-              importance: 'High',
-            });
+            await addMemoryItem(mission.id, { key: 'research_finding', value: finding, importance: 'High' });
           }
 
           await addActivityLog(mission.id, {
@@ -171,20 +169,18 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        // Phase 4: Return results to client
         send({
           type: 'result',
           phase: 'done',
+          actionId: action.id,
+          traceId: action.traceId,
           findings,
           recommendation,
           url,
           domain,
           mode,
-          filename: mission
-            ? `research_${query.toLowerCase().replace(/\W+/g, '_').substring(0, 40)}.md`
-            : null,
+          filename: mission ? `research_${query.toLowerCase().replace(/\W+/g, '_').substring(0, 40)}.md` : null,
         });
-
       } catch (err: any) {
         console.error('Research Agent API error:', err);
         send({ type: 'error', content: `Research pipeline failed: ${err.message}` });
@@ -198,7 +194,7 @@ export async function POST(req: NextRequest) {
     headers: {
       'Content-Type': 'application/x-ndjson',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      Connection: 'keep-alive',
     },
   });
 }
