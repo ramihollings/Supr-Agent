@@ -3,8 +3,26 @@ import { getActiveProvider } from '@/lib/providers/model';
 import { PermissionEngine } from '@/lib/services/governance';
 import { addActivityLog, getActiveMission } from '@/lib/db';
 import { requireApiAuth } from '@/lib/auth';
+import dbClient from '@/lib/database/db_client';
 
 export const dynamic = 'force-dynamic';
+
+function extractRequestedAction(prompt: string) {
+  const lower = prompt.toLowerCase();
+  if (/\b(deploy|release|production|prod)\b/.test(lower)) {
+    return { name: 'Production Modification', requiredTier: 'Root' as const, riskLevel: 'Critical' as const };
+  }
+  if (/\b(delete|remove|destroy|drop|truncate|wipe)\b/.test(lower)) {
+    return { name: 'Destructive Data Operation', requiredTier: 'Root' as const, riskLevel: 'Critical' as const };
+  }
+  if (/\b(slack|github|gmail|webhook|external api)\b/.test(lower)) {
+    return { name: 'External Connector Action', requiredTier: 'External_Act' as const, riskLevel: 'High' as const };
+  }
+  if (/\b(run|execute|sandbox|terminal|shell)\b/.test(lower)) {
+    return { name: 'Sandbox Execution', requiredTier: 'Execute' as const, riskLevel: 'High' as const };
+  }
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   const authError = await requireApiAuth(req);
@@ -24,23 +42,30 @@ export async function POST(req: NextRequest) {
           const mission = await getActiveMission();
           
           // 1. Governance Interception Check
-          // (Simulated based on keywords for demo. In production, this runs against structured tool calls from the LLM)
-          const lowerPrompt = prompt.toLowerCase();
-          if (lowerPrompt.includes('deploy') || lowerPrompt.includes('delete') || lowerPrompt.includes('drop')) {
+          const requestedAction = extractRequestedAction(prompt);
+          if (requestedAction) {
             const decision = PermissionEngine.evaluateAction(
               { id: 'a1', name: 'Supr', permissionTier: 'Execute', isPermanent: true },
-              { name: 'Production Modification', requiredTier: 'Root', riskLevel: 'Critical' }
+              requestedAction
             );
 
             if (decision.status === 'RequiresApproval') {
+              const approvalId = `gate-${Date.now()}`;
+              if (mission) {
+                await dbClient.execute(
+                  `INSERT INTO Approvals (id, mission_id, requesting_agent_id, action, required_permission, risk_level, reason, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [approvalId, mission.id, 'a1', requestedAction.name, requestedAction.requiredTier, requestedAction.riskLevel, decision.reason, 'pending']
+                );
+              }
               sendJSON({
                 type: 'message',
                 approvalRequest: {
-                  id: `gate-${Date.now()}`,
+                  id: approvalId,
                   requestingAgent: 'Supr',
-                  action: 'Production Modification',
-                  riskLevel: 'Critical',
-                  permission: 'Root',
+                  action: requestedAction.name,
+                  riskLevel: requestedAction.riskLevel,
+                  permission: requestedAction.requiredTier,
                   reason: decision.reason,
                   suprRecommendation: 'High-risk action intercepted. Human verification required before proceeding.'
                 }

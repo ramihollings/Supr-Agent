@@ -11,6 +11,7 @@ import {
   writeWorkspaceFileAction,
   deleteWorkspaceFileAction,
   executeCodeAction,
+  runProjectCheckAction,
   fetchSettingsAction,
   updateSettingAction
 } from '@/app/actions';
@@ -30,6 +31,9 @@ export default function CodePage() {
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([]);
   const [activeFile, setActiveFile] = useState<string>('');
   const [editorContent, setEditorContent] = useState<string>('');
+  const [lastSavedContent, setLastSavedContent] = useState<string>('');
+  const [pendingFix, setPendingFix] = useState<{ code: string; diagnosis: string; fix: string } | null>(null);
+  const [testHistory, setTestHistory] = useState<string[]>([]);
   
   // Real filesystem files list
   const [filesList, setFilesList] = useState<{ filename: string; size: number; updatedAt: string; type: string }[]>([]);
@@ -89,6 +93,7 @@ export default function CodePage() {
       setActiveFile(defaultFile.filename);
       const content = await readWorkspaceFileAction(defaultFile.filename);
       setEditorContent(content);
+      setLastSavedContent(content);
     }
     setIsLoading(false);
   };
@@ -102,6 +107,8 @@ export default function CodePage() {
     setSaveStatus('saved');
     const content = await readWorkspaceFileAction(filename);
     setEditorContent(content);
+    setLastSavedContent(content);
+    setPendingFix(null);
   };
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -115,6 +122,7 @@ export default function CodePage() {
       const res = await writeWorkspaceFileAction(activeFile, editorContent);
       if (res.success) {
         setSaveStatus('saved');
+        setLastSavedContent(editorContent);
         showToast(`${activeFile} saved to workspace! ✓`);
         setTerminalLogsAction(`[Workspace Storage] Synchronized ${activeFile} with secure workspace.`);
         // Reload list for updated sizes
@@ -183,6 +191,7 @@ export default function CodePage() {
     const res = await executeCodeAction(activeFile, activeFile.endsWith('.py') ? 'python' : 'javascript');
     const timeNow = Date.now();
     if (res.success) {
+      setTestHistory(prev => [`${new Date().toLocaleTimeString()} ${activeFile}: passed`, ...prev].slice(0, 6));
       const outputLines: string[] = res.stdout ? res.stdout.split('\n') : [];
       const newLines = outputLines.map((l: string, i: number) => ({
         id: timeNow + i,
@@ -196,6 +205,7 @@ export default function CodePage() {
         await updateTaskStatusAction(mission.id, 't2', 'Done');
       }
     } else {
+      setTestHistory(prev => [`${new Date().toLocaleTimeString()} ${activeFile}: failed`, ...prev].slice(0, 6));
       const errorContent = res.stderr || res.error || 'Execution failed with non-zero exit code.';
       const outputLines: string[] = errorContent.split('\n');
       const newLines = outputLines.map((l: string, i: number) => ({
@@ -219,6 +229,34 @@ export default function CodePage() {
       }
     }
     setIsRunning(false);
+  };
+
+  const handleProjectCheck = async (check: 'lint' | 'build') => {
+    if (isRunning) return;
+    setIsRunning(true);
+    setTerminalLines(prev => [...prev, { id: Date.now(), type: 'command', content: `npm run ${check}` }]);
+    const res = await runProjectCheckAction(check);
+    const content = [res.stdout, res.stderr, res.error].filter(Boolean).join('\n') || `${check} completed.`;
+    setTerminalLines(prev => [...prev, { id: Date.now() + 1, type: res.success ? 'success' : 'error', content }]);
+    setTestHistory(prev => [`${new Date().toLocaleTimeString()} project ${check}: ${res.success ? 'passed' : 'failed'}`, ...prev].slice(0, 6));
+    setIsRunning(false);
+  };
+
+  const handleRollbackFile = () => {
+    setEditorContent(lastSavedContent);
+    setSaveStatus('saved');
+    setPendingFix(null);
+    showToast(`Rolled ${activeFile} back to last saved content`);
+  };
+
+  const handleApplyPendingFix = async () => {
+    if (!pendingFix || !activeFile) return;
+    setEditorContent(pendingFix.code);
+    await writeWorkspaceFileAction(activeFile, pendingFix.code);
+    setLastSavedContent(pendingFix.code);
+    setSaveStatus('saved');
+    setPendingFix(null);
+    showToast(`Applied Code Agent fix to ${activeFile}`);
   };
 
   const handleDiagnoseAndFix = async () => {
@@ -279,9 +317,11 @@ export default function CodePage() {
 
             if (msg.type === 'result') {
               if (msg.fixedCode) {
-                setEditorContent(msg.fixedCode);
-                await writeWorkspaceFileAction(activeFile, msg.fixedCode);
-                setSaveStatus('saved');
+                setPendingFix({
+                  code: msg.fixedCode,
+                  diagnosis: msg.diagnosis || 'No diagnosis returned.',
+                  fix: msg.fix || 'No fix returned.',
+                });
               }
 
               const resultLines: TerminalLine[] = [
@@ -356,6 +396,22 @@ export default function CodePage() {
           >
             <span className="material-symbols-outlined text-[18px]">play_arrow</span>
             Run Code
+          </button>
+          <button
+            onClick={() => handleProjectCheck('lint')}
+            disabled={isRunning}
+            className="hidden md:flex bg-background text-primary border-2 border-primary px-3 py-1.5 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50 items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-[18px]">fact_check</span>
+            Lint
+          </button>
+          <button
+            onClick={() => handleProjectCheck('build')}
+            disabled={isRunning}
+            className="hidden md:flex bg-background text-primary border-2 border-primary px-3 py-1.5 font-headline font-bold uppercase hover:bg-primary hover:text-on-primary transition-colors active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50 items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-[18px]">deployed_code</span>
+            Build
           </button>
         </div>
       </header>
@@ -471,6 +527,25 @@ export default function CodePage() {
           </div>
           
           <div className="flex-1 flex flex-col relative overflow-hidden bg-surface-container-lowest">
+            {pendingFix && (
+              <div className="border-b-4 border-primary bg-primary-container p-3 flex flex-col gap-2 shrink-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-headline font-black uppercase text-xs text-primary">Code Agent fix pending review</h3>
+                    <p className="font-body text-[11px] text-on-primary-container">{pendingFix.diagnosis} Fix: {pendingFix.fix}</p>
+                    <p className="font-mono text-[10px] mt-1">{lastSavedContent.split('\n').length} lines current · {pendingFix.code.split('\n').length} lines proposed</p>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={handleApplyPendingFix} className="bg-primary text-on-primary border-2 border-primary px-3 py-1 font-headline font-bold uppercase text-[10px] hover:bg-tertiary">
+                      Apply Fix
+                    </button>
+                    <button onClick={() => setPendingFix(null)} className="bg-background text-primary border-2 border-primary px-3 py-1 font-headline font-bold uppercase text-[10px] hover:bg-surface">
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* Interactive textarea editor */}
             <textarea
               value={editorContent}
@@ -492,6 +567,13 @@ export default function CodePage() {
                 className="bg-secondary text-on-secondary border-2 border-primary px-3 py-1 text-xs font-headline font-bold uppercase hover:bg-tertiary hover:text-on-tertiary transition-colors shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50"
               >
                 Save File
+              </button>
+              <button
+                onClick={handleRollbackFile}
+                disabled={!activeFile || editorContent === lastSavedContent}
+                className="bg-background text-primary border-2 border-primary px-3 py-1 text-xs font-headline font-bold uppercase hover:bg-surface transition-colors shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50"
+              >
+                Rollback
               </button>
             </div>
           </div>
@@ -532,6 +614,20 @@ export default function CodePage() {
                  <span className="w-1.5 h-3 bg-green-400 animate-ping"></span>
                </div>
              )}
+          </div>
+
+          <div className="border-t-4 border-primary bg-surface-container p-3 shrink-0">
+            <h4 className="font-headline font-black uppercase text-xs text-primary mb-2 flex items-center gap-1">
+              <span className="material-symbols-outlined text-sm">history</span>
+              Test History
+            </h4>
+            <div className="space-y-1 max-h-20 overflow-y-auto custom-scrollbar">
+              {testHistory.length === 0 ? (
+                <p className="font-mono text-[10px] text-on-surface-variant">No runs yet.</p>
+              ) : testHistory.map((entry, idx) => (
+                <p key={`${entry}-${idx}`} className="font-mono text-[10px] text-on-surface-variant">{entry}</p>
+              ))}
+            </div>
           </div>
           
           {/* Supr Guidance */}

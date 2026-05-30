@@ -1,7 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
-import { useState, useEffect, useRef, startTransition, Suspense } from 'react';
+import { useState, useEffect, useRef, startTransition, Suspense, useCallback } from 'react';
 import { fetchOrchestrationFeed, fetchAgentStatuses, fetchMissionsAction } from '@/app/actions';
 import { Mission } from '@/types';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -81,7 +81,7 @@ function OrchestrationContent() {
     return () => clearInterval(interval);
   }, []);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     const [feed, statuses, missionList] = await Promise.all([
       fetchOrchestrationFeed(selectedProjectId === 'all' ? undefined : selectedProjectId),
       fetchAgentStatuses(),
@@ -91,11 +91,11 @@ function OrchestrationContent() {
     setAgentStatuses(statuses);
     setMissions(missionList);
     setIsLoading(false);
-  };
+  }, [selectedProjectId]);
 
   useEffect(() => {
-    loadData();
-  }, [selectedProjectId]);
+    void loadData();
+  }, [loadData]);
 
   // Simulated live updates
   useEffect(() => {

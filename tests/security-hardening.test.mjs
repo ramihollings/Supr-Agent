@@ -44,3 +44,38 @@ test('proxy keeps SSRF defenses enabled', () => {
   assert.match(proxyRoute, /isPrivateIp/);
 });
 
+test('runbooks and artifact versions are backed by persistence tables and actions', () => {
+  const initSql = readFileSync('lib/database/init.ts', 'utf8');
+  const actions = readFileSync('app/actions.ts', 'utf8');
+  const db = readFileSync('lib/db.ts', 'utf8');
+
+  assert.match(initSql, /CREATE TABLE IF NOT EXISTS Runbooks/);
+  assert.match(initSql, /CREATE TABLE IF NOT EXISTS Artifact_Versions/);
+  assert.match(actions, /fetchRunbooksAction/);
+  assert.match(actions, /startRunbookAction/);
+  assert.match(actions, /fetchArtifactVersionsAction/);
+  assert.match(actions, /rollbackArtifactVersionAction/);
+  assert.match(db, /INSERT INTO Artifact_Versions/);
+});
+
+test('memory review and connector validation stay wired to real actions', () => {
+  const actions = readFileSync('app/actions.ts', 'utf8');
+  const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
+
+  assert.match(actions, /updateMemoryReviewAction/);
+  assert.match(actions, /testConnectorAction/);
+  assert.match(settingsPage, /handleMemoryReview/);
+  assert.match(settingsPage, /handleConnectorTest/);
+  assert.match(settingsPage, /showPinnedOnly/);
+});
+
+test('governance and research routes expose real status labels instead of silent simulation', () => {
+  const agentRoute = readFileSync('app/api/agent/route.ts', 'utf8');
+  const researchRoute = readFileSync('app/api/research/route.ts', 'utf8');
+
+  assert.match(agentRoute, /extractRequestedAction/);
+  assert.match(agentRoute, /INSERT INTO Approvals/);
+  assert.match(researchRoute, /fetchResearchSource/);
+  assert.match(researchRoute, /Mode/);
+  assert.match(researchRoute, /mode = 'Live'/);
+});

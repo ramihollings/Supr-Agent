@@ -12,7 +12,18 @@ import {
   fetchMissionsAction, 
   fetchAgentsState, 
   logActivityAction, 
-  updateTaskStatusAction 
+  updateTaskStatusAction,
+  fetchMissionTimelineAction,
+  fetchApprovalCenterAction,
+  decideApprovalAction,
+  fetchMissionQualityAction,
+  fetchConnectorHealthAction,
+  fetchRunbooksAction,
+  fetchArtifactVersionsAction,
+  fetchMemoryItemsAction,
+  startRunbookAction,
+  rollbackArtifactVersionAction,
+  updateArtifactVersionStatusAction
 } from '@/app/actions';
 import { Message, Mission } from '@/types';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -25,6 +36,13 @@ function BlendedDashboardContent() {
   const [showWizard, setShowWizard] = useState(false);
   const [projects, setProjects] = useState<Mission[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
+  const [timeline, setTimeline] = useState<any[]>([]);
+  const [approvals, setApprovals] = useState<any[]>([]);
+  const [quality, setQuality] = useState<any | null>(null);
+  const [connectors, setConnectors] = useState<any[]>([]);
+  const [runbooks, setRunbooks] = useState<any[]>([]);
+  const [artifactVersions, setArtifactVersions] = useState<any[]>([]);
+  const [memoryPreview, setMemoryPreview] = useState<any[]>([]);
 
   // Project-specific workspace states
   const projectId = searchParams.get('id');
@@ -73,8 +91,18 @@ function BlendedDashboardContent() {
   // Fetch projects list
   const loadProjects = async () => {
     try {
-      const data = await fetchMissionsAction();
+      const [data, connectorData, runbookData, memoryData, approvalsData] = await Promise.all([
+        fetchMissionsAction(),
+        fetchConnectorHealthAction(),
+        fetchRunbooksAction(),
+        fetchMemoryItemsAction(),
+        fetchApprovalCenterAction(),
+      ]);
       setProjects(data);
+      setConnectors(connectorData);
+      setRunbooks(runbookData);
+      setMemoryPreview(memoryData.slice(0, 6));
+      setApprovals(approvalsData);
     } catch (err) {
       console.error(err);
     } finally {
@@ -132,6 +160,20 @@ function BlendedDashboardContent() {
   // Project-specific stream setup
   useEffect(() => {
     if (!projectId) return;
+
+    async function loadMissionOperatingData() {
+      const [timelineData, approvalsData, qualityData, versionsData] = await Promise.all([
+        fetchMissionTimelineAction(projectId || undefined),
+        fetchApprovalCenterAction(projectId || undefined),
+        fetchMissionQualityAction(projectId || undefined),
+        fetchArtifactVersionsAction(projectId || undefined),
+      ]);
+      setTimeline(timelineData);
+      setApprovals(approvalsData);
+      setQuality(qualityData);
+      setArtifactVersions(versionsData);
+    }
+    loadMissionOperatingData();
 
     const eventSource = new EventSource(`/api/mission/stream?id=${projectId}`);
 
@@ -192,6 +234,47 @@ function BlendedDashboardContent() {
     setMessages(prev => [...prev, { id: Date.now(), sender: 'You', text: `Action Safety Audit ${decision}d.`, isUser: true }]);
     setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'Supr', text: `Audit gate marked as ${decision}d. Verifying code structure in secure workspace.`, isUser: false }]);
     showToast(`Gate decision processed: ${decision}`);
+  };
+
+  const handleApprovalCenterDecision = async (id: string, decision: 'approved' | 'rejected' | 'revised') => {
+    const res = await decideApprovalAction(id, decision);
+    if (res.success) {
+      showToast(`Approval ${decision}`);
+      const [approvalsData, qualityData] = await Promise.all([
+        fetchApprovalCenterAction(projectId || undefined),
+        fetchMissionQualityAction(projectId || undefined),
+      ]);
+      setApprovals(approvalsData);
+      setQuality(qualityData);
+    }
+  };
+
+  const handleStartRunbook = async (runbookId: string) => {
+    const res = await startRunbookAction(runbookId);
+    if (res.success && res.missionId) {
+      showToast('Runbook mission started');
+      await loadProjects();
+      router.push(`/?id=${res.missionId}`);
+    } else {
+      showToast(res.error || 'Runbook could not be started');
+    }
+  };
+
+  const refreshArtifactVersions = async () => {
+    const versionsData = await fetchArtifactVersionsAction(projectId || undefined);
+    setArtifactVersions(versionsData);
+  };
+
+  const handleArtifactStatus = async (versionId: string, status: 'draft' | 'approved' | 'final') => {
+    const res = await updateArtifactVersionStatusAction(versionId, status);
+    showToast(res.success ? `Artifact marked ${status}` : 'Artifact status update failed');
+    if (res.success) await refreshArtifactVersions();
+  };
+
+  const handleArtifactRollback = async (versionId: string) => {
+    const res = await rollbackArtifactVersionAction(versionId);
+    showToast(res.success ? 'Artifact rolled back into a new approved version' : 'Rollback failed');
+    if (res.success) await refreshArtifactVersions();
   };
 
   const handleSubmitMessage = async (e: React.FormEvent) => {
@@ -593,14 +676,22 @@ function BlendedDashboardContent() {
 
               <div>
                 <div className="flex justify-between items-end mb-1">
-                  <span className="font-headline font-bold text-[10px] uppercase text-primary">Project Readiness</span>
-                  <span className="font-headline font-black text-lg text-secondary">{readinessScore}%</span>
+                  <span className="font-headline font-bold text-[10px] uppercase text-primary">Mission Quality</span>
+                  <span className="font-headline font-black text-lg text-secondary">{quality?.score ?? readinessScore}%</span>
                 </div>
                 <div className="w-full h-3 bg-outline-variant neo-border-sm relative overflow-hidden">
                   <div
                     className="absolute inset-y-0 left-0 bg-secondary transition-all duration-1000"
-                    style={{ width: `${readinessScore}%` }}
+                    style={{ width: `${quality?.score ?? readinessScore}%` }}
                   />
+                </div>
+                <div className="grid grid-cols-2 gap-1 mt-3">
+                  {(quality?.checks || []).slice(0, 6).map((check: any) => (
+                    <div key={check.label} className="bg-background border border-outline-variant p-1.5">
+                      <span className="block font-headline font-bold uppercase text-[8px] text-on-surface-variant truncate">{check.label}</span>
+                      <span className="font-mono text-[10px] font-bold">{check.value}%</span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -627,6 +718,76 @@ function BlendedDashboardContent() {
                   ))}
                 </div>
               </div>
+            </section>
+
+            <section className="border-4 border-primary p-4 bg-surface flex flex-col gap-3">
+              <h4 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-1.5 border-b-2 border-primary pb-2">
+                <span className="material-symbols-outlined text-sm text-secondary">approval_delegation</span>
+                Approval Center
+              </h4>
+              {approvals.length === 0 ? (
+                <p className="font-body text-xs text-on-surface-variant">No pending or historical approvals for this mission.</p>
+              ) : approvals.slice(0, 4).map((approval) => (
+                <div key={approval.id} className="neo-border bg-background p-3">
+                  <div className="flex justify-between gap-2 mb-1">
+                    <span className="font-headline font-black uppercase text-[10px]">{approval.action}</span>
+                    <span className="font-mono text-[9px] uppercase text-secondary">{approval.riskLevel}</span>
+                  </div>
+                  <p className="font-body text-[10px] text-on-surface-variant line-clamp-2">{approval.reason}</p>
+                  {approval.status === 'pending' && (
+                    <div className="grid grid-cols-3 gap-1 mt-2">
+                      {(['approved', 'rejected', 'revised'] as const).map(decision => (
+                        <button
+                          key={decision}
+                          onClick={() => handleApprovalCenterDecision(approval.id, decision)}
+                          className="border border-primary px-1 py-1 font-headline font-bold uppercase text-[8px] hover:bg-primary hover:text-on-primary"
+                        >
+                          {decision}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </section>
+
+            <section className="border-4 border-primary p-4 bg-surface flex flex-col gap-3">
+              <h4 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-1.5 border-b-2 border-primary pb-2">
+                <span className="material-symbols-outlined text-sm text-tertiary">timeline</span>
+                Mission Timeline
+              </h4>
+              <div className="space-y-2 max-h-[240px] overflow-y-auto custom-scrollbar">
+                {timeline.slice(0, 8).map(item => (
+                  <div key={`${item.source}-${item.id}`} className="border-l-4 border-tertiary pl-3 py-1">
+                    <div className="flex justify-between gap-2">
+                      <span className="font-headline font-black uppercase text-[10px]">{item.title}</span>
+                      <span className="font-mono text-[8px] uppercase text-on-surface-variant">{item.mode}</span>
+                    </div>
+                    <p className="font-body text-[10px] text-on-surface-variant line-clamp-2">{item.detail}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="border-4 border-primary p-4 bg-surface flex flex-col gap-3">
+              <h4 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-1.5 border-b-2 border-primary pb-2">
+                <span className="material-symbols-outlined text-sm text-secondary">difference</span>
+                Artifact Versions
+              </h4>
+              {artifactVersions.slice(0, 5).map(version => (
+                <div key={version.id} className="bg-background border border-outline-variant p-2">
+                  <div className="flex justify-between gap-2">
+                    <span className="font-headline font-bold uppercase text-[10px] truncate">{version.filename}</span>
+                    <span className="font-mono text-[9px]">{version.version}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 mt-2">
+                    <button onClick={() => handleArtifactStatus(version.id, 'approved')} className="border border-primary px-1 py-1 font-headline font-bold uppercase text-[8px] hover:bg-primary hover:text-on-primary">Approve</button>
+                    <button onClick={() => handleArtifactStatus(version.id, 'final')} className="border border-primary px-1 py-1 font-headline font-bold uppercase text-[8px] hover:bg-primary hover:text-on-primary">Final</button>
+                    <button onClick={() => handleArtifactRollback(version.id)} className="border border-secondary px-1 py-1 font-headline font-bold uppercase text-[8px] hover:bg-secondary hover:text-on-secondary">Rollback</button>
+                  </div>
+                  <p className="font-body text-[10px] text-on-surface-variant">{version.status} · {version.generatedBy} · {version.diffSummary}</p>
+                </div>
+              ))}
             </section>
 
             <section className="flex flex-col">
@@ -667,6 +828,91 @@ function BlendedDashboardContent() {
             </button>
           </div>
         </header>
+
+        <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="xl:col-span-2 bg-background neo-border neo-shadow p-6">
+            <div className="flex items-center justify-between border-b-2 border-primary pb-3 mb-4">
+              <h2 className="font-headline text-2xl font-black uppercase tracking-tight flex items-center gap-2">
+                <span className="material-symbols-outlined text-secondary">priority_high</span>
+                Needs Attention
+              </h2>
+              <span className="font-mono text-[10px] uppercase text-on-surface-variant">Live operating view</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-surface-container neo-border p-4">
+                <span className="font-headline font-bold uppercase text-[10px] text-on-surface-variant">Pending approvals</span>
+                <p className="font-headline font-black text-3xl text-secondary">{approvals.filter(a => a.status === 'pending').length}</p>
+              </div>
+              <div className="bg-surface-container neo-border p-4">
+                <span className="font-headline font-bold uppercase text-[10px] text-on-surface-variant">Connected tools</span>
+                <p className="font-headline font-black text-3xl text-tertiary">{connectors.filter(c => c.configured).length}/{connectors.length}</p>
+              </div>
+              <div className="bg-surface-container neo-border p-4">
+                <span className="font-headline font-bold uppercase text-[10px] text-on-surface-variant">Memory entries</span>
+                <p className="font-headline font-black text-3xl text-primary">{memoryPreview.length}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-background neo-border neo-shadow p-6">
+            <h2 className="font-headline text-xl font-black uppercase tracking-tight border-b-2 border-primary pb-3 mb-4 flex items-center gap-2">
+              <span className="material-symbols-outlined text-tertiary">sensors</span>
+              Mode
+            </h2>
+            <div className="space-y-2">
+              {connectors.map(connector => (
+                <div key={connector.id} className="flex items-center justify-between bg-surface-container border border-outline-variant p-2">
+                  <span className="font-headline font-bold uppercase text-[10px]">{connector.name}</span>
+                  <span className={`font-mono text-[9px] uppercase ${connector.configured ? 'text-tertiary' : 'text-on-surface-variant'}`}>{connector.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-background neo-border p-5">
+            <h2 className="font-headline text-xl font-black uppercase tracking-tight border-b-2 border-primary pb-2 mb-4 flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">assignment</span>
+              Runbooks
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {runbooks.map(runbook => (
+                <div key={runbook.id} className="bg-surface-container border border-outline-variant p-3">
+                  <span className="font-headline font-black uppercase text-sm block">{runbook.name}</span>
+                  <p className="font-body text-[10px] text-on-surface-variant mt-1">{runbook.description}</p>
+                  <p className="font-body text-[10px] text-on-surface-variant mt-1">{runbook.output}</p>
+                  <button
+                    onClick={() => handleStartRunbook(runbook.id)}
+                    className="mt-3 w-full bg-primary text-on-primary border border-primary px-2 py-1 font-headline font-bold uppercase text-[9px] hover:bg-tertiary hover:text-on-tertiary"
+                  >
+                    Start Runbook
+                  </button>
+                  <p className="font-mono text-[9px] uppercase mt-2">{runbook.agents.join(' + ')} · {runbook.gates} gates</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-background neo-border p-5">
+            <h2 className="font-headline text-xl font-black uppercase tracking-tight border-b-2 border-primary pb-2 mb-4 flex items-center gap-2">
+              <span className="material-symbols-outlined text-secondary">memory</span>
+              Memory Review
+            </h2>
+            <div className="space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
+              {memoryPreview.map(item => (
+                <div key={item.id} className="bg-surface-container border border-outline-variant p-3">
+                  <div className="flex justify-between gap-2">
+                    <span className="font-headline font-bold uppercase text-[10px]">{item.key}</span>
+                    <span className="font-mono text-[9px] uppercase">{item.importance}</span>
+                  </div>
+                  <p className="font-body text-[11px] text-on-surface-variant line-clamp-2 mt-1">{item.value}</p>
+                  <p className="font-mono text-[9px] uppercase mt-2">Used when scope matches {item.scope || 'General'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
         {/* Active Projects */}
         <section>

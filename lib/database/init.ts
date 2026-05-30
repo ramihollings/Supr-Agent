@@ -303,6 +303,51 @@ export function initDatabase() {
     )
   `);
 
+  // 17. Artifact Versions Table
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Artifact_Versions (
+      id TEXT PRIMARY KEY,
+      artifact_id TEXT,
+      mission_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      type TEXT,
+      content TEXT,
+      version INTEGER DEFAULT 1,
+      status TEXT DEFAULT 'draft',
+      generated_by TEXT,
+      diff_summary TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id)
+    )
+  `);
+
+  // 18. Runbooks Table
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Runbooks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      agents TEXT,
+      gates INTEGER DEFAULT 1,
+      output TEXT,
+      steps TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  try {
+    dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN pinned INTEGER DEFAULT 0`);
+  } catch (e) {}
+
+  try {
+    dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN reviewed_at DATETIME`);
+  } catch (e) {}
+
+  try {
+    dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN reason TEXT`);
+  } catch (e) {}
+
   // Seed default settings
   const insertSetting = dbInstance.prepare(`
     INSERT OR IGNORE INTO Settings (key, value)
@@ -409,6 +454,24 @@ export function initDatabase() {
       new Date(Date.now() - 45 * 60000).toISOString(),
       'Paused'
     );
+  }
+
+  // Seed default runbooks if table is empty
+  const runbooksCount = dbInstance.prepare(`SELECT COUNT(*) as cnt FROM Runbooks`).get() as { cnt: number };
+  if (runbooksCount.cnt === 0) {
+    const insertRunbook = dbInstance.prepare(`
+      INSERT OR IGNORE INTO Runbooks (id, name, description, agents, gates, output, steps)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    [
+      ['audit-repo', 'Audit Repo', 'Inspect code, dependencies, security posture, and UX risks.', ['Supr', 'Code Agent', 'QA Agent'], 2, 'Security and quality report'],
+      ['launch-report', 'Create Launch Report', 'Compile delivery status, risks, artifacts, and executive summary.', ['Research Agent', 'Signal Agent'], 1, 'Executive delivery packet'],
+      ['market-research', 'Research Market', 'Gather external signals and convert them into research memory.', ['Research Agent'], 1, 'Research brief and memory entries'],
+      ['fix-tests', 'Fix Failing Tests', 'Run diagnostics, propose a patch, and verify tests.', ['Code Agent', 'QA Agent'], 2, 'Patch proposal and test transcript'],
+      ['generate-pr', 'Generate PR', 'Prepare a review-ready change summary and approval checklist.', ['Code Agent', 'Supr'], 3, 'Review-ready change summary'],
+    ].forEach(([id, name, description, agents, gates, output]) => {
+      insertRunbook.run(id, name, description, JSON.stringify(agents), gates, output, JSON.stringify([]));
+    });
   }
 
   // Seed orchestration events for the Observance Hub

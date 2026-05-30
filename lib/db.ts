@@ -198,16 +198,40 @@ export async function updateTaskStatus(missionId: string, taskId: string, status
 }
 
 export async function addArtifact(missionId: string, artifact: Omit<Artifact, 'id'>): Promise<void> {
+  const id = `art-${Date.now()}`;
   const sql = `
     INSERT INTO Artifacts (id, mission_id, type, title, content)
     VALUES (?, ?, ?, ?, ?)
   `;
-  await dbClient.execute(sql, [`art-${Date.now()}`, missionId, artifact.type, artifact.filename, artifact.content]);
+  await dbClient.execute(sql, [id, missionId, artifact.type, artifact.filename, artifact.content]);
+  await dbClient.execute(
+    `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [`av-${Date.now()}`, id, missionId, artifact.filename, artifact.type, artifact.content, 1, 'draft', 'Supr', `${artifact.content.split('\n').length} lines created`]
+  );
 }
 
 export async function updateArtifact(missionId: string, title: string, content: string): Promise<void> {
+  const artifact = await dbClient.queryOne<any>(`SELECT * FROM Artifacts WHERE mission_id = ? AND title = ?`, [missionId, title]);
+  const latest = await dbClient.queryOne<any>(`SELECT MAX(version) as version FROM Artifact_Versions WHERE mission_id = ? AND title = ?`, [missionId, title]);
   const sql = `UPDATE Artifacts SET content = ? WHERE mission_id = ? AND title = ?`;
   await dbClient.execute(sql, [content, missionId, title]);
+  await dbClient.execute(
+    `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      `av-${Date.now()}`,
+      artifact?.id || null,
+      missionId,
+      title,
+      artifact?.type || 'markdown',
+      content,
+      Number(latest?.version || 0) + 1,
+      'draft',
+      'Code Agent',
+      `${content.split('\n').length} lines updated`
+    ]
+  );
 }
 
 export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'id'>): Promise<void> {

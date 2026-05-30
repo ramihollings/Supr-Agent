@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { MissionSchema } from '@/lib/validations';
@@ -27,7 +27,7 @@ export function MissionWizard({ onClose }: { onClose: () => void }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
-  const { register, handleSubmit, formState: { errors }, watch } = useForm<WizardData>({
+  const { register, handleSubmit, formState: { errors }, control } = useForm<WizardData>({
     resolver: zodResolver(WizardSchema),
     defaultValues: {
       name: '',
@@ -42,6 +42,9 @@ export function MissionWizard({ onClose }: { onClose: () => void }) {
       tasks: []
     }
   });
+  const watchedPhases = useWatch({ control, name: 'phases' });
+  const watchedName = useWatch({ control, name: 'name' });
+  const watchedObjective = useWatch({ control, name: 'objective' });
 
   const onSubmit = async (data: WizardData) => {
     setIsSubmitting(true);
@@ -150,7 +153,7 @@ export function MissionWizard({ onClose }: { onClose: () => void }) {
                  <p className="font-body text-sm text-on-surface-variant italic">The Roadmap is automatically generated based on the Supr Standard. You can customize phases later in the Workspace.</p>
                </div>
                <div className="space-y-4">
-                 {watch('phases')?.map((phase, idx) => (
+                 {watchedPhases?.map((phase, idx) => (
                    <div key={phase.id || idx} className="flex items-center gap-4 bg-background neo-border p-4">
                      <div className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xs">{idx + 1}</div>
                      <input 
@@ -169,8 +172,8 @@ export function MissionWizard({ onClose }: { onClose: () => void }) {
                  <Rocket className="w-12 h-12" />
                </div>
                <div>
-                 <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">{watch('name') || 'Unnamed Project'}</h3>
-                 <p className="font-body text-on-surface-variant mt-2 max-w-md mx-auto">{watch('objective') || 'No objective defined yet.'}</p>
+                 <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">{watchedName || 'Unnamed Project'}</h3>
+                 <p className="font-body text-on-surface-variant mt-2 max-w-md mx-auto">{watchedObjective || 'No objective defined yet.'}</p>
                </div>
                <div className="bg-surface-container p-6 neo-border text-left">
                   <h4 className="font-headline font-bold uppercase text-xs mb-4 border-b-2 border-primary pb-1">Project Parameters</h4>
@@ -201,7 +204,7 @@ export function MissionWizard({ onClose }: { onClose: () => void }) {
              <button 
                type="button"
                onClick={nextStep}
-               disabled={step === 1 && !watch('name')}
+               disabled={step === 1 && !watchedName}
                className="bg-primary text-on-primary neo-border px-8 py-3 font-headline font-bold uppercase hover:bg-tertiary transition-colors neo-shadow disabled:opacity-50 flex items-center gap-2"
              >
                Next <ChevronRight className="w-5 h-5" />

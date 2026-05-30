@@ -85,6 +85,41 @@ export async function fetchAgentsState(): Promise<Agent[]> {
   }
 }
 
+export async function fetchAgentCapabilityPoliciesAction() {
+  try {
+    const rows = await dbClient.query<any>(`SELECT key, value FROM Settings WHERE key LIKE 'agent_policy_%'`);
+    return rows.reduce((acc: Record<string, any>, row) => {
+      const agentId = row.key.replace('agent_policy_', '');
+      acc[agentId] = safeJson(row.value, {});
+      return acc;
+    }, {});
+  } catch (error) {
+    console.error('Failed to fetch agent policies:', error);
+    return {};
+  }
+}
+
+export async function updateAgentCapabilityPolicyAction(agentId: string, policy: Record<string, unknown>) {
+  try {
+    z.string().min(1).max(120).parse(agentId);
+    const sanitized = {
+      model: String(policy.model || 'gemini-1.5-flash').slice(0, 120),
+      temperature: Math.max(0, Math.min(1, Number(policy.temperature ?? 0.7))),
+      maxTokens: Math.max(256, Math.min(32768, Number(policy.maxTokens ?? 4096))),
+      capabilities: Array.isArray(policy.capabilities) ? policy.capabilities.map(String).slice(0, 16) : [],
+      autonomy: String(policy.autonomy || 'supervised').slice(0, 60),
+      scope: String(policy.scope || 'project').slice(0, 60),
+      integrations: Array.isArray(policy.integrations) ? policy.integrations.map(String).slice(0, 16) : [],
+      escalation: String(policy.escalation || 'approval-required').slice(0, 80),
+    };
+    await updateSettingAction(`agent_policy_${agentId}`, JSON.stringify(sanitized));
+    return { success: true, policy: sanitized };
+  } catch (error) {
+    console.error('Failed to update agent policy:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
 export async function logActivityAction(missionId: string, event: Omit<ActivityEvent, 'id' | 'timestamp'>) {
   try {
     const shadow = await checkShadowModeAction();
@@ -545,6 +580,10 @@ export async function fetchMemoryItemsAction() {
         type: r.type || 'semantic',
         scope: r.scope || 'General',
         importance: r.importance >= 0.8 ? 'High' : r.importance >= 0.4 ? 'Medium' : 'Low',
+        pinned: r.pinned === 1,
+        reason: r.reason || `Used when ${r.scope || 'General'} context is active.`,
+        reviewedAt: r.reviewed_at,
+        stale: !r.reviewed_at && new Date(r.created_at).getTime() < Date.now() - 1000 * 60 * 60 * 24 * 30,
         createdAt: r.created_at,
       };
     });
@@ -571,8 +610,8 @@ export async function purgeMemoryItemsAction(scope: string) {
 export async function addGlobalMemoryItemAction(key: string, value: string, importance: string, scope: string = 'User') {
   try {
     const sql = `
-      INSERT INTO Memory_Items (id, scope, type, content, importance)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO Memory_Items (id, scope, type, content, importance, reason)
+      VALUES (?, ?, ?, ?, ?, ?)
     `;
     const impVal = importance === 'High' ? 0.8 : importance === 'Medium' ? 0.5 : 0.2;
     await dbClient.execute(sql, [
@@ -580,11 +619,28 @@ export async function addGlobalMemoryItemAction(key: string, value: string, impo
       scope,
       'semantic',
       JSON.stringify({ key, value }),
-      impVal
+      impVal,
+      `Manual ${scope} memory added from Settings.`
     ]);
     return { success: true };
   } catch (error) {
     console.error("Failed to add memory item:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function updateMemoryReviewAction(id: string, updates: { pinned?: boolean; reviewed?: boolean }) {
+  try {
+    z.string().min(1).parse(id);
+    if (typeof updates.pinned === 'boolean') {
+      await dbClient.execute(`UPDATE Memory_Items SET pinned = ? WHERE id = ?`, [updates.pinned ? 1 : 0, id]);
+    }
+    if (updates.reviewed) {
+      await dbClient.execute(`UPDATE Memory_Items SET reviewed_at = ? WHERE id = ?`, [new Date().toISOString(), id]);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to update memory review:", error);
     return { success: false, error: String(error) };
   }
 }
@@ -608,6 +664,39 @@ const EXECUTION_LIMIT_PER_WINDOW = 5;
 const ALLOWED_WORKSPACE_EXTENSIONS = new Set(['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.py', '.csv', '.html', '.css']);
 const EXECUTION_ATTEMPTS = new Map<string, number[]>();
 
+type DesignProfileSummary = {
+  id: string;
+  name: string;
+  file: string;
+  theme: string;
+  palette: string;
+  mood: string;
+  preview: string;
+};
+
+function inferDesignMapping(filename: string, content: string) {
+  const lower = `${filename} ${content.slice(0, 1200)}`.toLowerCase();
+  if (lower.includes('notion')) {
+    return { theme: 'design-notion', palette: 'design-notion', mood: 'calm workspace' };
+  }
+  if (lower.includes('verge') || lower.includes('storystream')) {
+    return { theme: 'design-verge', palette: 'design-verge', mood: 'editorial command center' };
+  }
+  if (lower.includes('carbon') || lower.includes('ibm')) {
+    return { theme: 'design-carbon', palette: 'corporate-tech', mood: 'enterprise operations' };
+  }
+  if (lower.includes('retro') || lower.includes('terminal')) {
+    return { theme: 'crt', palette: 'matrix-digital', mood: 'terminal cockpit' };
+  }
+  if (lower.includes('glass') || lower.includes('aurora')) {
+    return { theme: 'google-neural', palette: 'nordic-frost', mood: 'soft glass workspace' };
+  }
+  if (lower.includes('cyber')) {
+    return { theme: 'cyberpunk', palette: 'toxic-spill', mood: 'high-contrast operations' };
+  }
+  return { theme: 'minimalist', palette: 'corporate-tech', mood: 'clean workspace' };
+}
+
 const getWorkspacePath = (filename: string) => {
   const safeName = path.basename(filename).trim();
   const ext = path.extname(safeName).toLowerCase();
@@ -619,7 +708,7 @@ const getWorkspacePath = (filename: string) => {
     throw new Error(`Unsupported workspace file type: ${ext || 'none'}.`);
   }
 
-  const dir = path.resolve(process.cwd(), 'supr_workspaces');
+  const dir = path.resolve(/* turbopackIgnore: true */ process.cwd(), 'supr_workspaces');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -633,6 +722,15 @@ const getWorkspacePath = (filename: string) => {
 function assertContentWithinLimit(content: string, limit: number) {
   if (Buffer.byteLength(content, 'utf-8') > limit) {
     throw new Error(`Content exceeds ${Math.floor(limit / 1024)}KB limit.`);
+  }
+}
+
+function safeJson<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
   }
 }
 
@@ -664,6 +762,425 @@ function buildChatPrompt(history: any[], currentMessage: string, file?: any) {
   }
   prompt += `\nUSER CURRENT REQUEST: ${currentMessage}`;
   return prompt;
+}
+
+export async function fetchDesignProfilesAction(): Promise<DesignProfileSummary[]> {
+  try {
+    const dir = path.resolve(/* turbopackIgnore: true */ process.cwd(), 'design');
+    if (!fs.existsSync(dir)) return [];
+
+    return fs.readdirSync(dir)
+      .filter((file) => file.endsWith('.md') && !file.includes('..'))
+      .map((file) => {
+        const filePath = path.join(dir, file);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const heading = content.match(/^#\s+(.+)$/m)?.[1] || file.replace(/-DESIGN\.md$/i, '');
+        const mapping = inferDesignMapping(file, content);
+        return {
+          id: file.replace(/\.md$/i, ''),
+          name: heading.replace(/^Design System Inspired by\s+/i, '').replace(/-design-analysis$/i, ''),
+          file,
+          preview: content.replace(/---[\s\S]*?---/, '').replace(/^#.+$/m, '').trim().slice(0, 180),
+          ...mapping,
+        };
+      });
+  } catch (error) {
+    console.error('Failed to fetch design profiles:', error);
+    return [];
+  }
+}
+
+export async function applyDesignProfileAction(profileId: string) {
+  try {
+    z.string().min(1).max(160).regex(/^[a-z0-9_.-]+$/i).parse(profileId);
+    const profiles = await fetchDesignProfilesAction();
+    const profile = profiles.find((item) => item.id === profileId || item.file === profileId || item.file === `${profileId}.md`);
+    if (!profile) return { success: false, error: 'Design profile not found.' };
+
+    await Promise.all([
+      updateSettingAction('active_design_profile', profile.id),
+      updateSettingAction('appearance_theme', profile.theme),
+      updateSettingAction('appearance_palette', profile.palette),
+    ]);
+    return { success: true, profile };
+  } catch (error) {
+    console.error('Failed to apply design profile:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function fetchMissionTimelineAction(projectId?: string) {
+  try {
+    const mission = projectId ? await getMissionById(projectId) : await getActiveMission();
+    if (!mission) return [];
+
+    const events = [
+      ...(mission.activityLog || []).map((item) => ({
+        id: item.id,
+        type: item.eventType,
+        title: item.summary,
+        detail: item.detail,
+        actor: item.actor,
+        timestamp: item.timestamp,
+        source: 'event-log',
+        mode: 'Live',
+      })),
+      ...(mission.failures || []).map((item) => ({
+        id: item.id,
+        type: item.resolved ? 'failure_resolved' : 'failure',
+        title: item.summary,
+        detail: item.suprGuidance || item.failureType,
+        actor: item.agentName,
+        timestamp: new Date().toISOString(),
+        source: 'failure',
+        mode: 'Live',
+      })),
+      ...(mission.artifacts || []).map((item) => ({
+        id: item.id,
+        type: 'artifact',
+        title: item.filename,
+        detail: `${item.type} artifact, ${item.content.length.toLocaleString()} characters`,
+        actor: 'Artifact Store',
+        timestamp: new Date().toISOString(),
+        source: 'artifact',
+        mode: 'Live',
+      })),
+      ...(mission.memoryItems || []).map((item) => ({
+        id: item.id,
+        type: 'memory',
+        title: item.key,
+        detail: item.value,
+        actor: 'Memory',
+        timestamp: new Date().toISOString(),
+        source: 'memory',
+        mode: 'Live',
+      })),
+    ];
+
+    return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 16);
+  } catch (error) {
+    console.error('Failed to fetch mission timeline:', error);
+    return [];
+  }
+}
+
+export async function fetchApprovalCenterAction(projectId?: string) {
+  try {
+    const rows = projectId
+      ? await dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid DESC`, [projectId])
+      : await dbClient.query<any>(`SELECT * FROM Approvals ORDER BY rowid DESC`);
+
+    const approvals = rows.map((row) => ({
+      id: row.id,
+      missionId: row.mission_id,
+      requestingAgent: row.requesting_agent_id || 'Supr',
+      action: row.action || 'Approval requested',
+      riskLevel: row.risk_level || 'Medium',
+      permission: row.required_permission || 'Execute',
+      reason: row.reason || 'Human review required before continuing.',
+      status: row.status || 'pending',
+      source: 'approval-table',
+    }));
+
+    const settings = await fetchSettingsAction();
+    if (settings.sandbox_allow_api_keys === 'true' && settings.sandbox_api_key_approval !== 'approved') {
+      approvals.unshift({
+        id: 'sandbox-api-key-approval',
+        missionId: projectId || null,
+        requestingAgent: 'Code Workspace',
+        action: 'Expose model API keys inside sandbox execution',
+        riskLevel: 'Critical',
+        permission: 'Root',
+        reason: 'API key sharing is enabled but has not been explicitly approved.',
+        status: 'pending',
+        source: 'settings',
+      });
+    }
+
+    return approvals;
+  } catch (error) {
+    console.error('Failed to fetch approval center:', error);
+    return [];
+  }
+}
+
+export async function decideApprovalAction(id: string, decision: 'approved' | 'rejected' | 'revised') {
+  try {
+    if (id === 'sandbox-api-key-approval') {
+      await updateSettingAction('sandbox_api_key_approval', decision === 'approved' ? 'approved' : '');
+      return { success: true };
+    }
+
+    await dbClient.execute(`UPDATE Approvals SET status = ?, decision = ? WHERE id = ?`, [decision, decision, id]);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to decide approval:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function fetchMissionQualityAction(projectId?: string) {
+  try {
+    const mission = projectId ? await getMissionById(projectId) : await getActiveMission();
+    if (!mission) return null;
+
+    const tasks = mission.tasks || [];
+    const artifacts = mission.artifacts || [];
+    const failures = mission.failures || [];
+    const approvals = await fetchApprovalCenterAction(mission.id);
+    const memoryItems = mission.memoryItems || [];
+    const researchArtifacts = artifacts.filter((item) => item.filename.startsWith('research_'));
+
+    const checks = [
+      { label: 'Requirements complete', value: tasks.length > 0 ? Math.round((tasks.filter((task) => task.status !== 'Pending').length / tasks.length) * 100) : 0 },
+      { label: 'Tests passing', value: failures.filter((failure) => !failure.resolved).length === 0 ? 100 : 45 },
+      { label: 'Approvals cleared', value: approvals.filter((item: any) => item.status === 'pending').length === 0 ? 100 : 40 },
+      { label: 'Artifacts reviewed', value: artifacts.length > 0 ? Math.min(100, artifacts.length * 25) : 0 },
+      { label: 'Risks unresolved', value: Math.max(0, 100 - failures.filter((failure) => !failure.resolved).length * 25) },
+      { label: 'Memory/research coverage', value: Math.min(100, memoryItems.length * 12 + researchArtifacts.length * 20) },
+    ];
+
+    const score = Math.round(checks.reduce((sum, check) => sum + check.value, 0) / checks.length);
+    return { missionId: mission.id, score, checks };
+  } catch (error) {
+    console.error('Failed to fetch mission quality:', error);
+    return null;
+  }
+}
+
+export async function fetchConnectorHealthAction() {
+  try {
+    const settings = await fetchSettingsAction();
+    const connectors = [
+      { id: 'gemini', name: 'Gemini', configured: settings.global_gemini_key_configured === 'true' || !!process.env.GEMINI_API_KEY, mode: 'Live' },
+      { id: 'slack', name: 'Slack', configured: settings.integrations_slack_configured === 'true', mode: 'Partially Connected' },
+      { id: 'github', name: 'GitHub', configured: settings.integrations_github_configured === 'true', mode: 'Partially Connected' },
+      { id: 'gmail', name: 'Gmail', configured: settings.integrations_gmail_configured === 'true', mode: 'Partially Connected' },
+      { id: 'composio', name: 'Composio', configured: settings.integrations_composio_configured === 'true', mode: 'Partially Connected' },
+    ];
+    return connectors.map((connector) => ({
+      ...connector,
+      status: settings[`connector_${connector.id}_last_status`] || (connector.configured ? connector.mode : 'Offline'),
+      lastChecked: settings[`connector_${connector.id}_last_checked`] || new Date().toISOString(),
+    }));
+  } catch (error) {
+    console.error('Failed to fetch connector health:', error);
+    return [];
+  }
+}
+
+export async function testConnectorAction(connectorId: string) {
+  try {
+    z.enum(['gemini', 'slack', 'github', 'gmail', 'composio']).parse(connectorId);
+    let configured = false;
+    let status = 'Offline';
+    let detail = 'No credential configured.';
+
+    if (connectorId === 'gemini') {
+      configured = !!(await getSecretSetting('global_gemini_key', process.env.GEMINI_API_KEY));
+      status = configured ? 'Live' : 'Offline';
+      detail = configured ? 'Gemini key is available to server actions.' : detail;
+    }
+
+    if (connectorId === 'github') {
+      const token = await getSecretSetting('integrations_github');
+      configured = !!token;
+      if (token) {
+        const response = await fetch('https://api.github.com/user', {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+          signal: AbortSignal.timeout(8000),
+        });
+        status = response.ok ? 'Live' : 'Partially Connected';
+        detail = response.ok ? 'GitHub token authenticated successfully.' : `GitHub returned ${response.status}.`;
+      }
+    }
+
+    if (connectorId === 'slack') {
+      configured = !!(await getSecretSetting('integrations_slack'));
+      status = configured ? 'Partially Connected' : 'Offline';
+      detail = configured ? 'Slack webhook is configured. Send tests are intentionally manual.' : detail;
+    }
+
+    if (connectorId === 'gmail') {
+      configured = !!(await getSecretSetting('integrations_gmail'));
+      status = configured ? 'Partially Connected' : 'Offline';
+      detail = configured ? 'Gmail credential is configured. OAuth validation is pending.' : detail;
+    }
+
+    if (connectorId === 'composio') {
+      configured = !!(await getSecretSetting('integrations_composio'));
+      status = configured ? 'Partially Connected' : 'Offline';
+      detail = configured ? 'Composio key is configured. Tool-level validation is pending.' : detail;
+    }
+
+    await Promise.all([
+      updateSettingAction(`connector_${connectorId}_last_status`, status),
+      updateSettingAction(`connector_${connectorId}_last_checked`, new Date().toISOString()),
+    ]);
+    return { success: true, configured, status, detail };
+  } catch (error) {
+    console.error('Failed to test connector:', error);
+    return { success: false, configured: false, status: 'Offline', detail: String(error) };
+  }
+}
+
+export async function fetchRunbooksAction() {
+  try {
+    const rows = await dbClient.query<any>(`SELECT * FROM Runbooks ORDER BY created_at ASC`);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      agents: safeJson(row.agents, []),
+      gates: row.gates || 1,
+      output: row.output,
+      steps: safeJson(row.steps, []),
+      updatedAt: row.updated_at,
+    }));
+  } catch (error) {
+    console.error('Failed to fetch runbooks:', error);
+    return [];
+  }
+}
+
+export async function startRunbookAction(runbookId: string) {
+  try {
+    z.string().min(1).parse(runbookId);
+    const row = await dbClient.queryOne<any>(`SELECT * FROM Runbooks WHERE id = ?`, [runbookId]);
+    if (!row) return { success: false, error: 'Runbook not found.' };
+
+    const agents = safeJson(row.agents, []) as string[];
+    const mission = await createMission({
+      name: row.name,
+      objective: row.description || row.output || `Run ${row.name}`,
+      status: 'Active',
+      readinessScore: 25,
+      phases: [{ id: `phase-${Date.now()}`, name: row.name, status: 'Active' }],
+      tasks: agents.map((agent, index) => ({
+        id: `task-${Date.now()}-${index}`,
+        title: `${agent}: ${row.output || row.name}`,
+        status: index === 0 ? 'Active' : 'Pending',
+        assignedAgent: agent,
+      })),
+      messages: [],
+      artifacts: [],
+      activityLog: [],
+      failures: [],
+      memoryItems: [],
+    } as any);
+    await addActivityLog(mission.id, {
+      eventType: 'Mission Created',
+      actor: 'Runbook',
+      summary: `Started from ${row.name}`,
+      detail: row.description || row.output || 'Runbook mission initialized.',
+    } as any);
+    return { success: true, missionId: mission.id };
+  } catch (error) {
+    console.error('Failed to start runbook:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function fetchArtifactVersionsAction(projectId?: string) {
+  try {
+    const mission = projectId ? await getMissionById(projectId) : await getActiveMission();
+    if (!mission) return [];
+    const rows = await dbClient.query<any>(
+      `SELECT * FROM Artifact_Versions WHERE mission_id = ? ORDER BY title ASC, version DESC`,
+      [mission.id]
+    );
+    if (rows.length > 0) {
+      return rows.map((row) => ({
+        id: row.id,
+        artifactId: row.artifact_id,
+        filename: row.title,
+        type: row.type,
+        version: `v${row.version}`,
+        versionNumber: row.version,
+        status: row.status || 'draft',
+        generatedBy: row.generated_by || 'Supr',
+        diffSummary: row.diff_summary || `${String(row.content || '').split('\n').length} lines tracked`,
+        createdAt: row.created_at,
+      }));
+    }
+
+    return (mission.artifacts || []).map((artifact, index) => ({
+      id: artifact.id,
+      artifactId: artifact.id,
+      filename: artifact.filename,
+      type: artifact.type,
+      version: `v${index + 1}`,
+      versionNumber: index + 1,
+      status: index === (mission.artifacts || []).length - 1 ? 'approved' : 'draft',
+      generatedBy: artifact.filename.startsWith('research_') ? 'Research Agent' : artifact.type === 'code' ? 'Code Agent' : 'Supr',
+      diffSummary: `${artifact.content.split('\n').length} lines tracked`,
+    }));
+  } catch (error) {
+    console.error('Failed to fetch artifact versions:', error);
+    return [];
+  }
+}
+
+export async function updateArtifactVersionStatusAction(versionId: string, status: 'draft' | 'approved' | 'final') {
+  try {
+    z.string().min(1).parse(versionId);
+    z.enum(['draft', 'approved', 'final']).parse(status);
+    await dbClient.execute(`UPDATE Artifact_Versions SET status = ? WHERE id = ?`, [status, versionId]);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to update artifact version status:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function rollbackArtifactVersionAction(versionId: string) {
+  try {
+    z.string().min(1).parse(versionId);
+    const row = await dbClient.queryOne<any>(`SELECT * FROM Artifact_Versions WHERE id = ?`, [versionId]);
+    if (!row) return { success: false, error: 'Version not found.' };
+
+    if (row.artifact_id) {
+      await dbClient.execute(`UPDATE Artifacts SET content = ?, type = ?, title = ? WHERE id = ?`, [
+        row.content || '',
+        row.type || 'markdown',
+        row.title,
+        row.artifact_id,
+      ]);
+    } else {
+      await dbClient.execute(`INSERT INTO Artifacts (id, mission_id, type, title, content) VALUES (?, ?, ?, ?, ?)`, [
+        `art-${Date.now()}`,
+        row.mission_id,
+        row.type || 'markdown',
+        row.title,
+        row.content || '',
+      ]);
+    }
+
+    const latest = await dbClient.queryOne<any>(
+      `SELECT COALESCE(MAX(version), 0) as version FROM Artifact_Versions WHERE mission_id = ? AND title = ?`,
+      [row.mission_id, row.title]
+    );
+    await dbClient.execute(
+      `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        `ver-${Date.now()}`,
+        row.artifact_id,
+        row.mission_id,
+        row.title,
+        row.type || 'markdown',
+        row.content || '',
+        Number(latest?.version || 0) + 1,
+        'approved',
+        'Supr',
+        `Rolled back to v${row.version}`,
+      ]
+    );
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to rollback artifact version:', error);
+    return { success: false, error: String(error) };
+  }
 }
 
 export async function fetchChatMessagesAction() {
@@ -910,7 +1427,7 @@ export async function sendChatMessageAction(
 
 export async function fetchWorkspaceFilesAction() {
   try {
-    const dir = path.resolve(process.cwd(), 'supr_workspaces');
+    const dir = path.resolve(/* turbopackIgnore: true */ process.cwd(), 'supr_workspaces');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -1002,6 +1519,25 @@ export async function executeCodeAction(filename: string, language: string) {
   } catch (error: any) {
     console.error("Failed to execute code file in sandbox:", error);
     return { success: false, error: error.message };
+  }
+}
+
+export async function runProjectCheckAction(check: 'lint' | 'build') {
+  try {
+    const command = check === 'lint' ? 'npm run lint' : 'npm run build';
+    const { stdout, stderr } = await execAsync(command, {
+      cwd: process.cwd(),
+      timeout: check === 'lint' ? 60000 : 180000,
+      maxBuffer: 1024 * 1024,
+    });
+    return { success: true, stdout, stderr };
+  } catch (error: any) {
+    return {
+      success: false,
+      stdout: error.stdout || '',
+      stderr: error.stderr || '',
+      error: error.message,
+    };
   }
 }
 

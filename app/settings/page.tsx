@@ -7,7 +7,12 @@ import {
   updateSettingAction, 
   fetchMemoryItemsAction, 
   purgeMemoryItemsAction, 
-  addGlobalMemoryItemAction 
+  addGlobalMemoryItemAction,
+  updateMemoryReviewAction,
+  fetchDesignProfilesAction,
+  applyDesignProfileAction,
+  fetchConnectorHealthAction,
+  testConnectorAction
 } from '@/app/actions';
 
 interface MemoryItem {
@@ -17,7 +22,29 @@ interface MemoryItem {
   type: string;
   scope: string;
   importance: string;
+  pinned: boolean;
+  reason: string;
+  reviewedAt?: string;
+  stale: boolean;
   createdAt: string;
+}
+
+interface DesignProfile {
+  id: string;
+  name: string;
+  file: string;
+  theme: string;
+  palette: string;
+  mood: string;
+  preview: string;
+}
+
+interface ConnectorHealth {
+  id: string;
+  name: string;
+  configured: boolean;
+  status: string;
+  lastChecked: string;
 }
 
 export default function SettingsPage() {
@@ -72,6 +99,8 @@ export default function SettingsPage() {
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
   const [newImportance, setNewImportance] = useState('Medium');
+  const [memorySearch, setMemorySearch] = useState('');
+  const [showPinnedOnly, setShowPinnedOnly] = useState(false);
 
   const modeRef = useRef<HTMLDivElement>(null);
   const permissionsRef = useRef<HTMLDivElement>(null);
@@ -85,6 +114,9 @@ export default function SettingsPage() {
   // Theme & Appearance States
   const [currentTheme, setCurrentTheme] = useState('neobrutalist');
   const [currentPalette, setCurrentPalette] = useState('classic');
+  const [activeDesignProfile, setActiveDesignProfile] = useState('');
+  const [designProfiles, setDesignProfiles] = useState<DesignProfile[]>([]);
+  const [connectorHealth, setConnectorHealth] = useState<ConnectorHealth[]>([]);
 
   // Integration credentials
   const [integrationComposio, setIntegrationComposio] = useState('');
@@ -99,6 +131,12 @@ export default function SettingsPage() {
         fetchSettingsAction(),
         fetchMemoryItemsAction()
       ]);
+      const [profiles, health] = await Promise.all([
+        fetchDesignProfilesAction(),
+        fetchConnectorHealthAction(),
+      ]);
+      setDesignProfiles(profiles);
+      setConnectorHealth(health);
 
       if (settings.appearance_theme) {
         setCurrentTheme(settings.appearance_theme);
@@ -108,6 +146,7 @@ export default function SettingsPage() {
         setCurrentPalette(settings.appearance_palette);
         localStorage.setItem('supr_palette', settings.appearance_palette);
       }
+      if (settings.active_design_profile) setActiveDesignProfile(settings.active_design_profile);
 
       if (settings.integrations_composio) setIntegrationComposio(settings.integrations_composio);
       if (settings.integrations_github) setIntegrationGithub(settings.integrations_github);
@@ -198,6 +237,23 @@ export default function SettingsPage() {
     handleUpdateSetting('appearance_palette', palette, `Color Palette set to ${palette.toUpperCase()} ✓`);
   };
 
+  const handleDesignProfileApply = async (profileId: string) => {
+    const res = await applyDesignProfileAction(profileId);
+    if (res.success && res.profile) {
+      setActiveDesignProfile(res.profile.id);
+      setCurrentTheme(res.profile.theme);
+      setCurrentPalette(res.profile.palette);
+      localStorage.setItem('supr_theme', res.profile.theme);
+      localStorage.setItem('supr_palette', res.profile.palette);
+      const htmlClasses = document.documentElement.className.split(' ');
+      const cleanedClasses = htmlClasses.filter(c => !c.startsWith('theme-') && !c.startsWith('palette-'));
+      document.documentElement.className = `theme-${res.profile.theme} palette-${res.profile.palette} ` + cleanedClasses.join(' ');
+      showToast(`Applied ${res.profile.name} design profile`);
+    } else {
+      showToast(res.error || 'Design profile could not be applied');
+    }
+  };
+
   const handleToggleChannel = (channel: string, current: boolean, label: string) => {
     const newVal = !current;
     if (channel === 'email') {
@@ -238,6 +294,35 @@ export default function SettingsPage() {
       }
     }
   };
+
+  const refreshMemories = async () => {
+    const updatedMemories = await fetchMemoryItemsAction();
+    setMemoryItems(updatedMemories);
+  };
+
+  const handleMemoryReview = async (id: string, updates: { pinned?: boolean; reviewed?: boolean }) => {
+    const res = await updateMemoryReviewAction(id, updates);
+    if (res.success) {
+      showToast(updates.reviewed ? 'Memory marked reviewed' : 'Memory pin updated');
+      await refreshMemories();
+    } else {
+      showToast('Memory update failed');
+    }
+  };
+
+  const handleConnectorTest = async (connectorId: string, name: string) => {
+    const res = await testConnectorAction(connectorId);
+    showToast(`${name}: ${res.status}`);
+    setConnectorHealth(await fetchConnectorHealthAction());
+  };
+
+  const visibleMemoryItems = memoryItems
+    .filter(item => item.scope === activeMemoryBank)
+    .filter(item => !showPinnedOnly || item.pinned)
+    .filter(item => {
+      const q = memorySearch.trim().toLowerCase();
+      return !q || `${item.key} ${item.value} ${item.reason}`.toLowerCase().includes(q);
+    });
 
   const scrollToSection = (section: string, ref: React.RefObject<HTMLDivElement | null>) => {
     setActiveSection(section);
@@ -333,23 +418,55 @@ export default function SettingsPage() {
                     Purge All
                   </button>
                 </h4>
-                {memoryItems.filter(item => item.scope === activeMemoryBank).length === 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                  <input
+                    value={memorySearch}
+                    onChange={(e) => setMemorySearch(e.target.value)}
+                    className="bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
+                    placeholder="Search memory, reason, or value"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPinnedOnly(prev => !prev)}
+                    className={`neo-border px-3 py-2 font-headline font-bold uppercase text-[10px] ${showPinnedOnly ? 'bg-tertiary text-on-tertiary' : 'bg-background'}`}
+                  >
+                    Pinned
+                  </button>
+                </div>
+                {visibleMemoryItems.length === 0 ? (
                   <div className="p-8 text-center bg-surface-container neo-border text-on-surface-variant text-xs">
                     No memories persisted in the {activeMemoryBank} bank. Use the form above to inject a custom fact.
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {memoryItems
-                      .filter(item => item.scope === activeMemoryBank)
+                    {visibleMemoryItems
                       .map((item) => (
                         <div key={item.id} className="neo-border bg-surface p-3 text-xs relative">
                           <span className={`absolute top-2 right-2 text-[8px] font-bold uppercase px-1.5 py-0.5 border ${
                             item.importance === 'High' ? 'bg-secondary text-on-error border-secondary' : 'bg-surface-container text-on-surface-variant'
                           }`}>
-                            {item.importance}
+                            {item.pinned ? 'Pinned' : item.importance}
                           </span>
                           <span className="font-bold uppercase text-primary block truncate max-w-[80%]">{item.key}</span>
                           <p className="font-mono text-on-surface-variant mt-1.5 bg-background p-2 neo-border leading-relaxed break-words">{item.value}</p>
+                          <p className="font-body text-[10px] text-on-surface-variant mt-2">{item.reason}</p>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            <button
+                              type="button"
+                              onClick={() => handleMemoryReview(item.id, { pinned: !item.pinned })}
+                              className="border border-primary px-2 py-1 font-headline font-bold uppercase text-[9px] hover:bg-primary hover:text-on-primary"
+                            >
+                              {item.pinned ? 'Unpin' : 'Pin'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMemoryReview(item.id, { reviewed: true })}
+                              className="border border-primary px-2 py-1 font-headline font-bold uppercase text-[9px] hover:bg-primary hover:text-on-primary"
+                            >
+                              Review
+                            </button>
+                            {item.stale && <span className="border border-secondary px-2 py-1 font-mono text-[9px] uppercase text-secondary">Stale</span>}
+                          </div>
                           <span className="text-[9px] text-outline mt-2 block">Persisted at: {new Date(item.createdAt).toLocaleString()}</span>
                         </div>
                       ))}
@@ -886,6 +1003,46 @@ export default function SettingsPage() {
               <p className="font-body text-on-surface-variant mt-2">Morph the entire design system and layout structure with instant preview.</p>
             </div>
 
+            <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
+              <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
+                <span className="material-symbols-outlined text-primary">design_services</span> Design.md Profiles
+              </h3>
+              <p className="font-body text-sm text-on-surface-variant">
+                Apply a profile from <span className="font-mono">design/</span>. Profiles are mapped to safe Supr theme and palette tokens, so the interface changes live without rewriting React files.
+              </p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {designProfiles.map(profile => (
+                  <button
+                    key={profile.id}
+                    onClick={() => handleDesignProfileApply(profile.id)}
+                    className={`neo-border bg-background p-4 text-left flex flex-col gap-3 hover:bg-surface-container transition-colors ${
+                      activeDesignProfile === profile.id ? 'ring-2 ring-primary bg-primary-container text-on-primary-container' : ''
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <span className="font-headline font-black uppercase text-sm block">{profile.name}</span>
+                        <span className="font-mono text-[10px] uppercase text-on-surface-variant">{profile.file}</span>
+                      </div>
+                      <span className="bg-surface-container-high border border-outline-variant px-2 py-1 font-headline font-bold uppercase text-[9px]">
+                        {profile.mood}
+                      </span>
+                    </div>
+                    <p className="text-xs text-on-surface-variant line-clamp-3">{profile.preview || 'Design profile ready.'}</p>
+                    <div className="flex gap-2 text-[10px] font-mono uppercase">
+                      <span>theme:{profile.theme}</span>
+                      <span>palette:{profile.palette}</span>
+                    </div>
+                  </button>
+                ))}
+                {designProfiles.length === 0 && (
+                  <div className="neo-border bg-background p-4 text-sm text-on-surface-variant">
+                    No design profiles found in <span className="font-mono">design/</span>.
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Layout Themes */}
             <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
               <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
@@ -972,6 +1129,29 @@ export default function SettingsPage() {
             <div className="border-b-4 border-primary pb-4 mb-4">
               <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">API & Integrations Credentials</h2>
               <p className="font-body text-on-surface-variant mt-2">Provide keys to run real commands on GitHub, Slack, and Gmail, or fall back to high-fidelity logs simulation.</p>
+            </div>
+
+            <div className="border-4 border-primary p-6 bg-surface">
+              <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2 mb-4">
+                <span className="material-symbols-outlined text-primary">health_and_safety</span> Connector Health
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                {connectorHealth.map(connector => (
+                  <div key={connector.id} className="neo-border bg-background p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-headline font-black uppercase text-xs">{connector.name}</span>
+                      <span className={`w-2.5 h-2.5 border border-primary rounded-full ${connector.configured ? 'bg-tertiary' : 'bg-surface-variant'}`}></span>
+                    </div>
+                    <p className="font-mono text-[10px] uppercase text-on-surface-variant">{connector.status}</p>
+                    <button
+                      onClick={() => handleConnectorTest(connector.id, connector.name)}
+                      className="mt-3 w-full border border-primary px-2 py-1 font-headline font-bold uppercase text-[9px] hover:bg-primary hover:text-on-primary"
+                    >
+                      Test
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-6">

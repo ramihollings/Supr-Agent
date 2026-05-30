@@ -20,6 +20,54 @@ interface MockPost {
   engagement: string;
 }
 
+const VISION_STEPS = [
+  {
+    id: 1,
+    title: 'Target Navigation',
+    url: 'https://news.ycombinator.com',
+    agent: 'Context Agent',
+    status: 'Passed',
+    desc: 'Connect to target node, bypass cloudflare, scrape DOM metadata.',
+    trace: 'chrome-devtools-mcp::navigate_page -> Success (200 OK)',
+  },
+  {
+    id: 2,
+    title: 'Anti-Bot Emulation',
+    url: 'https://twitter.com/search?q=saas_automation',
+    agent: 'Signal Agent',
+    status: 'Passed',
+    desc: 'Emulate canvas fingerprints, human cursor gestures, scroll feeds.',
+    trace: 'chrome-devtools-mcp::emulate -> Desktop layout active, user agents randomized.',
+  },
+  {
+    id: 3,
+    title: 'Intel Ingestion',
+    url: 'https://reddit.com/r/saas/comments/supr_agentic',
+    agent: 'Signal Agent',
+    status: 'In Progress',
+    desc: 'Identify high-engagement threads and parse competitor pricing tags.',
+    trace: 'chrome-devtools-mcp::evaluate_script -> Parsing DOM thread list.',
+  },
+  {
+    id: 4,
+    title: 'Shadow Schema Sync',
+    url: 'https://competitor.io/pricing',
+    agent: 'Research Agent',
+    status: 'Pending',
+    desc: 'Diff competitive feature tables with local SQLite system metrics.',
+    trace: 'chrome-devtools-mcp::take_screenshot -> Capturing viewport canvas.',
+  },
+  {
+    id: 5,
+    title: 'Lighthouse Audit',
+    url: 'https://supr-local-sandbox.net',
+    agent: 'QA Agent',
+    status: 'Pending',
+    desc: 'Conduct final core web vitals, SEO meta checks, and accessibility audits.',
+    trace: 'chrome-devtools-mcp::lighthouse_audit -> Firing performance runner.',
+  },
+] as const;
+
 export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerminalLog }: Props) {
   // Navigation & Emulation State
   const [url, setUrl] = useState('https://reddit.com/r/saas/comments/supr_agentic');
@@ -35,54 +83,6 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
 
   // Time-Travel Debugger State
   const [currentStep, setCurrentStep] = useState(3);
-  const steps = [
-    {
-      id: 1,
-      title: 'Target Navigation',
-      url: 'https://news.ycombinator.com',
-      agent: 'Context Agent',
-      status: 'Passed',
-      desc: 'Connect to target node, bypass cloudflare, scrape DOM metadata.',
-      trace: 'chrome-devtools-mcp::navigate_page -> Success (200 OK)',
-    },
-    {
-      id: 2,
-      title: 'Anti-Bot Emulation',
-      url: 'https://twitter.com/search?q=saas_automation',
-      agent: 'Signal Agent',
-      status: 'Passed',
-      desc: 'Emulate canvas fingerprints, human cursor gestures, scroll feeds.',
-      trace: 'chrome-devtools-mcp::emulate -> Desktop layout active, user agents randomized.',
-    },
-    {
-      id: 3,
-      title: 'Intel Ingestion',
-      url: 'https://reddit.com/r/saas/comments/supr_agentic',
-      agent: 'Signal Agent',
-      status: 'In Progress',
-      desc: 'Identify high-engagement threads and parse competitor pricing tags.',
-      trace: 'chrome-devtools-mcp::evaluate_script -> Parsing DOM thread list.',
-    },
-    {
-      id: 4,
-      title: 'Shadow Schema Sync',
-      url: 'https://competitor.io/pricing',
-      agent: 'Research Agent',
-      status: 'Pending',
-      desc: 'Diff competitive feature tables with local SQLite system metrics.',
-      trace: 'chrome-devtools-mcp::take_screenshot -> Capturing viewport canvas.',
-    },
-    {
-      id: 5,
-      title: 'Lighthouse Audit',
-      url: 'https://supr-local-sandbox.net',
-      agent: 'QA Agent',
-      status: 'Pending',
-      desc: 'Conduct final core web vitals, SEO meta checks, and accessibility audits.',
-      trace: 'chrome-devtools-mcp::lighthouse_audit -> Firing performance runner.',
-    },
-  ];
-
   // Lighthouse / UX SEO Governance State
   const [auditProgress, setAuditProgress] = useState(0);
   const [isAuditing, setIsAuditing] = useState(false);
@@ -129,7 +129,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
 
   // Load trace & terminal when step changes
   useEffect(() => {
-    const step = steps.find(s => s.id === currentStep);
+    const step = VISION_STEPS.find(s => s.id === currentStep);
     if (step) {
       setUrl(step.url);
       setActiveUrl(step.url);
@@ -147,7 +147,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
         `CONSOLE ➜ Active URL: ${step.url}`
       ]);
     }
-  }, [currentStep]);
+  }, [currentStep, onTerminalLog, onTraceUpdate]);
 
   // Handle URL change trigger
   const handleNavigate = (targetUrl: string) => {
@@ -161,7 +161,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
     }
     setUrl(normalized);
 
-    const isPredefinedStep = steps.some(s => s.url === normalized);
+    const isPredefinedStep = VISION_STEPS.some(s => s.url === normalized);
     if (!isPredefinedStep) {
       setIsLiveMode(true);
     }
@@ -651,12 +651,12 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                 <div className="absolute top-1/2 left-0 right-0 h-1 bg-primary/20 -translate-y-1/2 z-0"></div>
                 <div 
                   className="absolute top-1/2 left-0 h-1 bg-secondary -translate-y-1/2 z-0 transition-all duration-300"
-                  style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
+                  style={{ width: `${((currentStep - 1) / (VISION_STEPS.length - 1)) * 100}%` }}
                 ></div>
 
                 {/* Steps Nodes */}
                 <div className="flex justify-between relative z-10">
-                  {steps.map((s) => (
+                  {VISION_STEPS.map((s) => (
                     <button
                       key={s.id}
                       onClick={() => {
@@ -682,7 +682,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
 
               {/* Active Step Card */}
               {(() => {
-                const s = steps.find(st => st.id === currentStep);
+                const s = VISION_STEPS.find(st => st.id === currentStep);
                 if (!s) return null;
                 return (
                   <div className="mt-4 bg-surface-container-low border-2 border-primary p-3 space-y-1.5">
@@ -705,7 +705,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
             {/* Rollback Trigger Button */}
             <button
               onClick={() => {
-                const s = steps.find(st => st.id === currentStep);
+                const s = VISION_STEPS.find(st => st.id === currentStep);
                 if (s && onTerminalLog) {
                   onTerminalLog(`[ROLLBACK COMMAND] Executing hard workspace reset to Snapshot Step ${currentStep} (${s.title})...`);
                   onTerminalLog(`[ROLLBACK COMMAND] Overwriting files with cache-hash: sha256_b3749cff...`);
@@ -714,7 +714,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                 if (onLogActivity) {
                   onLogActivity('review', 'Workspace Rollback Triggered', `Hard rollback executed. Restored local git working directory state back to step ${currentStep}.`);
                 }
-                alert(`SUCCESS: Workspace files and SQLite database rolled back to State Step ${currentStep} (${steps.find(st => st.id === currentStep)?.title}).`);
+                alert(`SUCCESS: Workspace files and SQLite database rolled back to State Step ${currentStep} (${VISION_STEPS.find(st => st.id === currentStep)?.title}).`);
               }}
               className="mt-4 bg-primary text-on-primary font-headline font-bold uppercase py-2 px-4 border-2 border-primary hover:bg-primary-fixed hover:text-primary transition-colors duration-100 shadow-[3px_3px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none text-xs text-center flex items-center justify-center gap-1.5"
             >

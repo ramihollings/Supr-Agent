@@ -552,6 +552,54 @@
   --color-outline-variant-val: #d6cc9c;
 }
 
+.palette-design-notion {
+  --color-primary-val: #5645d4;
+  --color-primary-fixed-val: #f5d75e;
+  --color-primary-container-val: #e6e0f5;
+  --color-on-primary-val: #ffffff;
+  --color-on-primary-container-val: #391c57;
+  --color-secondary-val: #dd5b00;
+  --color-tertiary-val: #2a9d99;
+  --color-background-val: #ffffff;
+  --color-surface-val: #ffffff;
+  --color-surface-variant-val: #f6f5f4;
+  --color-on-surface-val: #1a1a1a;
+  --color-on-background-val: #1a1a1a;
+  --color-on-surface-variant-val: #5d5b54;
+  --color-surface-container-val: #f6f5f4;
+  --color-surface-container-high-val: #f0eeec;
+  --color-surface-container-low-val: #fafaf9;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #e5e3df;
+  --color-surface-dim-val: #e5e3df;
+  --color-surface-bright-val: #ffffff;
+  --color-outline-variant-val: #e5e3df;
+}
+
+.palette-design-verge {
+  --color-primary-val: #ffffff;
+  --color-primary-fixed-val: #3cffd0;
+  --color-primary-container-val: #3cffd0;
+  --color-on-primary-val: #000000;
+  --color-on-primary-container-val: #000000;
+  --color-secondary-val: #5200ff;
+  --color-tertiary-val: #3cffd0;
+  --color-background-val: #131313;
+  --color-surface-val: #131313;
+  --color-surface-variant-val: #2d2d2d;
+  --color-on-surface-val: #ffffff;
+  --color-on-background-val: #ffffff;
+  --color-on-surface-variant-val: #949494;
+  --color-surface-container-val: #1b1b1b;
+  --color-surface-container-high-val: #2d2d2d;
+  --color-surface-container-low-val: #171717;
+  --color-surface-container-lowest-val: #000000;
+  --color-surface-container-highest-val: #313131;
+  --color-surface-dim-val: #000000;
+  --color-surface-bright-val: #2d2d2d;
+  --color-outline-variant-val: #3d00bf;
+}
+
 
 /* ─────────────────────────────────────────────────────────────────────────────
    GLOBAL CLASS REBINDINGS BASED ON THE STRUCTURAL THEME VARIABLES

@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState, Suspense } from 'react';
+import { useEffect, useState, Suspense } from 'react';
+import { fetchConnectorHealthAction } from '@/app/actions';
 
 function TopNavSkeleton({ title }: { title: string }) {
   return (
@@ -30,6 +31,14 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
   const projectId = searchParams.get('id');
   const [showNotificationToast, setShowNotificationToast] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [systemMode, setSystemMode] = useState('Offline');
+
+  useEffect(() => {
+    fetchConnectorHealthAction().then((connectors) => {
+      const connected = connectors.filter((connector: any) => connector.configured).length;
+      setSystemMode(connected === 0 ? 'Offline' : connected === connectors.length ? 'Live' : 'Partially Connected');
+    });
+  }, []);
 
   const handleNotificationClick = () => {
     setShowNotificationToast(true);
@@ -58,7 +67,7 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
               <>
                 <div className="flex items-center gap-2 bg-surface neo-border-sm px-3 py-1.5 font-headline font-bold text-xs uppercase text-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-black animate-pulse inline-block"></span>
-                  <span>System: Online</span>
+                  <span>{systemMode}</span>
                 </div>
                 <div className="flex items-center gap-2 bg-surface neo-border-sm px-3 py-1.5 font-headline font-bold text-xs uppercase text-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
                   <span className="material-symbols-outlined text-xs text-primary font-bold">verified_user</span>

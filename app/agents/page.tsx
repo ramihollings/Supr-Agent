@@ -2,9 +2,16 @@
 
 import { TopNav } from '@/components/TopNav';
 import { useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AgentWizard } from '@/components/AgentWizard';
-import { fetchAgentsState, deleteAgentAction, archiveAgentAction, extendAgentAction } from '@/app/actions';
+import {
+  fetchAgentsState,
+  deleteAgentAction,
+  archiveAgentAction,
+  extendAgentAction,
+  fetchAgentCapabilityPoliciesAction,
+  updateAgentCapabilityPolicyAction
+} from '@/app/actions';
 import { Agent } from '@/types';
 
 export default function AgentsPage() {
@@ -20,10 +27,17 @@ export default function AgentsPage() {
     temperature: number;
     maxTokens: number;
     capabilities: string[];
+    autonomy: string;
+    scope: string;
+    integrations: string[];
+    escalation: string;
   }>>({});
 
-  const loadAgents = async () => {
-    const data = await fetchAgentsState();
+  const loadAgents = useCallback(async () => {
+    const [data, persistedPolicies] = await Promise.all([
+      fetchAgentsState(),
+      fetchAgentCapabilityPoliciesAction(),
+    ]);
     if (data) {
       setAgents(data);
       // Initialize configurations if empty
@@ -34,12 +48,16 @@ export default function AgentsPage() {
           model: a.name.toLowerCase() === 'supr' ? 'gemini-1.5-pro' : 'gemini-1.5-flash',
           temperature: a.permissionTier === 'Edit' ? 0.3 : 0.7,
           maxTokens: isHighTier ? 8192 : 4096,
-          capabilities: getDefaultsForTier(a.permissionTier)
+          capabilities: getDefaultsForTier(a.permissionTier),
+          autonomy: isHighTier ? 'approval-gated' : 'supervised',
+          scope: 'project',
+          integrations: [],
+          escalation: 'approval-required',
         };
       });
-      setAgentSettings(prev => ({ ...initialSettings, ...prev }));
+      setAgentSettings(prev => ({ ...initialSettings, ...persistedPolicies, ...prev }));
     }
-  };
+  }, []);
 
   const getDefaultsForTier = (tier: string): string[] => {
     switch (tier) {
@@ -53,12 +71,16 @@ export default function AgentsPage() {
   };
 
   useEffect(() => {
-    loadAgents();
-  }, []);
+    void loadAgents();
+  }, [loadAgents]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const persistAgentPolicy = async (agentId: string, next: any) => {
+    await updateAgentCapabilityPolicyAction(agentId, next);
   };
 
   const handleUpdateCapability = (agentId: string, cap: string) => {
@@ -67,13 +89,12 @@ export default function AgentsPage() {
       const updatedCaps = currentCaps.includes(cap)
         ? currentCaps.filter(c => c !== cap)
         : [...currentCaps, cap];
+      const next = { ...prev[agentId], capabilities: updatedCaps };
+      persistAgentPolicy(agentId, next);
       showToast(`Capabilities re-aligned for sub-agent.`);
       return {
         ...prev,
-        [agentId]: {
-          ...prev[agentId],
-          capabilities: updatedCaps
-        }
+        [agentId]: next
       };
     });
   };
@@ -86,6 +107,28 @@ export default function AgentsPage() {
         [field]: value
       }
     }));
+    const next = { ...agentSettings[agentId], [field]: value };
+    persistAgentPolicy(agentId, next);
+  };
+
+  const handleUpdatePolicy = (agentId: string, field: 'autonomy' | 'scope' | 'escalation', value: string) => {
+    setAgentSettings(prev => {
+      const next = { ...prev[agentId], [field]: value };
+      persistAgentPolicy(agentId, next);
+      return { ...prev, [agentId]: next };
+    });
+  };
+
+  const handleUpdateIntegration = (agentId: string, integration: string) => {
+    setAgentSettings(prev => {
+      const current = prev[agentId]?.integrations || [];
+      const integrations = current.includes(integration)
+        ? current.filter(item => item !== integration)
+        : [...current, integration];
+      const next = { ...prev[agentId], integrations };
+      persistAgentPolicy(agentId, next);
+      return { ...prev, [agentId]: next };
+    });
   };
 
   const activeAgents = agents.filter(a => a.isActive);
@@ -151,7 +194,16 @@ export default function AgentsPage() {
         {viewMode === 'active' ? (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
             {activeAgents.map(agent => {
-              const settings = agentSettings[agent.id] || { model: 'gemini-1.5-flash', temperature: 0.7, maxTokens: 4096, capabilities: [] };
+              const settings = agentSettings[agent.id] || {
+                model: 'gemini-1.5-flash',
+                temperature: 0.7,
+                maxTokens: 4096,
+                capabilities: [],
+                autonomy: 'supervised',
+                scope: 'project',
+                integrations: [],
+                escalation: 'approval-required',
+              };
               const metrics = getMetrics(agent.name);
               const isSupr = agent.name.toLowerCase() === 'supr';
 
@@ -227,6 +279,49 @@ export default function AgentsPage() {
                             <option value="16384">16384 Tokens</option>
                           </select>
                         </div>
+                      </div>
+                    </div>
+
+                    <div className="border-2 border-primary p-4 bg-surface">
+                      <h4 className="font-headline font-bold text-xs uppercase text-primary mb-3 flex items-center gap-1.5 border-b border-primary/20 pb-1.5">
+                        <span className="material-symbols-outlined text-xs">policy</span> Autonomy & Escalation Rules
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                        <label className="flex flex-col gap-1">
+                          <span className="font-body font-bold uppercase text-on-surface-variant text-[10px]">Scope</span>
+                          <select value={settings.scope} onChange={(e) => handleUpdatePolicy(agent.id, 'scope', e.target.value)} className="bg-background border-2 border-primary px-2 py-1 font-mono font-bold uppercase text-[10px]">
+                            <option value="project">Project</option>
+                            <option value="global">Global</option>
+                            <option value="sandbox-only">Sandbox Only</option>
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="font-body font-bold uppercase text-on-surface-variant text-[10px]">Autonomy</span>
+                          <select value={settings.autonomy} onChange={(e) => handleUpdatePolicy(agent.id, 'autonomy', e.target.value)} className="bg-background border-2 border-primary px-2 py-1 font-mono font-bold uppercase text-[10px]">
+                            <option value="supervised">Supervised</option>
+                            <option value="approval-gated">Approval Gated</option>
+                            <option value="autonomous-low-risk">Autonomous Low Risk</option>
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="font-body font-bold uppercase text-on-surface-variant text-[10px]">Escalation</span>
+                          <select value={settings.escalation} onChange={(e) => handleUpdatePolicy(agent.id, 'escalation', e.target.value)} className="bg-background border-2 border-primary px-2 py-1 font-mono font-bold uppercase text-[10px]">
+                            <option value="approval-required">Approval Required</option>
+                            <option value="ask-on-risk">Ask On Risk</option>
+                            <option value="block-critical">Block Critical</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-headline font-bold uppercase mt-4">
+                        {['github', 'slack', 'gmail', 'composio'].map(integration => {
+                          const isAllowed = settings.integrations.includes(integration);
+                          return (
+                            <label key={integration} className={`flex items-center gap-2 p-2 border-2 cursor-pointer ${isAllowed ? 'bg-tertiary text-on-tertiary border-primary' : 'bg-background border-outline-variant text-on-surface-variant'}`}>
+                              <input type="checkbox" checked={isAllowed} onChange={() => handleUpdateIntegration(agent.id, integration)} className="w-3.5 h-3.5 border-2 border-primary accent-primary" />
+                              <span>{integration}</span>
+                            </label>
+                          );
+                        })}
                       </div>
                     </div>
 

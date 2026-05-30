@@ -3,6 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getSqliteDb } from '../database/init';
 
 const execAsync = promisify(exec);
 
@@ -178,7 +179,7 @@ export class LocalNodeSandbox extends AbstractSandboxProvider {
 
   constructor() {
     super();
-    this.baseSandboxDir = path.resolve(process.cwd(), 'supr_workspaces');
+    this.baseSandboxDir = path.resolve(/* turbopackIgnore: true */ process.cwd(), 'supr_workspaces');
     if (!fs.existsSync(this.baseSandboxDir)) {
       fs.mkdirSync(this.baseSandboxDir, { recursive: true });
     }
@@ -229,7 +230,6 @@ export class LocalNodeSandbox extends AbstractSandboxProvider {
     // 1. Resolve settings for API key exposure using the lazy DB getter
     let envFlags = '';
     try {
-      const { getSqliteDb } = require('../database/init');
       const db = getSqliteDb();
       const settingRow = db.prepare("SELECT value FROM Settings WHERE key = 'sandbox_allow_api_keys'").get() as { value: string } | undefined;
       const approvalRow = db.prepare("SELECT value FROM Settings WHERE key = 'sandbox_api_key_approval'").get() as { value: string } | undefined;

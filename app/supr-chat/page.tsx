@@ -1,5 +1,6 @@
 "use client";
 
+import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
 import { TopNav } from '@/components/TopNav';
 import { 
@@ -470,10 +471,13 @@ How can I assist you today? You can query data, ask me to draft/run code files i
                   {/* Handle inline generated images */}
                   {msg.file?.type.startsWith('image/') && msg.file.content ? (
                     <div className="mb-3 neo-border bg-surface overflow-hidden max-w-md">
-                      <img 
-                        src={msg.file.content.startsWith('data:') ? msg.file.content : `data:image/png;base64,${msg.file.content}`} 
-                        alt="Supr generated illustration" 
-                        className="w-full object-contain max-h-[300px]"
+                      <Image
+                        src={msg.file.content.startsWith('data:') ? msg.file.content : `data:image/png;base64,${msg.file.content}`}
+                        alt="Supr generated illustration"
+                        width={800}
+                        height={600}
+                        unoptimized
+                        className="w-full object-contain max-h-[300px] h-auto"
                       />
                     </div>
                   ) : null}
