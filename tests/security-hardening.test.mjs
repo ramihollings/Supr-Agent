@@ -131,3 +131,21 @@ test('docker build context and runtime image avoid common secret leaks', () => {
   assert.doesNotMatch(dockerfile, /storage\.googleapis\.com\/supr-build-assets\/cloakbrowser-linux-amd64/);
   assert.doesNotMatch(compose, /^version:/m);
 });
+
+test('front page defaults to live agent orchestration instead of fake glidepath telemetry', () => {
+  const page = readFileSync('app/page.tsx', 'utf8');
+  const actions = readFileSync('app/actions.ts', 'utf8');
+  const workflowCanvas = readFileSync('components/ProjectWorkflowCanvas.tsx', 'utf8');
+
+  assert.match(page, /ProjectWorkflowCanvas/);
+  assert.match(page, /spawnProjectAgentAction/);
+  assert.match(page, /fetchProjectOperatingGraphAction/);
+  assert.match(actions, /export async function spawnProjectAgentAction/);
+  assert.match(actions, /createRuntimeAgentAction/);
+  assert.match(actions, /export async function fetchProjectOperatingGraphAction/);
+  assert.match(workflowCanvas, /Spawn Agent/);
+  assert.match(workflowCanvas, /mission phases, tasks, agent actions, approvals, and artifacts/);
+  assert.doesNotMatch(page, /COMPETITOR SIGNAL TELEMETRY BRIEF/);
+  assert.doesNotMatch(page, /Simulated Logs/);
+  assert.doesNotMatch(page, /Simulated Traces/);
+});

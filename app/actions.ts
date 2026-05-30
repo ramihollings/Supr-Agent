@@ -245,6 +245,99 @@ export async function createAgentAction(agentData: Omit<Agent, 'id'>, systemProm
   }
 }
 
+export async function spawnProjectAgentAction(input: {
+  missionId: string;
+  role: string;
+  objective: string;
+  permissionTier?: string;
+  capability?: string;
+  riskLevel?: 'Low' | 'Medium' | 'High' | 'Critical';
+}) {
+  try {
+    const data = z.object({
+      missionId: z.string().min(1).max(160),
+      role: z.string().min(2).max(80),
+      objective: z.string().min(4).max(500),
+      permissionTier: z.enum(['Observe', 'Draft', 'Edit', 'Execute', 'External_Act', 'Root']).default('Edit'),
+      capability: z.string().min(2).max(120).default('project.execute_task'),
+      riskLevel: z.enum(['Low', 'Medium', 'High', 'Critical']).default('Medium'),
+    }).parse(input);
+
+    const mission = await getMissionById(data.missionId);
+    if (!mission) return { success: false, error: 'Mission not found.' };
+
+    const agentName = `${data.role.replace(/\s+/g, ' ').trim()} Agent`;
+    const createdAgent = await createAgent({
+      name: agentName,
+      role: data.role,
+      icon: 'smart_toy',
+      isActive: true,
+      permissionTier: data.permissionTier,
+      isPermanent: false,
+      description: data.objective,
+      reportsTo: 'Supr',
+    } as Omit<Agent, 'id'>);
+
+    writeIdentityProfile({
+      name: createdAgent.name,
+      role: createdAgent.role,
+      permissionTier: data.permissionTier,
+      type: 'temporary',
+      systemPrompt: `You are ${createdAgent.name}. Your project objective is: ${data.objective}. Work through Supr Agent_Actions, stay inside your permission tier, and request approval for risky steps.`,
+      tools: createdAgent.tools || [],
+      memoryContext: createdAgent.memoryContext,
+    });
+
+    const taskId = `task-${crypto.randomUUID()}`;
+    await dbClient.execute(
+      `INSERT INTO Tasks (id, mission_id, title, status, owner_agent_id, required_permission)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [taskId, data.missionId, data.objective, 'Active', createdAgent.id, data.permissionTier],
+    );
+
+    const nextTasks = [
+      ...(mission.tasks || []),
+      {
+        id: taskId,
+        title: data.objective,
+        description: `Spawned for ${createdAgent.name}`,
+        agentName: createdAgent.name,
+        agentIcon: 'smart_toy',
+        status: 'Active',
+      },
+    ];
+    await dbClient.execute(`UPDATE Glidepaths SET tasks = ? WHERE mission_id = ?`, [
+      JSON.stringify(nextTasks),
+      data.missionId,
+    ]);
+
+    const action = await createRuntimeAgentAction({
+      missionId: data.missionId,
+      taskId,
+      agentId: createdAgent.id,
+      capability: data.capability,
+      intent: data.objective,
+      riskLevel: data.riskLevel,
+      requiredPermission: data.permissionTier as any,
+      inputs: { objective: data.objective, spawnedFrom: 'dashboard' },
+      metadata: { spawnedBy: 'Supr', agentName: createdAgent.name },
+    });
+
+    await addActivityLog(data.missionId, {
+      eventType: 'delegation',
+      actor: 'Supr',
+      actorIcon: 'psychology',
+      summary: `Spawned ${createdAgent.name}`,
+      detail: data.objective,
+    });
+
+    return { success: true, agent: createdAgent, taskId, actionId: action.id };
+  } catch (error) {
+    console.error('Failed to spawn project agent:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
 export async function archiveAgentAction(agentId: string) {
   try {
     await archiveAgent(agentId);
@@ -655,7 +748,7 @@ import { promisify } from 'util';
 import { getActiveProvider } from '@/lib/providers/model';
 import { GoogleGenAI } from '@google/genai';
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
-import { fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
+import { createAgentAction as createRuntimeAgentAction, fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
 import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
 
 const execAsync = promisify(exec);
@@ -888,6 +981,118 @@ export async function fetchMissionTimelineAction(projectId?: string) {
   } catch (error) {
     console.error('Failed to fetch mission timeline:', error);
     return [];
+  }
+}
+
+export async function fetchProjectOperatingGraphAction(projectId: string) {
+  try {
+    z.string().min(1).parse(projectId);
+    const mission = await getMissionById(projectId);
+    if (!mission) return null;
+
+    const [agentActions, approvalRows] = await Promise.all([
+      fetchAgentActionsForMission(projectId),
+      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid ASC`, [projectId]),
+    ]);
+
+    const nodes: any[] = [];
+    const edges: any[] = [];
+    const phaseIds = new Set<string>();
+
+    (mission.phases || []).forEach((phase, index) => {
+      const nodeId = `phase:${phase.id || index}`;
+      phaseIds.add(nodeId);
+      nodes.push({
+        id: nodeId,
+        kind: 'phase',
+        label: phase.name,
+        status: phase.status,
+        actor: 'Supr',
+        detail: `${phase.status} phase`,
+        x: 40 + index * 210,
+        y: 40,
+      });
+      if (index > 0) edges.push({ id: `edge:${index - 1}:${index}`, source: nodes[nodes.length - 2].id, target: nodeId, label: 'then' });
+    });
+
+    (mission.tasks || []).forEach((task, index) => {
+      const nodeId = `task:${task.id || index}`;
+      const fallbackPhase = Array.from(phaseIds)[Math.min(index, Math.max(0, phaseIds.size - 1))];
+      nodes.push({
+        id: nodeId,
+        kind: 'task',
+        label: task.title,
+        status: task.status,
+        actor: task.agentName || 'Unassigned',
+        detail: task.description || 'Project task',
+        x: 80 + (index % 4) * 230,
+        y: 170 + Math.floor(index / 4) * 140,
+      });
+      if (fallbackPhase) edges.push({ id: `edge:${fallbackPhase}:${nodeId}`, source: fallbackPhase, target: nodeId, label: 'assign' });
+    });
+
+    agentActions.forEach((action, index) => {
+      const nodeId = `action:${action.id}`;
+      nodes.push({
+        id: nodeId,
+        kind: 'agent_action',
+        label: action.capability,
+        status: action.status,
+        actor: action.agentId,
+        detail: action.intent,
+        riskLevel: action.riskLevel,
+        x: 120 + (index % 4) * 230,
+        y: 330 + Math.floor(index / 4) * 140,
+      });
+      if (action.taskId) edges.push({ id: `edge:task:${action.taskId}:${nodeId}`, source: `task:${action.taskId}`, target: nodeId, label: 'action' });
+    });
+
+    approvalRows.forEach((approval, index) => {
+      const nodeId = `approval:${approval.id}`;
+      nodes.push({
+        id: nodeId,
+        kind: 'approval',
+        label: approval.action || 'Approval',
+        status: approval.status || 'pending',
+        actor: approval.requesting_agent_id || 'Supr',
+        detail: approval.reason || '',
+        riskLevel: approval.risk_level || 'Medium',
+        x: 160 + (index % 4) * 230,
+        y: 490 + Math.floor(index / 4) * 140,
+      });
+      if (approval.agent_action_id) edges.push({ id: `edge:action:${approval.agent_action_id}:${nodeId}`, source: `action:${approval.agent_action_id}`, target: nodeId, label: 'gate' });
+    });
+
+    (mission.artifacts || []).forEach((artifact, index) => {
+      const nodeId = `artifact:${artifact.id}`;
+      nodes.push({
+        id: nodeId,
+        kind: 'artifact',
+        label: artifact.filename,
+        status: 'stored',
+        actor: 'Artifact Store',
+        detail: `${artifact.type} artifact`,
+        x: 80 + (index % 4) * 230,
+        y: 650 + Math.floor(index / 4) * 140,
+      });
+      if (agentActions[0]) edges.push({ id: `edge:${agentActions[0].id}:${nodeId}`, source: `action:${agentActions[0].id}`, target: nodeId, label: 'produces' });
+    });
+
+    return {
+      missionId: projectId,
+      nodes,
+      edges,
+      counts: {
+        phases: mission.phases?.length || 0,
+        tasks: mission.tasks?.length || 0,
+        actions: agentActions.length,
+        approvals: approvalRows.length,
+        artifacts: mission.artifacts?.length || 0,
+      },
+    };
+  } catch (error) {
+    console.error('Failed to fetch project operating graph:', error);
+    return null;
   }
 }
 

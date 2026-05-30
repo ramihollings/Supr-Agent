@@ -2,12 +2,12 @@
 
 import { TopNav } from '@/components/TopNav';
 import Link from 'next/link';
-import { useState, useEffect, useRef, startTransition, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { MissionWizard } from '@/components/MissionWizard';
 import { InlineApproval } from '@/components/InlineApproval';
-import { SteerableCanvas } from '@/components/SteerableCanvas';
 import { AgentCard, AgentInfo } from '@/components/AgentCard';
 import { AgentVisionLab } from '@/components/AgentVisionLab';
+import { ProjectWorkflowCanvas } from '@/components/ProjectWorkflowCanvas';
 import { 
   fetchMissionsAction, 
   fetchAgentsState, 
@@ -22,6 +22,8 @@ import {
   fetchArtifactVersionsAction,
   fetchMemoryItemsAction,
   startRunbookAction,
+  spawnProjectAgentAction,
+  fetchProjectOperatingGraphAction,
   rollbackArtifactVersionAction,
   updateArtifactVersionStatusAction
 } from '@/app/actions';
@@ -43,6 +45,7 @@ function BlendedDashboardContent() {
   const [runbooks, setRunbooks] = useState<any[]>([]);
   const [artifactVersions, setArtifactVersions] = useState<any[]>([]);
   const [memoryPreview, setMemoryPreview] = useState<any[]>([]);
+  const [operatingGraph, setOperatingGraph] = useState<any | null>(null);
 
   // Project-specific workspace states
   const projectId = searchParams.get('id');
@@ -52,37 +55,13 @@ function BlendedDashboardContent() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [readinessScore, setReadinessScore] = useState(72);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSpawningAgent, setIsSpawningAgent] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'glidepath' | 'browser'>('glidepath');
   const [mobilePanel, setMobilePanel] = useState<'chat' | 'work' | 'telemetry'>('work');
 
-  // Telemetry Metrics
-  const [tokenBurn, setTokenBurn] = useState(1.42);
-  const [tokenCount, setTokenCount] = useState(24082);
-  const [activeReasoning, setActiveReasoning] = useState(
-    "Supr activated WebCrawler to gather competitor metrics. Redirecting to QA Validator to check code structure and run tests in the secure workspace."
-  );
-
-  // Live AG-UI Tool traces
-  const [toolTraces, setToolTraces] = useState<string[]>([
-    '[10:40:02] INITIALIZE - Secure workspace active.',
-    '[10:40:15] toprank::seo_audit - Crawling target backlinks...',
-    '[10:40:32] browser::web_scrape - Fetching public page data...',
-    '[10:40:51] workspace::exec - Scanning workspace directory structure...'
-  ]);
-
-  // Terminal Simulator Logs
-  const [terminalLogs, setTerminalLogs] = useState<string[]>([
-    '➜ /workspace/sandbox',
-    'Initializing secure workspace...',
-    'Mounting project volumes...',
-    'Supr AI Manager standing by for instructions.',
-    '[Agent: WebCrawler] Executing browser run --target="competitor_metrics"...',
-    '[Sandbox Output] Fetching raw JSON parameters...',
-    '[Agent: WebCrawler] Successfully parsed 24 target data frames.'
-  ]);
-  const terminalRef = useRef<HTMLDivElement>(null);
-
+  const [toolTraces, setToolTraces] = useState<string[]>([]);
+  const [, setTerminalLogs] = useState<string[]>([]);
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
@@ -123,59 +102,28 @@ function BlendedDashboardContent() {
     loadAgents();
   }, []);
 
-  // Scroll terminal to bottom
-  useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }
-  }, [terminalLogs]);
-
-  // Live telemetry ticker
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTokenBurn(prev => Number((prev + 0.002).toFixed(4)));
-      setTokenCount(prev => prev + 12);
-
-      const newTraces = [
-        `[${new Date().toLocaleTimeString()}] toprank::seo_audit - Running semantic scoring`,
-        `[${new Date().toLocaleTimeString()}] agentmemory::compress - Auto-saving workspace snapshot`,
-        `[${new Date().toLocaleTimeString()}] superpowers::file_replace - Patching package specifications`,
-        `[${new Date().toLocaleTimeString()}] workspace::verify_code - Checking code structure`
-      ];
-      const randomTrace = newTraces[Math.floor(Math.random() * newTraces.length)];
-      setToolTraces(prev => [...prev.slice(-6), randomTrace]);
-
-      const randomTerminal = [
-        `[Sandbox Output] Process thread ${Math.floor(Math.random() * 8000)} running...`,
-        `[Agent: StrategicPlanner] Recalculating priority score indices...`,
-        `[Sandbox Output] Exit Code 0 - Process succeeded.`
-      ];
-      setTerminalLogs(prev => [...prev, randomTerminal[Math.floor(Math.random() * randomTerminal.length)]]);
-
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
-
   // Project-specific stream setup
   useEffect(() => {
     if (!projectId) return;
+    const activeProjectId = projectId;
 
     async function loadMissionOperatingData() {
-      const [timelineData, approvalsData, qualityData, versionsData] = await Promise.all([
-        fetchMissionTimelineAction(projectId || undefined),
-        fetchApprovalCenterAction(projectId || undefined),
-        fetchMissionQualityAction(projectId || undefined),
-        fetchArtifactVersionsAction(projectId || undefined),
+      const [timelineData, approvalsData, qualityData, versionsData, graphData] = await Promise.all([
+        fetchMissionTimelineAction(activeProjectId),
+        fetchApprovalCenterAction(activeProjectId),
+        fetchMissionQualityAction(activeProjectId),
+        fetchArtifactVersionsAction(activeProjectId),
+        fetchProjectOperatingGraphAction(activeProjectId),
       ]);
       setTimeline(timelineData);
       setApprovals(approvalsData);
       setQuality(qualityData);
       setArtifactVersions(versionsData);
+      setOperatingGraph(graphData);
     }
     loadMissionOperatingData();
 
-    const eventSource = new EventSource(`/api/mission/stream?id=${projectId}`);
+    const eventSource = new EventSource(`/api/mission/stream?id=${activeProjectId}`);
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data) as Mission;
@@ -260,6 +208,46 @@ function BlendedDashboardContent() {
     }
   };
 
+  const refreshOperatingGraph = async () => {
+    if (!projectId) return;
+    const [timelineData, approvalsData, qualityData, versionsData, graphData, agentData] = await Promise.all([
+      fetchMissionTimelineAction(projectId),
+      fetchApprovalCenterAction(projectId),
+      fetchMissionQualityAction(projectId),
+      fetchArtifactVersionsAction(projectId),
+      fetchProjectOperatingGraphAction(projectId),
+      fetchAgentsState(),
+    ]);
+    setTimeline(timelineData);
+    setApprovals(approvalsData);
+    setQuality(qualityData);
+    setArtifactVersions(versionsData);
+    setOperatingGraph(graphData);
+    setAgents(agentData);
+  };
+
+  const handleSpawnProjectAgent = async (draft: {
+    role: string;
+    objective: string;
+    permissionTier: string;
+    capability: string;
+    riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
+  }) => {
+    if (!projectId) return;
+    setIsSpawningAgent(true);
+    const res = await spawnProjectAgentAction({
+      missionId: projectId,
+      ...draft,
+    });
+    if (res.success) {
+      showToast('Agent spawned and action queued');
+      await refreshOperatingGraph();
+    } else {
+      showToast(res.error || 'Agent spawn failed');
+    }
+    setIsSpawningAgent(false);
+  };
+
   const refreshArtifactVersions = async () => {
     const versionsData = await fetchArtifactVersionsAction(projectId || undefined);
     setArtifactVersions(versionsData);
@@ -324,39 +312,6 @@ function BlendedDashboardContent() {
 
   const handleDragStart = (e: React.DragEvent, type: string) => {
     e.dataTransfer.setData('text/plain', type);
-  };
-
-  const handleNodeSteered = (nodeId: string, instructions: string) => {
-    showToast(`Steering Context injected into Node "${nodeId}"! ✓`);
-    setMessages(prev => [
-      ...prev,
-      { id: Date.now(), sender: 'You', text: `[STEER INTERRUPT on Node ${nodeId}] Injected directions: "${instructions}"`, isUser: true },
-      { id: Date.now() + 1, sender: 'Supr', text: `AG-UI Interrupt received. Backend workers paused. Context buffers successfully updated. Resuming thread loops...`, isUser: false }
-    ]);
-  };
-
-  const handleNodeRollback = (nodeId: string) => {
-    showToast(`Time Travel: Reverting file trees to snapshot "${nodeId}"... ✓`);
-    setTerminalLogs(prev => [
-      ...prev,
-      `[Time Travel Rollback] Reverting workspace files to snapshot: ${nodeId}`,
-      `[Time Travel Rollback] Restoring file trees... Done.`,
-      `[Time Travel Rollback] Truncated future execution paths. Ready.`
-    ]);
-    setMessages(prev => [
-      ...prev,
-      { id: Date.now(), sender: 'You', text: `Time travel rollback triggered on Node "${nodeId}"`, isUser: true },
-      { id: Date.now() + 1, sender: 'Supr', text: `Snapshot reversion successfully reset to secure workspace instances. Workspace state re-aligned to ${nodeId} completion.`, isUser: false }
-    ]);
-  };
-
-  const handleCheckpointAdded = (label: string, beforeNodeId: string) => {
-    showToast(`Checkpoint Added before Node "${beforeNodeId}"! ✓`);
-    setMessages(prev => [
-      ...prev,
-      { id: Date.now(), sender: 'Supr', text: `[Rewired Connection] A new custom ${label} was dropped onto connection line before node ${beforeNodeId}. SQLite planner state recalculated successfully.`, isUser: false }
-    ]);
-    setActiveReasoning(`User inserted a manual review gate before Node ${beforeNodeId}. Rerouting downstream tasks and auditing permission tier contexts.`);
   };
 
   const handleNewMission = () => {
@@ -558,77 +513,11 @@ function BlendedDashboardContent() {
 
             <div className="p-4 flex flex-col gap-6 flex-1">
               {activeTab === 'glidepath' ? (
-                <>
-                  <SteerableCanvas
-                    onNodeSteered={handleNodeSteered}
-                    onNodeRollback={handleNodeRollback}
-                    onCheckpointAdded={handleCheckpointAdded}
-                  />
-
-                  <section className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-[320px] shrink-0">
-                    <div className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-4 flex flex-col relative overflow-hidden">
-                      <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
-                        <h4 className="font-headline text-lg font-black uppercase tracking-tight text-secondary flex items-center gap-1.5">
-                          <span className="material-symbols-outlined">design_services</span> Artifact Studio
-                        </h4>
-                        <span className="bg-secondary-container text-on-secondary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Live Preview</span>
-                      </div>
-                      <div className="flex-1 bg-surface-container-low neo-border p-4 overflow-y-auto custom-scrollbar">
-                        <article className="font-body text-xs space-y-4">
-                          <div className="border-l-4 border-secondary pl-3 py-1">
-                            <h4 className="font-headline font-bold text-sm uppercase text-primary">COMPETITOR SIGNAL TELEMETRY BRIEF</h4>
-                            <p className="text-[10px] text-on-surface-variant font-semibold">Generated by Signal Agent</p>
-                          </div>
-                          <p className="leading-relaxed">This deliverable captures competitor releases extracted through the CloakBrowser crawler workspace. Focus points include API bottlenecks and schema redundancies.</p>
-                          <table className="w-full text-left border-collapse text-[10px] font-mono">
-                            <thead>
-                              <tr className="border-b-2 border-primary bg-surface">
-                                <th className="p-1.5 font-bold uppercase">System Metric</th>
-                                <th className="p-1.5 font-bold uppercase">Stitch Score</th>
-                                <th className="p-1.5 font-bold uppercase">Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr className="border-b border-outline/10">
-                                <td className="p-1.5">JSON Serialization</td>
-                                <td className="p-1.5 text-secondary font-bold">98.2%</td>
-                                <td className="p-1.5 text-primary">Stable</td>
-                              </tr>
-                              <tr className="border-b border-outline/10">
-                                <td className="p-1.5">Docker Sandboxes</td>
-                                <td className="p-1.5 text-secondary font-bold">91.4%</td>
-                                <td className="p-1.5 text-tertiary">Optimized</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </article>
-                      </div>
-                    </div>
-
-                    <div className="neo-border bg-background shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-4 flex flex-col relative overflow-hidden">
-                      <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
-                        <h4 className="font-headline text-lg font-black uppercase tracking-tight text-primary flex items-center gap-1.5">
-                          <span className="material-symbols-outlined">terminal</span> Sandbox Terminal
-                        </h4>
-                        <span className="bg-primary-container text-on-primary-container px-2 py-0.5 text-[8px] font-bold uppercase neo-border">Simulated Logs</span>
-                      </div>
-                      <div
-                        ref={terminalRef}
-                        className="flex-1 bg-black p-4 font-mono text-[10px] text-green-400 neo-border overflow-y-auto custom-scrollbar space-y-1.5 selection:bg-green-800"
-                      >
-                        {terminalLogs.map((log, idx) => (
-                          <p key={idx} className={
-                            log.startsWith('➜') ? "text-blue-400 font-bold" :
-                              log.includes('Agent:') ? "text-amber-300 font-bold" :
-                                log.includes('[Sandbox Output]') ? "text-gray-300" : "text-green-400"
-                          }>
-                            {log}
-                          </p>
-                        ))}
-                      </div>
-                    </div>
-                  </section>
-                </>
+                <ProjectWorkflowCanvas
+                  graph={operatingGraph}
+                  onSpawnAgent={handleSpawnProjectAgent}
+                  isSpawning={isSpawningAgent}
+                />
               ) : (
                 <AgentVisionLab
                   projectId={projectId}
@@ -644,11 +533,13 @@ function BlendedDashboardContent() {
           <aside className={`${mobilePanel === 'telemetry' ? 'flex' : 'hidden'} xl:flex w-full xl:w-80 bg-background flex-col shrink-0 overflow-y-auto custom-scrollbar p-5 gap-6`}>
             <section className="border-4 border-primary p-4 bg-surface relative overflow-hidden">
               <h4 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-1.5 border-b-2 border-primary pb-2 mb-2">
-                <span className="material-symbols-outlined text-sm text-tertiary">lightbulb</span>
-                Governor Context Explainability
+                <span className="material-symbols-outlined text-sm text-tertiary">account_tree</span>
+                Live Orchestration State
               </h4>
               <p className="font-body text-xs leading-relaxed text-on-surface bg-surface-container p-3 border-l-4 border-tertiary">
-                {activeReasoning}
+                {operatingGraph
+                  ? `${operatingGraph.counts?.tasks || 0} tasks, ${operatingGraph.counts?.actions || 0} queued agent actions, and ${approvals.filter(a => a.status === 'pending').length} pending approval gates are wired into this project.`
+                  : 'No operating graph has been built for this project yet.'}
               </p>
             </section>
 
@@ -656,14 +547,16 @@ function BlendedDashboardContent() {
               <div className="flex justify-between items-center border-b-2 border-primary pb-2 mb-3">
                 <h4 className="font-headline font-black uppercase text-sm tracking-tight text-primary flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-secondary animate-pulse">radar</span>
-                  Simulated Traces
+                  Runtime Traces
                 </h4>
                 <span className="w-2 h-2 bg-secondary rounded-full animate-ping"></span>
               </div>
               <div className="space-y-2 max-h-[140px] overflow-y-auto custom-scrollbar font-mono text-[9px] text-on-surface-variant">
-                {toolTraces.map((trace, idx) => (
-                  <div key={idx} className="border-b border-outline/5 pb-1 last:border-b-0 leading-normal">
-                    {trace}
+                {toolTraces.length > 0 ? toolTraces.map((trace, idx) => (
+                  <div key={idx} className="border-b border-outline/5 pb-1 last:border-b-0 leading-normal">{trace}</div>
+                )) : timeline.slice(0, 6).map((item) => (
+                  <div key={`${item.source}-${item.id}`} className="border-b border-outline/5 pb-1 last:border-b-0 leading-normal">
+                    [{item.mode}] {item.actor}: {item.title}
                   </div>
                 ))}
               </div>
@@ -695,13 +588,14 @@ function BlendedDashboardContent() {
                 </div>
               </div>
 
-              <div>
-                <div className="flex justify-between items-end mb-1">
-                  <span className="font-headline font-bold text-[10px] uppercase text-primary">Token Spend</span>
-                  <span className="font-headline font-black text-sm text-tertiary">${tokenBurn}</span>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-background border border-outline-variant p-2">
+                  <span className="block font-headline font-bold uppercase text-[8px] text-on-surface-variant">Open actions</span>
+                  <span className="font-mono text-sm font-bold">{operatingGraph?.counts?.actions || 0}</span>
                 </div>
-                <div className="font-mono text-[9px] text-on-surface-variant">
-                  Total Accumulated: <span className="font-bold">{tokenCount} tokens</span>
+                <div className="bg-background border border-outline-variant p-2">
+                  <span className="block font-headline font-bold uppercase text-[8px] text-on-surface-variant">Artifacts</span>
+                  <span className="font-mono text-sm font-bold">{operatingGraph?.counts?.artifacts || artifactVersions.length}</span>
                 </div>
               </div>
 
