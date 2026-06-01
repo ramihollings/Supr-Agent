@@ -1,13 +1,13 @@
 "use server"
 
-import { 
-  getActiveMission, 
-  getAgents, 
-  addActivityLog, 
-  recordFailure, 
-  resolveFailure, 
-  updateTaskStatus, 
-  addArtifact, 
+import {
+  getActiveMission,
+  getAgents,
+  addActivityLog,
+  recordFailure,
+  resolveFailure,
+  updateTaskStatus,
+  addArtifact,
   updateArtifact,
   addMemoryItem,
   getDb,
@@ -20,24 +20,32 @@ import {
   getMissionById
 } from '@/lib/db';
 import { writeIdentityProfile, deleteIdentityProfile } from '@/lib/agents';
-import { 
-  ActivityEvent, 
-  FailureEvent, 
-  TaskStatus, 
-  Artifact, 
-  MemoryItem, 
-  Mission, 
+import { agentBlueprintService } from '@/src/services/agent-blueprints';
+import { agentGroupService } from '@/src/services/agent-groups';
+import { guidelinePackService } from '@/src/services/guideline-packs';
+import { memorySectionService } from '@/src/services/memory-sections';
+import { operationalMetrics } from '@/src/services/operational-metrics';
+import { PipelineGates } from '@/src/governance/PipelineGates';
+import { portabilityService } from '@/src/services/portability';
+import crypto from 'crypto';
+import {
+  ActivityEvent,
+  FailureEvent,
+  TaskStatus,
+  Artifact,
+  MemoryItem,
+  Mission,
   Agent,
   Phase,
   Task
 } from '@/types';
-import { 
-  ActivityEventSchema, 
-  FailureEventSchema, 
-  ArtifactSchema, 
-  MemoryItemSchema, 
+import {
+  ActivityEventSchema,
+  FailureEventSchema,
+  ArtifactSchema,
+  MemoryItemSchema,
   TaskStatusSchema,
-  MissionSchema 
+  MissionSchema
 } from '@/lib/validations';
 import { z } from 'zod';
 
@@ -82,6 +90,101 @@ export async function fetchAgentsState(): Promise<Agent[]> {
   } catch (error) {
     handleActionError(error);
     return []; // Fallback for TS
+  }
+}
+
+export async function fetchSupervisorConsoleAction(projectId?: string) {
+  try {
+    const mission = projectId ? await getMissionById(projectId) : await getActiveMission();
+    const missionId = mission?.id || null;
+    const [agents, groups, blueprints, memorySections, metrics, guidelinePacks] = await Promise.all([
+      getAgents(),
+      missionId ? agentGroupService.listForMission(missionId) : Promise.resolve([]),
+      agentBlueprintService.list(missionId),
+      memorySectionService.list(missionId),
+      operationalMetrics.listRecent(25, missionId),
+      guidelinePackService.list(),
+    ]);
+    return { mission, agents, groups, blueprints, memorySections, metrics, guidelinePacks };
+  } catch (error: any) {
+    console.error('[fetchSupervisorConsoleAction]', error);
+    return { mission: null, agents: [], groups: [], blueprints: [], memorySections: [], metrics: [], guidelinePacks: [], error: error.message };
+  }
+}
+
+export async function createAgentBlueprintAction(prompt: string, projectId?: string) {
+  try {
+    const blueprint = await agentBlueprintService.create({ prompt, missionId: projectId || null });
+    await operationalMetrics.record({
+      missionId: projectId || null,
+      eventType: 'agent',
+      outcome: 'blueprint_created',
+      metadata: { role: blueprint.role, provider: blueprint.provider },
+    });
+    return { success: true, blueprint };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function createAgentGroupAction(input: {
+  projectId: string;
+  name: string;
+  supervisorAgentId: string;
+  memberAgentIds: string[];
+  sharedContext: string;
+}) {
+  try {
+    const agents = await getAgents();
+    const group = await agentGroupService.createGroup({
+      missionId: input.projectId,
+      name: input.name,
+      supervisorAgentId: input.supervisorAgentId,
+      sharedContext: input.sharedContext,
+      members: input.memberAgentIds.map((agentId) => ({
+        agentId,
+        role: agents.find((agent) => agent.id === agentId)?.role || 'Contributor',
+      })),
+    });
+    await operationalMetrics.record({
+      missionId: input.projectId,
+      agentId: input.supervisorAgentId,
+      eventType: 'agent',
+      outcome: 'group_created',
+      metadata: { members: input.memberAgentIds.length },
+    });
+    return { success: true, group };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function upsertMemorySectionAction(input: {
+  id?: string;
+  projectId?: string;
+  title: string;
+  content: string;
+  injectionStatus: 'active' | 'inactive';
+}) {
+  try {
+    const section = await memorySectionService.upsert({
+      id: input.id,
+      missionId: input.projectId || null,
+      title: input.title,
+      content: input.content,
+      provenance: 'user',
+      injectionStatus: input.injectionStatus,
+      userEdited: true,
+    });
+    await operationalMetrics.record({
+      missionId: input.projectId || null,
+      eventType: 'mission',
+      outcome: 'memory_section_saved',
+      metadata: { sectionId: section.id, injectionStatus: section.injectionStatus },
+    });
+    return { success: true, section };
+  } catch (error: any) {
+    return { success: false, error: error.message };
   }
 }
 
@@ -163,6 +266,21 @@ export async function updateTaskStatusAction(missionId: string, taskId: string, 
     z.string().parse(missionId);
     z.string().parse(taskId);
     TaskStatusSchema.parse(status);
+
+    if (status === 'Done') {
+      const reviewGate = await PipelineGates.verifyReviewGate(missionId, taskId);
+      if (!reviewGate.passed) {
+        // Fallback: check if there are any artifact versions for this mission
+        const hasArtifact = await dbClient.queryOne<any>(
+          `SELECT id FROM Artifact_Versions WHERE mission_id = ? LIMIT 1`,
+          [missionId]
+        );
+        if (!hasArtifact) {
+          throw new Error(reviewGate.message || "Hard Gate Block: Task requires approved review or associated deliverables (artifacts) before it can be marked as complete.");
+        }
+      }
+    }
+
     await updateTaskStatus(missionId, taskId, status);
   } catch (error) {
     handleActionError(error);
@@ -210,10 +328,123 @@ export async function createMissionAction(missionData: Omit<Mission, 'id'>) {
   try {
     const schema = MissionSchema.omit({ id: true });
     schema.parse(missionData);
-    
+
     return await createMission(missionData);
   } catch (error) {
     handleActionError(error);
+  }
+}
+
+export async function updateMissionAction(
+  missionId: string,
+  updates: { name?: string; objective?: string; status?: Mission['status'] }
+) {
+  try {
+    const id = z.string().min(1).max(160).parse(missionId);
+    const data = z.object({
+      name: z.string().min(1).max(160).optional(),
+      objective: z.string().max(4000).optional(),
+      status: z.enum(['Active', 'Done', 'Failed']).optional(),
+    }).parse(updates);
+
+    const fields: string[] = [];
+    const params: any[] = [];
+    if (data.name !== undefined) {
+      fields.push('title = ?');
+      params.push(data.name);
+    }
+    if (data.objective !== undefined) {
+      fields.push('goal = ?');
+      params.push(data.objective);
+    }
+    if (data.status !== undefined) {
+      fields.push('status = ?');
+      params.push(data.status);
+    }
+    if (fields.length === 0) return { success: true };
+
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+    await dbClient.execute(`UPDATE Missions SET ${fields.join(', ')} WHERE id = ?`, params);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to update mission:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function deleteMissionAction(missionId: string) {
+  try {
+    const id = z.string().min(1).max(160).parse(missionId);
+    const groups = await dbClient.query<{ id: string }>(`SELECT id FROM Agent_Groups WHERE mission_id = ?`, [id]);
+    const operations = [
+      ...groups.map((group) => ({ sql: `DELETE FROM Agent_Group_Members WHERE group_id = ?`, params: [group.id] })),
+      { sql: `DELETE FROM Agent_Groups WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Agent_Blueprints WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Memory_Sections WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Operational_Metrics WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Tool_Invocations WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Agent_Runs WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Flow_Nodes WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Flow_Runs WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Agent_Actions WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Approvals WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Artifact_Versions WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Artifacts WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Memory_Items WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Knowledge_Pages WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Event_Log WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Failure_Events WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Tasks WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Glidepaths WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM Missions WHERE id = ?`, params: [id] },
+    ];
+    await dbClient.runTransaction(operations);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to delete mission:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function exportMissionBundleAction(missionId: string) {
+  try {
+    const id = z.string().min(1).max(160).parse(missionId);
+    const [mission, approvals, actions, flowRuns, flowNodes, agentRuns, tools, artifactVersions, memorySections, groups, metrics, events] = await Promise.all([
+      getMissionById(id),
+      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Agent_Actions WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Flow_Runs WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Flow_Nodes WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Agent_Runs WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Tool_Invocations WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Artifact_Versions WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Memory_Sections WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
+      agentGroupService.listForMission(id),
+      dbClient.query<any>(`SELECT * FROM Operational_Metrics WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Event_Log WHERE mission_id = ? ORDER BY timestamp ASC`, [id]),
+    ]);
+    return {
+      success: true,
+      bundle: {
+        exportedAt: new Date().toISOString(),
+        mission,
+        approvals,
+        actions,
+        flowRuns,
+        flowNodes,
+        agentRuns,
+        toolInvocations: tools,
+        artifactVersions,
+        memorySections,
+        agentGroups: groups,
+        operationalMetrics: metrics,
+        eventLog: events,
+      },
+    };
+  } catch (error) {
+    console.error('Failed to export mission bundle:', error);
+    return { success: false, error: String(error) };
   }
 }
 
@@ -259,7 +490,7 @@ export async function spawnProjectAgentAction(input: {
       role: z.string().min(2).max(80),
       objective: z.string().min(4).max(500),
       permissionTier: z.enum(['Observe', 'Draft', 'Edit', 'Execute', 'External_Act', 'Root']).default('Edit'),
-      capability: z.string().min(2).max(120).default('project.execute_task'),
+      capability: z.enum(PROJECT_FLOW_CAPABILITIES).default('workspace_write_artifact'),
       riskLevel: z.enum(['Low', 'Medium', 'High', 'Critical']).default('Medium'),
     }).parse(input);
 
@@ -320,8 +551,16 @@ export async function spawnProjectAgentAction(input: {
       riskLevel: data.riskLevel,
       requiredPermission: data.permissionTier as any,
       inputs: { objective: data.objective, spawnedFrom: 'dashboard' },
-      metadata: { spawnedBy: 'Supr', agentName: createdAgent.name },
+      metadata: { spawnedBy: 'Supr', agentName: createdAgent.name, requiresEvidence: true },
     });
+
+    const capabilityRow = await dbClient.queryOne<any>(`SELECT id FROM Capabilities WHERE name = ?`, [data.capability]);
+    if (capabilityRow) {
+      await dbClient.execute(
+        `INSERT OR IGNORE INTO Agent_Capabilities (agent_id, capability_id, allowed) VALUES (?, ?, 1)`,
+        [createdAgent.id, capabilityRow.id],
+      );
+    }
 
     await addActivityLog(data.missionId, {
       eventType: 'delegation',
@@ -350,7 +589,7 @@ export async function deleteAgentAction(agentId: string, agentName: string) {
   try {
     // 1. Remove physical .md file
     deleteIdentityProfile(agentName);
-    
+
     // 2. Remove from SQLite
     await deleteAgent(agentId);
   } catch (error) {
@@ -600,7 +839,7 @@ export async function checkShadowModeAction(): Promise<{ active: boolean; expire
     }
     const active = settings.shadow_mode_active === 'true';
     const expiresAt = settings.shadow_mode_expires_at || null;
-    
+
     if (active && expiresAt) {
       if (new Date().getTime() > new Date(expiresAt).getTime()) {
         // Expired! Auto-deactivate
@@ -745,11 +984,19 @@ import fs from 'fs';
 import path from 'path';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
-import { getActiveProvider } from '@/lib/providers/model';
 import { GoogleGenAI } from '@google/genai';
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
 import { createAgentAction as createRuntimeAgentAction, fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
 import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
+import {
+  approveLowRiskActions,
+  pauseProjectFlow,
+  resumeProjectFlow,
+  retryFailedFlowNodes,
+  routeIntakeToProjectFlow,
+  runProjectFlow,
+  startProjectFlow,
+} from '@/lib/runtime/project-flow';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -759,6 +1006,15 @@ const EXECUTION_WINDOW_MS = 60 * 1000;
 const EXECUTION_LIMIT_PER_WINDOW = 5;
 const ALLOWED_WORKSPACE_EXTENSIONS = new Set(['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.py', '.csv', '.html', '.css']);
 const EXECUTION_ATTEMPTS = new Map<string, number[]>();
+const PROJECT_FLOW_CAPABILITIES = [
+  'web_scrape',
+  'workspace_write_artifact',
+  'workspace_write_file',
+  'workspace_validate_outputs',
+  'governance_review',
+  'delivery_package',
+  'execute_command',
+] as const;
 
 type DesignProfileSummary = {
   id: string;
@@ -840,26 +1096,6 @@ function assertExecutionRate(filename: string) {
   EXECUTION_ATTEMPTS.set(filename, attempts);
 }
 
-function chatSystemInstruction(settings: any) {
-  const mode = settings.operating_mode || 'guided';
-  const boundary = settings.permission_boundary || 'governed';
-  return `You are Supr, the central AI agent supervisor. You are interacting with the user in Supr-Chat, a rapid-fire workspace for quick tasks, document triage, and code execution.
-Current System Mode: Autonomy = ${mode}, Permission Tier = ${boundary}.
-Always adopt an authoritative, premium, and concise tone. When the user asks you to write code or documents, output complete, high-quality, executable file content. Describe your steps clearly.`;
-}
-
-function buildChatPrompt(history: any[], currentMessage: string, file?: any) {
-  let prompt = "Here is the chat history:\n";
-  for (const msg of history) {
-    prompt += `- ${msg.sender.toUpperCase()}: ${msg.content}\n`;
-  }
-  if (file) {
-    prompt += `\n[ATTACHED FILE: ${file.name} (Type: ${file.type})]\nContent:\n${file.content}\n`;
-  }
-  prompt += `\nUSER CURRENT REQUEST: ${currentMessage}`;
-  return prompt;
-}
-
 export async function fetchDesignProfilesAction(): Promise<DesignProfileSummary[]> {
   try {
     const dir = path.resolve(/* turbopackIgnore: true */ process.cwd(), 'design');
@@ -909,12 +1145,38 @@ export async function fetchMissionTimelineAction(projectId?: string) {
   try {
     const mission = projectId ? await getMissionById(projectId) : await getActiveMission();
     if (!mission) return [];
-    const [agentActions, approvals] = await Promise.all([
+    const [agentActions, approvals, toolInvocations] = await Promise.all([
       fetchAgentActionsForMission(mission.id),
       dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid DESC`, [mission.id]),
+      dbClient.query<any>(`SELECT * FROM Tool_Invocations WHERE mission_id = ? ORDER BY created_at DESC LIMIT 20`, [mission.id]),
     ]);
 
     const events = [
+      ...toolInvocations.map((tool) => {
+        const output = safeJson<Record<string, any>>(tool.output, {});
+        const input = safeJson<Record<string, any>>(tool.input, {});
+        const command = output?.command || input?.command || '';
+        const exitCode = Number.isFinite(Number(output?.exitCode)) ? Number(output.exitCode) : undefined;
+        const stdout = typeof output?.stdout === 'string' ? output.stdout : '';
+        const stderr = typeof output?.stderr === 'string' ? output.stderr : '';
+        return {
+          id: tool.id,
+          type: tool.tool_name === 'execute_command' ? 'command' : 'tool',
+          title: tool.tool_name === 'execute_command' ? `Command ${tool.status}` : `${tool.tool_name} (${tool.status})`,
+          detail: tool.error || command || stdout || stderr || tool.tool_name,
+          actor: tool.agent_id || 'Tool Runtime',
+          timestamp: tool.completed_at || tool.created_at || new Date().toISOString(),
+          source: 'tool-invocations',
+          mode: 'Live',
+          command: tool.tool_name === 'execute_command' ? {
+            command,
+            stdout,
+            stderr,
+            exitCode,
+            durationMs: Number.isFinite(Number(output?.durationMs)) ? Number(output.durationMs) : undefined,
+          } : undefined,
+        };
+      }),
       ...agentActions.map((item) => ({
         id: item.id,
         type: `agent_action_${item.status}`,
@@ -990,10 +1252,101 @@ export async function fetchProjectOperatingGraphAction(projectId: string) {
     const mission = await getMissionById(projectId);
     if (!mission) return null;
 
-    const [agentActions, approvalRows] = await Promise.all([
+    const [agentActions, approvalRows, flowRun, flowNodes, agentRuns, toolInvocations] = await Promise.all([
       fetchAgentActionsForMission(projectId),
       dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid ASC`, [projectId]),
+      dbClient.queryOne<any>(`SELECT * FROM Flow_Runs WHERE mission_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`, [projectId]),
+      dbClient.query<any>(`SELECT * FROM Flow_Nodes WHERE mission_id = ? ORDER BY y ASC, x ASC, created_at ASC`, [projectId]),
+      dbClient.query<any>(`SELECT * FROM Agent_Runs WHERE mission_id = ? ORDER BY created_at DESC LIMIT 20`, [projectId]),
+      dbClient.query<any>(`SELECT * FROM Tool_Invocations WHERE mission_id = ? ORDER BY created_at DESC LIMIT 30`, [projectId]),
     ]);
+
+    if (flowNodes.length > 0) {
+      const nodes = flowNodes.map((node) => {
+        const metadata = safeJson<Record<string, any>>(node.metadata, {});
+        return {
+          id: node.id,
+          kind: node.kind,
+          refId: node.ref_id,
+          label: node.label,
+          status: node.status,
+          actor: node.owner_agent_id || 'Supr',
+          detail: metadata.reason || metadata.phase || metadata.traceId || '',
+          riskLevel: node.risk_level,
+          nextAction: node.next_action,
+          x: Number(node.x || 0),
+          y: Number(node.y || 0),
+        };
+      });
+      const taskByRef = flowNodes.filter((node) => node.kind === 'task');
+      const actionByTask = new Map(agentActions.map((action) => [action.taskId, action]));
+      const nodeByRef = new Map(flowNodes.map((node) => [`${node.kind}:${node.ref_id}`, node.id]));
+      const edges: any[] = [];
+      const phases = flowNodes.filter((node) => node.kind === 'phase');
+      phases.forEach((phase, index) => {
+        if (index > 0) edges.push({ id: `edge:${phases[index - 1].id}:${phase.id}`, source: phases[index - 1].id, target: phase.id, label: 'then' });
+      });
+      taskByRef.forEach((task) => {
+        const action = actionByTask.get(task.ref_id);
+        const phase = safeJson<any>(task.metadata, {}).phase;
+        const phaseNode = flowNodes.find((node) => node.kind === 'phase' && node.label === phase);
+        if (phaseNode) edges.push({ id: `edge:${phaseNode.id}:${task.id}`, source: phaseNode.id, target: task.id, label: 'assign' });
+        if (action) {
+          const actionNodeId = nodeByRef.get(`agent_action:${action.id}`);
+          if (actionNodeId) edges.push({ id: `edge:${task.id}:${actionNodeId}`, source: task.id, target: actionNodeId, label: 'run' });
+        }
+      });
+      approvalRows.forEach((approval) => {
+        const actionNodeId = nodeByRef.get(`agent_action:${approval.agent_action_id}`);
+        const approvalNodeId = nodeByRef.get(`approval:${approval.id}`);
+        if (actionNodeId && approvalNodeId) edges.push({ id: `edge:${actionNodeId}:${approvalNodeId}`, source: actionNodeId, target: approvalNodeId, label: 'gate' });
+      });
+      agentActions.forEach((action) => {
+        const result = safeJson<any>(action.result, {});
+        const actionNodeId = nodeByRef.get(`agent_action:${action.id}`);
+        const artifactIds = Array.isArray(result?.evidence?.artifacts) ? result.evidence.artifacts : [];
+        for (const artifactId of artifactIds) {
+          const artifactNodeId = nodeByRef.get(`artifact:${artifactId}`);
+          if (actionNodeId && artifactNodeId) {
+            edges.push({ id: `edge:${action.id}:${artifactId}`, source: actionNodeId, target: artifactNodeId, label: 'produces' });
+          }
+        }
+      });
+      return {
+        missionId: projectId,
+        flowRun: flowRun ? { id: flowRun.id, status: flowRun.status, mode: flowRun.mode, source: flowRun.source } : null,
+        nodes,
+        edges,
+        agentRuns: agentRuns.map((run) => ({
+          id: run.id,
+          status: run.status,
+          agentActionId: run.agent_action_id,
+          agentId: run.agent_id,
+          logs: safeJson(run.logs, []),
+          result: safeJson(run.result, run.result || null),
+          error: run.error,
+          createdAt: run.created_at,
+        })),
+        toolInvocations: toolInvocations.map((tool) => ({
+          id: tool.id,
+          toolName: tool.tool_name,
+          status: tool.status,
+          agentId: tool.agent_id,
+          agentActionId: tool.agent_action_id,
+          input: safeJson(tool.input, tool.input || null),
+          output: safeJson(tool.output, tool.output || null),
+          error: tool.error,
+          createdAt: tool.created_at,
+        })),
+        counts: {
+          phases: nodes.filter((node) => node.kind === 'phase').length,
+          tasks: nodes.filter((node) => node.kind === 'task').length,
+          actions: agentActions.length,
+          approvals: approvalRows.length,
+          artifacts: mission.artifacts?.length || 0,
+        },
+      };
+    }
 
     const nodes: any[] = [];
     const edges: any[] = [];
@@ -1080,8 +1433,21 @@ export async function fetchProjectOperatingGraphAction(projectId: string) {
 
     return {
       missionId: projectId,
+      flowRun: flowRun ? { id: flowRun.id, status: flowRun.status, mode: flowRun.mode, source: flowRun.source } : null,
       nodes,
       edges,
+      agentRuns: [],
+      toolInvocations: toolInvocations.map((tool) => ({
+        id: tool.id,
+        toolName: tool.tool_name,
+        status: tool.status,
+        agentId: tool.agent_id,
+        agentActionId: tool.agent_action_id,
+        input: safeJson(tool.input, tool.input || null),
+        output: safeJson(tool.output, tool.output || null),
+        error: tool.error,
+        createdAt: tool.created_at,
+      })),
       counts: {
         phases: mission.phases?.length || 0,
         tasks: mission.tasks?.length || 0,
@@ -1093,6 +1459,86 @@ export async function fetchProjectOperatingGraphAction(projectId: string) {
   } catch (error) {
     console.error('Failed to fetch project operating graph:', error);
     return null;
+  }
+}
+
+export async function startProjectFlowAction(projectId: string) {
+  try {
+    z.string().min(1).parse(projectId);
+    return await startProjectFlow(projectId);
+  } catch (error) {
+    console.error('Failed to start project flow:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function runProjectFlowAction(projectId: string) {
+  try {
+    z.string().min(1).parse(projectId);
+    return await runProjectFlow(projectId);
+  } catch (error) {
+    console.error('Failed to run project flow:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function pauseProjectFlowAction(projectId: string) {
+  try {
+    z.string().min(1).parse(projectId);
+    return await pauseProjectFlow(projectId);
+  } catch (error) {
+    console.error('Failed to pause project flow:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function resumeProjectFlowAction(projectId: string) {
+  try {
+    z.string().min(1).parse(projectId);
+    return await resumeProjectFlow(projectId);
+  } catch (error) {
+    console.error('Failed to resume project flow:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function retryFailedFlowNodesAction(projectId: string) {
+  try {
+    z.string().min(1).parse(projectId);
+    return await retryFailedFlowNodes(projectId);
+  } catch (error) {
+    console.error('Failed to retry project flow:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function approveLowRiskActionsAction(projectId: string) {
+  try {
+    z.string().min(1).parse(projectId);
+    return await approveLowRiskActions(projectId);
+  } catch (error) {
+    console.error('Failed to approve low-risk actions:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function routeIntakeToProjectFlowAction(input: {
+  source: 'supr-chat' | 'telegram' | 'api';
+  content: string;
+  projectId?: string | null;
+  attachments?: unknown[];
+}) {
+  try {
+    const data = z.object({
+      source: z.enum(['supr-chat', 'telegram', 'api']),
+      content: z.string().min(1).max(12000),
+      projectId: z.string().min(1).max(160).nullable().optional(),
+      attachments: z.array(z.unknown()).optional(),
+    }).parse(input);
+    return await routeIntakeToProjectFlow(data);
+  } catch (error) {
+    console.error('Failed to route intake:', error);
+    return { success: false, error: String(error) };
   }
 }
 
@@ -1452,6 +1898,29 @@ export async function fetchChatMessagesAction() {
   }
 }
 
+export async function updateChatMessageAction(messageId: string, content: string) {
+  try {
+    const id = z.string().min(1).max(160).parse(messageId);
+    const nextContent = z.string().min(1).max(12000).parse(content);
+    await dbClient.execute(`UPDATE Supr_Chat_Messages SET content = ? WHERE id = ?`, [nextContent, id]);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to update chat message:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function deleteChatMessageAction(messageId: string) {
+  try {
+    const id = z.string().min(1).max(160).parse(messageId);
+    await dbClient.execute(`DELETE FROM Supr_Chat_Messages WHERE id = ?`, [id]);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to delete chat message:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
 export async function generateImagenImageAction(prompt: string): Promise<string> {
   z.string().min(1).max(2000).parse(prompt);
   const apiKey = await getSecretSetting('global_gemini_key', process.env.GEMINI_API_KEY);
@@ -1491,7 +1960,7 @@ export async function generateImagenImageAction(prompt: string): Promise<string>
 }
 
 export async function sendChatMessageAction(
-  content: string, 
+  content: string,
   file?: { name: string; type: string; content: string }
 ) {
   try {
@@ -1514,139 +1983,20 @@ export async function sendChatMessageAction(
       await dbClient.execute(insertMsgSql, [userMsgId, content, file?.name || null, file?.type || null, file?.content || null]);
     }
 
-    // 2. Fetch recent chat history
-    const history = await dbClient.query(`
-      SELECT * FROM Supr_Chat_Messages 
-      ORDER BY created_at ASC 
-      LIMIT 20
-    `);
-
-    // 3. Build Prompt for LLM
-    const prompt = buildChatPrompt(history, content, file);
-
-    // 4. Call Provider
-    const provider = await getActiveProvider('supr');
-    let suprResponse = '';
-    let simulationLogs: string[] = [];
-
-    const contentLower = content.toLowerCase();
-    
-    // IMAGE GENERATION HEURISTIC
-    const isImageRequest = contentLower.includes('generate image') || contentLower.includes('create image') || contentLower.includes('draw') || contentLower.includes('generate an image');
-    
-    if (isImageRequest) {
-      simulationLogs.push('[TELEMETRY] Detected image request. Triggering Google GenAI Imagen...');
-      try {
-        const imagePrompt = content.replace(/(generate|create|draw|make)\s+(an\s+)?image\s+(of\s+)?/gi, '').trim();
-        const base64Image = await generateImagenImageAction(imagePrompt);
-        
-        if (!shadow.active) {
-          const suprMsgId = `chat-${Date.now() + 1}`;
-          const insertImgSql = `
-            INSERT INTO Supr_Chat_Messages (id, sender, content, file_name, file_type, file_content)
-            VALUES (?, 'supr', ?, ?, 'image/png', ?)
-          `;
-          await dbClient.execute(insertImgSql, [suprMsgId, `I've generated the image for: "${imagePrompt}"`, 'generated_image.png', base64Image]);
-        }
-        return { 
-          success: true,
-          shadow: shadow.active,
-          message: shadow.active ? {
-            id: `shadow-${Date.now()}`,
-            sender: 'supr' as const,
-            content: `I've generated the image for: "${imagePrompt}"`,
-            file: { name: 'generated_image.png', type: 'image/png', content: base64Image },
-            createdAt: new Date().toISOString()
-          } : undefined
-        };
-      } catch (err: any) {
-        simulationLogs.push(`[ERROR] Imagen generation failed: ${err.message}. Falling back to text response.`);
-      }
-    }
-
-    // CONNECTORS HEURISTICS
-    const isEmailRequest = contentLower.includes('email') || contentLower.includes('mail') || contentLower.includes('inbox');
-    const isSlackRequest = contentLower.includes('slack') || contentLower.includes('ping') || contentLower.includes('message channel');
-    const isGithubRequest = contentLower.includes('github') || contentLower.includes('issue') || contentLower.includes('repo');
-
-    // Fetch integration keys from Settings
-    const settings = await fetchSettingsAction();
-    const composioIntegration = await getSecretSetting('integrations_composio');
-    const githubIntegration = await getSecretSetting('integrations_github');
-    const slackIntegration = await getSecretSetting('integrations_slack');
-    const gmailIntegration = await getSecretSetting('integrations_gmail');
-    const hasComposio = !!composioIntegration;
-    const hasGithub = !!githubIntegration;
-    const hasSlack = !!slackIntegration;
-    const hasGmail = !!gmailIntegration;
-
-    if (isEmailRequest) {
-      if (hasGmail) {
-        simulationLogs.push('[GMAIL CONNECTED] Querying active inbox via Google APIs...');
-        suprResponse = `Connected via direct credentials. I've pulled the latest email:\n\n*   **From:** notify@github.com\n*   **Subject:** Security update for Supr sandbox dependencies\n*   **Body:** High severity vulnerabilities found. Action recommended.`;
-      } else if (hasComposio) {
-        simulationLogs.push('[COMPOSIO ACTIVE] Querying Gmail action bridge...');
-        suprResponse = `[Composio GMAIL] Successfully retrieved latest email: "Urgent: Project spec review requested."`;
-      } else {
-        simulationLogs.push('[SIMULATOR] Connecting GSuite OAuth simulation...');
-        simulationLogs.push('[SIMULATOR] GET https://gmail.googleapis.com/gmail/v1/users/me/messages');
-        simulationLogs.push('[SIMULATOR] Status: 200 OK');
-        suprResponse = `[SIMULATED EMAIL] I've pulled the latest email from your simulator inbox:
-*   **From:** workspace-operations@supr.io
-*   **Subject:** Production build ready
-*   **Body:** All 18 pages built successfully. Exposing live via secure Cloudflare Tunnel.`;
-      }
-    } else if (isSlackRequest) {
-      if (hasSlack) {
-        simulationLogs.push('[SLACK API] Dispatching raw webhook notification...');
-        try {
-          await fetch(slackIntegration!, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: `Supr-Chat: ${content}` })
-          });
-          suprResponse = `Dispatched live message to Slack successfully!`;
-        } catch (err: any) {
-          simulationLogs.push(`[ERROR] Webhook failed: ${err.message}`);
-        }
-      } else if (hasComposio) {
-        simulationLogs.push('[COMPOSIO ACTIVE] Bridging Slack message...');
-        suprResponse = `[Composio SLACK] Message posted to #general.`;
-      } else {
-        simulationLogs.push('[SIMULATOR] Preparing Slack Webhook request...');
-        simulationLogs.push('[SIMULATOR] POST https://hooks.slack.com/services/...');
-        simulationLogs.push('[SIMULATOR] Status: 200 OK');
-        suprResponse = `[SIMULATED SLACK] Dispatched warning alert to channel **#general**: *"Supr-Chat alert: ${content}"*`;
-      }
-    } else if (isGithubRequest) {
-      if (hasGithub) {
-        simulationLogs.push('[GITHUB API] Connecting with configured PAT token...');
-        suprResponse = `Successfully authenticated and created issue #82: "Workspace Build Triage" in repository.`;
-      } else if (hasComposio) {
-        simulationLogs.push('[COMPOSIO ACTIVE] Bridging Github action...');
-        suprResponse = `[Composio GITHUB] Created issue #82.`;
-      } else {
-        simulationLogs.push('[SIMULATOR] Querying repository metadata...');
-        simulationLogs.push('[SIMULATOR] POST https://api.github.com/repos/supr-org/workspace/issues');
-        simulationLogs.push('[SIMULATOR] Status: 201 Created');
-        suprResponse = `[SIMULATED GITHUB] Created GitHub Issue #18: *"Chat Task: ${content}"* in repository **supr-org/workspace**.`;
-      }
-    } else {
-      // General LLM Chat Triage
-      simulationLogs.push('[SUPR] Orchestrating response context...');
-      try {
-        suprResponse = await provider.generateContent(prompt, {
-          systemInstruction: chatSystemInstruction(settings),
-          temperature: parseFloat(settings.llm_temperature_supr || '0.7'),
-        });
-      } catch (err: any) {
-        suprResponse = `[FALLBACK] I acknowledge your request. Error generating response: ${err.message}`;
-      }
-    }
-
-    // Save response with simulation/telemetry logs prepended
-    const logPrefix = simulationLogs.length > 0 ? `\`\`\`telemetry\n${simulationLogs.join('\n')}\n\`\`\`\n\n` : '';
-    const finalContent = logPrefix + suprResponse;
+    const routed = await routeIntakeToProjectFlow({
+      source: 'supr-chat',
+      content,
+      attachments: file ? [{ name: file.name, type: file.type }] : [],
+    });
+    const finalContent = routed.success
+      ? [
+          `Supr routed this into Project Flow.`,
+          `- Spawned/updated the agent work graph.`,
+          `- Queued agent-owned tasks instead of handling the work directly.`,
+          `- Flow: ${routed.flowRunId}`,
+          `- Status: ${routed.response}`,
+        ].join('\n')
+      : `Supr could not route this into Project Flow: ${routed.error}`;
 
     if (!shadow.active) {
       const suprMsgId = `chat-${Date.now() + 2}`;
@@ -1657,7 +2007,7 @@ export async function sendChatMessageAction(
       await dbClient.execute(insertSuprSql, [suprMsgId, finalContent]);
     }
 
-    return { 
+    return {
       success: true,
       shadow: shadow.active,
       message: {
@@ -1818,7 +2168,7 @@ export async function runProjectCheckAction(check: 'lint' | 'build') {
 export async function fetchAllArtifactsAction() {
   try {
     const rows = await dbClient.query(`
-      SELECT a.*, m.title as mission_title 
+      SELECT a.*, m.title as mission_title
       FROM Artifacts a
       JOIN Missions m ON a.mission_id = m.id
       ORDER BY a.created_at DESC
@@ -1835,5 +2185,126 @@ export async function fetchAllArtifactsAction() {
   } catch (error) {
     console.error("Failed to fetch all artifacts:", error);
     return [];
+  }
+}
+
+export async function exportOrganizationAction() {
+  try {
+    const data = await portabilityService.exportOrganization();
+    return { success: true, data };
+  } catch (error) {
+    console.error("Failed to export organization database:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function importOrganizationAction(serializedData: string, options?: { allowOverwrite?: boolean }) {
+  try {
+    z.string().parse(serializedData);
+    const parsedOptions = z.object({ allowOverwrite: z.boolean().optional() }).optional().parse(options);
+    const res = await portabilityService.importOrganization(serializedData, parsedOptions);
+    if (!res.success) {
+      return {
+        success: false,
+        imported: res.imported,
+        collisions: res.collisions || [],
+        error: 'Import contains records that already exist. Confirm overwrite to continue.',
+      };
+    }
+    return { success: true, imported: res.imported, collisions: res.collisions || [] };
+  } catch (error) {
+    console.error("Failed to import organization database:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function duplicateMissionAction(missionId: string) {
+  try {
+    const id = z.string().min(1).max(160).parse(missionId);
+
+    // 1. Fetch source mission & glidepath
+    const mission = await dbClient.queryOne<any>(`SELECT * FROM Missions WHERE id = ?`, [id]);
+    if (!mission) return { success: false, error: 'Source mission not found' };
+
+    const glidepath = await dbClient.queryOne<any>(`SELECT * FROM Glidepaths WHERE mission_id = ?`, [id]);
+    const artifacts = await dbClient.query<any>(`SELECT * FROM Artifacts WHERE mission_id = ?`, [id]);
+
+    // 2. Generate new IDs
+    const newMissionId = `m-${Date.now()}`;
+    const newTitle = `${mission.title} (Copy)`;
+
+    const operations: { sql: string; params: any[] }[] = [
+      {
+        sql: `INSERT INTO Missions (id, title, goal, workflow_type, autonomy_mode, status, current_phase_id, constraints)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          newMissionId,
+          newTitle,
+          mission.goal,
+          mission.workflow_type || 'default',
+          mission.autonomy_mode || 'governed',
+          'Active',
+          mission.current_phase_id,
+          mission.constraints
+        ]
+      },
+      {
+        sql: `INSERT INTO Glidepaths (id, mission_id, phases, tasks, approval_gates, blockers, standards, decisions, risks, assumptions, progress, readiness_score)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          `gp-${newMissionId}`,
+          newMissionId,
+          glidepath?.phases || '[]',
+          glidepath?.tasks || '[]',
+          glidepath?.approval_gates || null,
+          glidepath?.blockers || null,
+          glidepath?.standards || null,
+          glidepath?.decisions || null,
+          glidepath?.risks || null,
+          glidepath?.assumptions || null,
+          glidepath?.progress || 0,
+          glidepath?.readiness_score || 0
+        ]
+      }
+    ];
+
+    // 3. Clone artifacts
+    for (const art of artifacts) {
+      const newArtId = `art-${crypto.randomUUID()}`;
+      operations.push({
+        sql: `INSERT INTO Artifacts (id, mission_id, type, title, content) VALUES (?, ?, ?, ?, ?)`,
+        params: [newArtId, newMissionId, art.type, art.title, art.content]
+      });
+      operations.push({
+        sql: `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          `av-${crypto.randomUUID()}`,
+          newArtId,
+          newMissionId,
+          art.title,
+          art.type,
+          art.content,
+          1,
+          'approved',
+          'Supr',
+          `Cloned from ${art.title}`
+        ]
+      });
+    }
+
+    await dbClient.runTransaction(operations);
+
+    await addActivityLog(newMissionId, {
+      eventType: 'Mission Created',
+      actor: 'Supr',
+      summary: `Duplicated project from ${mission.title}`,
+      detail: `New project ${newTitle} successfully duplicated with ${artifacts.length} cloned deliverables.`
+    } as any);
+
+    return { success: true, missionId: newMissionId };
+  } catch (error) {
+    console.error('Failed to duplicate mission:', error);
+    return { success: false, error: String(error) };
   }
 }

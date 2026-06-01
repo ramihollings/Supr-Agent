@@ -103,3 +103,107 @@ export interface DatabaseSchema {
   missions: Mission[];
   agents: Agent[];
 }
+
+export type DashboardObjectType =
+  | 'project'
+  | 'file'
+  | 'message'
+  | 'sub-agent'
+  | 'artifact'
+  | 'report'
+  | 'memory'
+  | 'guideline'
+  | 'approval'
+  | 'provider';
+
+export type ObjectActionKind =
+  | 'create'
+  | 'edit'
+  | 'delete'
+  | 'upload'
+  | 'download'
+  | 'duplicate'
+  | 'export'
+  | 'archive'
+  | 'inspect-evidence'
+  | 'attach'
+  | 'pin'
+  | 'retry'
+  | 'approve'
+  | 'reject'
+  | 'open';
+
+export interface ObjectAction {
+  id: ObjectActionKind;
+  label: string;
+  icon: string;
+  enabled: boolean;
+  risk?: 'low' | 'medium' | 'high';
+  reason?: string;
+}
+
+export interface DashboardObject {
+  id: string;
+  type: DashboardObjectType;
+  title: string;
+  status: string;
+  owner: string;
+  description?: string;
+  provenance?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  evidenceCount?: number;
+  metadata?: Record<string, string | number | boolean | null | undefined>;
+  actions: ObjectAction[];
+}
+
+export type RunEventKind =
+  | 'command'
+  | 'tool'
+  | 'diff'
+  | 'stderr'
+  | 'system'
+  | 'approval'
+  | 'artifact'
+  | 'memory'
+  | 'failure';
+
+export interface ExecutionEvidence {
+  id: string;
+  label: string;
+  href?: string;
+  durable: boolean;
+  detail?: string;
+}
+
+export interface RunEvent {
+  id: string;
+  kind: RunEventKind;
+  title: string;
+  detail: string;
+  actor: string;
+  timestamp: string;
+  status: 'pending' | 'running' | 'succeeded' | 'warning' | 'failed';
+  evidence?: ExecutionEvidence[];
+  command?: {
+    command?: string;
+    stdout?: string;
+    stderr?: string;
+    exitCode?: number;
+    durationMs?: number;
+  };
+  raw?: unknown;
+}
+
+export interface DashboardArtifact {
+  id: string;
+  filename: string;
+  type: Artifact['type'] | string;
+  source: string;
+  preview?: string;
+  status: 'streaming' | 'draft' | 'approved' | 'final';
+  provenance: string;
+  linkedMissionId?: string;
+  linkedReportId?: string;
+  exportName?: string;
+}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { TopNav } from '@/components/TopNav';
+import { RunTranscriptView } from '@/components/RunTranscriptView';
 import { 
   fetchMissionState, 
   recordFailureAction, 
@@ -15,7 +16,7 @@ import {
   fetchSettingsAction,
   updateSettingAction
 } from '@/app/actions';
-import { Mission, Artifact } from '@/types';
+import { Mission, Artifact, RunEvent } from '@/types';
 
 type TerminalLine = {
   id: number;
@@ -77,7 +78,7 @@ export default function CodePage() {
       const seeds: Record<string, string> = {
         'main.py': `# Core entry point\nimport feedback_clusters as fc\n\ndef run_pipeline():\n    print("Starting Cognitive Pipeline...")\n    print("Loading datasets...")\n    print("Pipeline run completed successfully.")\n\nif __name__ == "__main__":\n    run_pipeline()`,
         'feedback_clusters.py': `# Cognitive Debt Detection Script\n# Author: Supr CodeBot\nimport numpy as np\n\ndef analyze_feedback(data_path: str):\n    """\n    Analyzes ticket feedback to identify clusters.\n    """\n    print("Analyzing feedback embeddings...")\n    return {"status": "success", "clusters": 5}\n`,
-        'validation.py': `# Pytest Verification Suite\n# Author: QA Sentinel\nimport pytest\nfrom feedback_clusters import analyze_feedback\n\ndef test_analyze_feedback():\n    # Active mock verification\n    print("Running verification tests...")\n    result = analyze_feedback("mock_tickets.json")\n    assert result["status"] == "success"\n    print("Test validation.py PASSED.")\n\nif __name__ == "__main__":\n    test_analyze_feedback()`
+        'validation.py': `# Pytest Verification Suite\n# Author: QA Sentinel\nimport pytest\nfrom feedback_clusters import analyze_feedback\n\ndef test_analyze_feedback():\n    # Active sample verification\n    print("Running verification tests...")\n    result = analyze_feedback("sample_tickets.json")\n    assert result["status"] == "success"\n    print("Test validation.py PASSED.")\n\nif __name__ == "__main__":\n    test_analyze_feedback()`
       };
 
       for (const [fname, content] of Object.entries(seeds)) {
@@ -329,6 +330,21 @@ export default function CodePage() {
                 { id: Date.now() + 1, type: 'supr', content: `[CODE AGENT] Fix applied: ${msg.fix}` },
                 { id: Date.now() + 2, type: msg.passed ? 'success' : 'error', content: `Test result: ${msg.testResult}` },
               ];
+              if (msg.evidenceIds?.length) {
+                resultLines.push({ id: Date.now() + 4, type: 'output', content: `[EVIDENCE] Patch evidence: ${msg.evidenceIds.join(', ')}` });
+              }
+              if (msg.validationEvidenceIds?.length) {
+                resultLines.push({ id: Date.now() + 5, type: 'output', content: `[EVIDENCE] Validation evidence: ${msg.validationEvidenceIds.join(', ')}` });
+              }
+              if (msg.validationApprovalId) {
+                resultLines.push({ id: Date.now() + 6, type: 'error', content: `[APPROVAL] Validation blocked until approval ${msg.validationApprovalId}` });
+              }
+              if (msg.retryPatchActionId) {
+                resultLines.push({ id: Date.now() + 7, type: 'supr', content: `[RETRY] Patch retry action: ${msg.retryPatchActionId}` });
+              }
+              if (msg.retryValidationActionId) {
+                resultLines.push({ id: Date.now() + 8, type: 'supr', content: `[RETRY] Validation retry action: ${msg.retryValidationActionId}` });
+              }
 
               if (msg.passed) {
                 resultLines.push({ id: Date.now() + 3, type: 'success', content: `[CODE AGENT] ✓ All assertions passed. File updated in workspace.` });
@@ -367,6 +383,19 @@ export default function CodePage() {
   };
 
   const researchArtifacts = mission?.artifacts?.filter(a => a.filename.startsWith('research_')) || [];
+  const codeRunEvents: RunEvent[] = terminalLines.map((line) => ({
+    id: String(line.id),
+    kind: line.type === 'command' ? 'command' : line.type === 'error' ? 'failure' : line.type === 'supr' ? 'system' : 'tool',
+    title: line.type === 'command' ? 'Workspace command' : line.type === 'supr' ? 'Supervisor note' : 'Execution output',
+    detail: line.content,
+    actor: line.type === 'supr' ? 'Supr' : 'Code Workspace',
+    timestamp: new Date(line.id).toISOString(),
+    status: line.type === 'error' ? 'failed' : line.type === 'output' && !line.content.trim() ? 'warning' : 'succeeded',
+    evidence: line.type === 'success' || line.type === 'error'
+      ? [{ id: `${line.id}-terminal`, label: activeFile || 'workspace', durable: true }]
+      : [],
+    raw: line,
+  }));
 
   return (
     <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden bg-surface-container relative">
@@ -591,8 +620,16 @@ export default function CodePage() {
                className="text-xs font-bold uppercase hover:text-error transition-colors"
              >Clear</button>
           </div>
+
+          <div className="p-3 border-b-4 border-primary bg-surface-container-low">
+            <RunTranscriptView events={codeRunEvents} title="Code execution transcript" />
+          </div>
           
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-black text-green-400 font-mono text-xs leading-loose">
+          <details className="border-b-4 border-primary bg-black text-green-400 font-mono text-xs">
+            <summary className="cursor-pointer bg-surface-container-high text-primary p-3 font-headline font-black uppercase text-[10px] border-b-2 border-primary">
+              Raw terminal
+            </summary>
+            <div className="max-h-56 overflow-y-auto custom-scrollbar p-4 leading-loose">
              {terminalLines.length === 0 && (
                <div className="text-green-800">Secure workspace terminal ready. Write and run python or javascript scripts below.</div>
              )}
@@ -614,7 +651,8 @@ export default function CodePage() {
                  <span className="w-1.5 h-3 bg-green-400 animate-ping"></span>
                </div>
              )}
-          </div>
+            </div>
+          </details>
 
           <div className="border-t-4 border-primary bg-surface-container p-3 shrink-0">
             <h4 className="font-headline font-black uppercase text-xs text-primary mb-2 flex items-center gap-1">

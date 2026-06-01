@@ -38,6 +38,17 @@ function mapRow(row: any): AgentActionRecord {
   };
 }
 
+function hasExecutionEvidence(result: unknown) {
+  if (!result || typeof result !== 'object') return false;
+  const evidence = (result as any).evidence;
+  if (!evidence || typeof evidence !== 'object') return false;
+  const artifactCount = Array.isArray(evidence.artifacts) ? evidence.artifacts.length : 0;
+  const memoryCount = Array.isArray(evidence.memory) ? evidence.memory.length : 0;
+  const eventCount = Array.isArray(evidence.events) ? evidence.events.length : 0;
+  const toolCallCount = Array.isArray(evidence.toolCalls) ? evidence.toolCalls.length : 0;
+  return artifactCount + memoryCount + eventCount + toolCallCount > 0;
+}
+
 export async function recordRuntimeAudit(input: {
   missionId?: string | null;
   actorType: string;
@@ -211,6 +222,9 @@ export async function executeAgentAction<T>(
 
   try {
     const result = await executor(running);
+    if ((running.metadata as any)?.requiresEvidence && !hasExecutionEvidence(result)) {
+      throw new Error('Agent action produced no durable work evidence. Completion rejected.');
+    }
     const serialized = typeof result === 'string' ? result : JSON.stringify(result);
     await updateActionStatus(actionId, 'completed', { result: serialized });
     const completed = await getAgentAction(actionId);

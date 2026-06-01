@@ -202,7 +202,7 @@ export function SetupWizard({ onClose }: SetupWizardProps) {
           {step === 3 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
               <div className="bg-surface-container p-4 border-2 border-primary border-dashed text-xs text-on-surface-variant">
-                <strong>Simulated Telemetry (Default):</strong> If these inputs are left blank, Supr runs a sandbox emulator which outputs detailed trace logging (mock request payloads, status codes) instead of firing live requests.
+                <strong>Live Integrations:</strong> If these inputs are left blank, Supr will keep external actions unavailable or approval-gated instead of pretending the request succeeded. Demo/offline mode labels diagnostic fallbacks explicitly.
               </div>
 
               <div className="space-y-4">
@@ -302,8 +302,8 @@ export function SetupWizard({ onClose }: SetupWizardProps) {
                 <ul className="space-y-1.5 font-mono text-[10px] text-on-surface-variant">
                   <li className="flex justify-between"><span>Core LLM:</span> <span className="font-bold">{geminiKey ? 'Gemini 2.0 (Configured)' : 'Missing (Required)'}</span></li>
                   <li className="flex justify-between"><span>Autonomy Mode:</span> <span className="font-bold uppercase">{operatingMode}</span></li>
-                  <li className="flex justify-between"><span>GitHub PAT:</span> <span className="font-bold uppercase">{githubPat ? 'Active' : 'Simulated'}</span></li>
-                  <li className="flex justify-between"><span>Slack Webhook:</span> <span className="font-bold uppercase">{slackWebhook ? 'Active' : 'Simulated'}</span></li>
+                  <li className="flex justify-between"><span>GitHub PAT:</span> <span className="font-bold uppercase">{githubPat ? 'Active' : 'Unavailable'}</span></li>
+                  <li className="flex justify-between"><span>Slack Webhook:</span> <span className="font-bold uppercase">{slackWebhook ? 'Active' : 'Unavailable'}</span></li>
                 </ul>
               </div>
             </div>

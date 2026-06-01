@@ -10,6 +10,7 @@ const navItems = [
   { href: '/', icon: 'dashboard', label: 'Dashboard' },
   { href: '/supr-chat', icon: 'chat', label: 'Supr-Chat' },
   { href: '/orchestration', icon: 'visibility', label: 'Observability' },
+  { href: '/supervisor', icon: 'admin_panel_settings', label: 'Supervisor' },
   { href: '/agents', icon: 'smart_toy', label: 'Agents' },
   { href: '/reasoning', icon: 'psychology', label: 'Reasoning Core' },
   { href: '/skills', icon: 'construction', label: 'Skills' },

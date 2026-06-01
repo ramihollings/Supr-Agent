@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { EvidenceSourcePanel } from '@/components/EvidenceSourcePanel';
 import { fetchMissionState } from '@/app/actions';
-import { Mission, Artifact } from '@/types';
+import { Mission, Artifact, RunEvent } from '@/types';
 
 type SearchLogEntry = {
   id: number;
@@ -11,6 +12,14 @@ type SearchLogEntry = {
 };
 
 type BrowseState = 'idle' | 'searching' | 'browsing' | 'extracting' | 'done';
+type ResearchSourceCard = {
+  id: string;
+  url: string;
+  domain: string;
+  title: string;
+  snippets: string[];
+  confidence: 'low' | 'medium' | 'high';
+};
 
 export default function ResearchPage() {
   const [browseState, setBrowseState] = useState<BrowseState>('idle');
@@ -18,6 +27,8 @@ export default function ResearchPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchLog, setSearchLog] = useState<SearchLogEntry[]>([]);
   const [extractedData, setExtractedData] = useState<string[]>([]);
+  const [sourceCards, setSourceCards] = useState<ResearchSourceCard[]>([]);
+  const [completionStatus, setCompletionStatus] = useState<'idle' | 'complete' | 'partial'>('idle');
   const [isRunning, setIsRunning] = useState(false);
   const [mission, setMission] = useState<Mission | null>(null);
   
@@ -25,6 +36,41 @@ export default function ResearchPage() {
   const [codeArtifacts, setCodeArtifacts] = useState<Artifact[]>([]);
   const [selectedCodeFile, setSelectedCodeFile] = useState<Artifact | null>(null);
   const [codeTriageStatus, setCodeTriageStatus] = useState<string>('Pending Research Context');
+  const researchEvents: RunEvent[] = searchLog.map((line) => ({
+    id: String(line.id),
+    kind: line.type === 'extract' ? 'artifact' : line.type === 'supr' ? 'system' : 'tool',
+    title: line.type === 'extract' ? 'Extraction result' : line.type === 'navigate' ? 'Browser step' : 'Research event',
+    detail: line.content,
+    actor: line.type === 'supr' ? 'Supr' : 'Research Agent',
+    timestamp: new Date(line.id).toISOString(),
+    status: line.content.includes('[ERROR]') ? 'failed' : line.content.includes('Extracted') ? 'succeeded' : isRunning ? 'running' : 'succeeded',
+    evidence: line.type === 'extract' ? [{ id: `${line.id}-source`, label: 'research-stream', durable: true }] : [],
+  }));
+  const evidenceSources = [
+    ...sourceCards.map((source) => ({
+      id: source.id,
+      title: source.title,
+      detail: `${source.domain} / ${source.snippets.length} snippet(s) captured.`,
+      sourceType: 'web' as const,
+      confidence: source.confidence,
+      href: source.url,
+    })),
+    ...extractedData.map((finding, index) => ({
+      id: `finding-${index}`,
+      title: `Signal #${index + 1}`,
+      detail: finding,
+      sourceType: 'web' as const,
+      confidence: 'medium' as const,
+      href: currentUrl || undefined,
+    })),
+    ...codeArtifacts.map((artifact) => ({
+      id: artifact.id,
+      title: artifact.filename,
+      detail: `${artifact.type} artifact available to the code workspace.`,
+      sourceType: 'artifact' as const,
+      confidence: 'high' as const,
+    })),
+  ];
 
   const fetchState = async () => {
     const activeMission = await fetchMissionState();
@@ -58,6 +104,8 @@ export default function ResearchPage() {
     setIsRunning(true);
     setBrowseState('searching');
     setExtractedData([]);
+    setSourceCards([]);
+    setCompletionStatus('idle');
 
     setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[SUPR] Delegating research task to Research Agent: "${searchQuery}"` }]);
 
@@ -102,12 +150,14 @@ export default function ResearchPage() {
 
             if (msg.type === 'result') {
               setExtractedData(msg.findings || []);
+              setSourceCards(msg.sources || []);
+              setCompletionStatus(msg.completionStatus || (msg.sources?.length ? 'complete' : 'partial'));
               if (msg.url) setCurrentUrl(msg.url);
               setBrowseState('done');
               setSearchLog(prev => [
                 ...prev,
-                { id: Date.now(), type: 'extract', content: `[RESEARCH AGENT] Extracted ${msg.findings?.length || 0} intelligence signals.` },
-                { id: Date.now(), type: 'supr', content: `[SUPR] Brief saved to SQLite: ${msg.filename}. Syncing to Code Workspace.` },
+                { id: Date.now(), type: 'extract', content: `[RESEARCH AGENT] Extracted ${msg.findings?.length || 0} intelligence signals from ${msg.sources?.length || 0} source(s).` },
+                { id: Date.now(), type: 'supr', content: msg.completionStatus === 'complete' ? `[SUPR] Source-backed brief saved to SQLite: ${msg.filename}.` : `[SUPR] Partial brief saved to SQLite: ${msg.filename}. Source evidence required before verified handoff.` },
               ]);
               // Refresh mission state to pick up new artifacts
               await fetchState();
@@ -372,10 +422,23 @@ export default function ResearchPage() {
               {browseState !== 'idle' && browseState !== 'done' && (
                 <p className="text-on-surface-variant leading-relaxed animate-pulse text-secondary font-bold">Research Agent is actively scraping targets. Awaiting data extraction...</p>
               )}
-              {browseState === 'done' && (
-                <p className="text-on-surface-variant leading-relaxed">Research complete. The Coding Agent workspace can now view the specs and automatically generate the defensive fix!</p>
+            {browseState === 'done' && (
+                <p className="text-on-surface-variant leading-relaxed">
+                  {completionStatus === 'complete'
+                    ? 'Research complete with source-backed evidence. The Coding Agent workspace can now use the brief.'
+                    : 'Research finished as partial. Source evidence is missing, so Supr will treat this as unverified context.'}
+                </p>
               )}
             </div>
+          </div>
+
+          <div className="border-t-4 border-primary p-3 bg-surface-container-low">
+            <EvidenceSourcePanel
+              sources={evidenceSources}
+              events={researchEvents}
+              title="Research Evidence"
+              emptyMessage="Run a research query to collect sources, signals, and durable artifacts."
+            />
           </div>
         </aside>
       </div>

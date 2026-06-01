@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ToolDefinition, toolRegistry } from './registry';
+import { getRuntimeMode, isMockAllowed } from '../runtime/runtime-mode';
 // @ts-ignore - The types might be missing or incomplete depending on version
 import { Composio } from 'composio-core';
 
@@ -30,9 +31,13 @@ export async function registerComposioTool(actionName: string, riskLevel: 'Low' 
     riskLevel: riskLevel,
     execute: async (params) => {
       if (!composioClient) {
+        const mode = await getRuntimeMode();
+        if (!isMockAllowed(mode)) {
+          throw new Error(`Composio action '${actionName}' requires COMPOSIO_API_KEY in real runtime mode.`);
+        }
         // Diagnostic Mock Execution
         console.log(`[Composio Mock] Executing ${actionName} with params:`, params);
-        return `[MOCK COMPOSIO SUCCESS] Executed action: ${actionName}`;
+        return `[${mode.toUpperCase()} COMPOSIO RESULT] Executed diagnostic action: ${actionName}`;
       }
 
       // Real Execution

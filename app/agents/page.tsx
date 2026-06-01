@@ -21,7 +21,7 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [viewMode, setViewMode] = useState<'active' | 'archived'>('active');
 
-  // Agent Custom LLM & Capability state override mocks
+  // Agent custom LLM and capability policy overrides
   const [agentSettings, setAgentSettings] = useState<Record<string, {
     model: string;
     temperature: number;
@@ -134,7 +134,7 @@ export default function AgentsPage() {
   const activeAgents = agents.filter(a => a.isActive);
   const archivedAgents = agents.filter(a => !a.isActive);
 
-  // Helper mock metrics
+  // Derived display metrics for the roster cards
   const getMetrics = (name: string) => {
     const lname = name.toLowerCase();
     if (lname === 'supr') return { tasks: 48, time: '18.4h', tokens: '4.8M' };

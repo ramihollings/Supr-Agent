@@ -2,17 +2,21 @@
 
 import { TopNav } from '@/components/TopNav';
 import { useState, useEffect, useRef } from 'react';
-import { 
-  fetchSettingsAction, 
-  updateSettingAction, 
-  fetchMemoryItemsAction, 
-  purgeMemoryItemsAction, 
+import {
+  fetchSettingsAction,
+  updateSettingAction,
+  fetchMemoryItemsAction,
+  purgeMemoryItemsAction,
   addGlobalMemoryItemAction,
   updateMemoryReviewAction,
   fetchDesignProfilesAction,
   applyDesignProfileAction,
   fetchConnectorHealthAction,
-  testConnectorAction
+  testConnectorAction,
+  exportOrganizationAction,
+  importOrganizationAction,
+  fetchMissionsAction,
+  fetchAgentsState
 } from '@/app/actions';
 
 interface MemoryItem {
@@ -110,6 +114,16 @@ export default function SettingsPage() {
   const memoryRef = useRef<HTMLDivElement>(null);
   const standardsRef = useRef<HTMLDivElement>(null);
   const channelsRef = useRef<HTMLDivElement>(null);
+  const portabilityRef = useRef<HTMLDivElement>(null);
+
+  // Portability States
+  const [importBundle, setImportBundle] = useState<any>(null);
+  const [importStatus, setImportStatus] = useState<'idle' | 'reading' | 'ready' | 'importing'>('idle');
+  const [collisions, setCollisions] = useState<{ table: string; count: number; examples: string[] }[]>([]);
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  const [importSummary, setImportSummary] = useState<any>(null);
+  const [existingMissions, setExistingMissions] = useState<any[]>([]);
+  const [existingAgents, setExistingAgents] = useState<any[]>([]);
 
   // Theme & Appearance States
   const [currentTheme, setCurrentTheme] = useState('neobrutalist');
@@ -127,9 +141,11 @@ export default function SettingsPage() {
   // Load settings and memories from SQLite
   useEffect(() => {
     async function loadData() {
-      const [settings, memories] = await Promise.all([
+      const [settings, memories, missions, agents] = await Promise.all([
         fetchSettingsAction(),
-        fetchMemoryItemsAction()
+        fetchMemoryItemsAction(),
+        fetchMissionsAction(),
+        fetchAgentsState()
       ]);
       const [profiles, health] = await Promise.all([
         fetchDesignProfilesAction(),
@@ -137,6 +153,8 @@ export default function SettingsPage() {
       ]);
       setDesignProfiles(profiles);
       setConnectorHealth(health);
+      setExistingMissions(missions || []);
+      setExistingAgents(agents || []);
 
       if (settings.appearance_theme) {
         setCurrentTheme(settings.appearance_theme);
@@ -187,7 +205,7 @@ export default function SettingsPage() {
       if (settings.llm_key_sub) setSubKey(settings.llm_key_sub);
       if (settings.llm_model_sub) setSubModel(settings.llm_model_sub);
       if (settings.llm_url_sub) setSubUrl(settings.llm_url_sub);
-      
+
       setEmailEnabled(settings.channels_email === 'true');
       setSlackEnabled(settings.channels_slack === 'true');
       setTelegramEnabled(settings.channels_telegram === 'true');
@@ -316,6 +334,126 @@ export default function SettingsPage() {
     setConnectorHealth(await fetchConnectorHealthAction());
   };
 
+  const handleExportDatabase = async () => {
+    showToast("Exporting database...");
+    const res = await exportOrganizationAction();
+    if (res.success && res.data) {
+      const blob = new Blob([res.data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `supr_scrubbed_backup_${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Scrubbed organization backup downloaded successfully ✓");
+    } else {
+      showToast(res.error || "Failed to export organization backup.");
+    }
+  };
+
+  const handleImportFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportStatus('reading');
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const bundle = JSON.parse(text);
+
+        if (!bundle || bundle.version !== '1.0.0' || !bundle.data) {
+          showToast("Unsupported backup format. Version must be 1.0.0.");
+          setImportStatus('idle');
+          return;
+        }
+
+        const foundCollisions: typeof collisions = [];
+
+        // 1. Check settings collisions
+        if (Array.isArray(bundle.data.settings)) {
+          const matchingSettings = bundle.data.settings.filter((s: any) => s.value !== '[SCRUBBED]');
+          if (matchingSettings.length > 0) {
+            foundCollisions.push({
+              table: 'Settings',
+              count: matchingSettings.length,
+              examples: matchingSettings.slice(0, 3).map((s: any) => s.key),
+            });
+          }
+        }
+
+        // 2. Check missions collisions
+        if (Array.isArray(bundle.data.missions)) {
+          const existingIds = new Set(existingMissions.map((m: any) => m.id));
+          const matchingMissions = bundle.data.missions.filter((m: any) => existingIds.has(m.id));
+          if (matchingMissions.length > 0) {
+            foundCollisions.push({
+              table: 'Missions',
+              count: matchingMissions.length,
+              examples: matchingMissions.slice(0, 3).map((m: any) => m.title),
+            });
+          }
+        }
+
+        // 3. Check agents collisions
+        if (Array.isArray(bundle.data.agents)) {
+          const existingIds = new Set(existingAgents.map((a: any) => a.id));
+          const matchingAgents = bundle.data.agents.filter((a: any) => existingIds.has(a.id));
+          if (matchingAgents.length > 0) {
+            foundCollisions.push({
+              table: 'Agents',
+              count: matchingAgents.length,
+              examples: matchingAgents.slice(0, 3).map((a: any) => a.name),
+            });
+          }
+        }
+
+        setCollisions(foundCollisions);
+        setImportBundle(bundle);
+        setImportStatus('ready');
+      } catch (err) {
+        showToast("Invalid JSON file uploaded.");
+        setImportStatus('idle');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExecuteImport = async () => {
+    if (!importBundle) return;
+    setImportStatus('importing');
+    try {
+      const res = await importOrganizationAction(JSON.stringify(importBundle), { allowOverwrite: confirmOverwrite });
+      if (res.success && res.imported) {
+        setImportSummary(res.imported);
+        showToast("Database backup successfully restored ✓");
+        setImportStatus('idle');
+        setImportBundle(null);
+        setCollisions([]);
+        setConfirmOverwrite(false);
+        // Reload settings, memories, missions, and agents
+        const [settings, memories, missions, agents] = await Promise.all([
+          fetchSettingsAction(),
+          fetchMemoryItemsAction(),
+          fetchMissionsAction(),
+          fetchAgentsState()
+        ]);
+        setMemoryItems(memories);
+        setExistingMissions(missions || []);
+        setExistingAgents(agents || []);
+      } else {
+        if (res.collisions) setCollisions(res.collisions);
+        showToast(res.error || "Restoration failed.");
+        setImportStatus('ready');
+      }
+    } catch (err: any) {
+      showToast(err.message || "Restoration failed.");
+      setImportStatus('ready');
+    }
+  };
+
   const visibleMemoryItems = memoryItems
     .filter(item => item.scope === activeMemoryBank)
     .filter(item => !showPinnedOnly || item.pinned)
@@ -332,7 +470,7 @@ export default function SettingsPage() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Settings" />
-      
+
       {toastMessage && (
         <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
           {toastMessage}
@@ -349,7 +487,7 @@ export default function SettingsPage() {
                 <span className="material-symbols-outlined">database</span>
                 Memory Inspector: {activeMemoryBank} Bank
               </h3>
-              <button 
+              <button
                 onClick={() => setShowMemoryModal(false)}
                 className="w-8 h-8 neo-border bg-background flex items-center justify-center hover:bg-secondary hover:text-on-error transition-colors"
               >
@@ -365,8 +503,8 @@ export default function SettingsPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Key / Domain</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={newKey}
                       onChange={(e) => setNewKey(e.target.value)}
                       className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary"
@@ -389,7 +527,7 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Value / Fact Content</label>
-                  <textarea 
+                  <textarea
                     value={newValue}
                     onChange={(e) => setNewValue(e.target.value)}
                     className="w-full bg-background neo-border p-2 text-xs h-16 focus:outline-none focus:border-tertiary font-mono"
@@ -398,7 +536,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div className="flex justify-end">
-                  <button 
+                  <button
                     type="submit"
                     className="bg-primary text-on-primary neo-border px-4 py-2 font-headline font-bold uppercase text-xs hover:bg-tertiary hover:text-on-tertiary transition-colors"
                   >
@@ -411,7 +549,7 @@ export default function SettingsPage() {
               <div className="space-y-3">
                 <h4 className="font-headline font-bold uppercase text-xs text-primary flex justify-between items-center">
                   <span>Learned Fact Contexts</span>
-                  <button 
+                  <button
                     onClick={() => handlePurgeBank(activeMemoryBank)}
                     className="text-error hover:underline text-[10px] uppercase font-bold"
                   >
@@ -477,7 +615,7 @@ export default function SettingsPage() {
 
             {/* Modal Footer */}
             <div className="p-4 border-t-4 border-primary bg-surface-container-high flex justify-end">
-              <button 
+              <button
                 onClick={() => setShowMemoryModal(false)}
                 className="bg-primary text-on-primary neo-border px-6 py-2 font-headline font-bold uppercase text-xs"
               >
@@ -502,13 +640,14 @@ export default function SettingsPage() {
               { name: 'Memory', ref: memoryRef },
               { name: 'Standards', ref: standardsRef },
               { name: 'Channels & Socials', ref: channelsRef },
+              { name: 'Portability', ref: portabilityRef },
             ].map((item) => (
-              <button 
+              <button
                 key={item.name}
                 onClick={() => scrollToSection(item.name, item.ref)}
                 className={`font-body font-bold uppercase text-sm p-4 neo-border flex justify-between items-center group transition-all ${
-                  activeSection === item.name 
-                    ? 'bg-primary text-on-primary neo-shadow translate-x-[2px] translate-y-[2px]' 
+                  activeSection === item.name
+                    ? 'bg-primary text-on-primary neo-shadow translate-x-[2px] translate-y-[2px]'
                     : 'bg-surface text-primary hover:bg-surface-container'
                 }`}
               >
@@ -521,13 +660,13 @@ export default function SettingsPage() {
 
         {/* Settings Content Area */}
         <section className="flex-1 flex flex-col gap-12 pb-20">
-          
+
           <div ref={modeRef} className="flex flex-col gap-6">
             <div className="border-b-4 border-primary pb-4 mb-4">
               <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Operating Mode</h2>
               <p className="font-body text-on-surface-variant mt-2">Configure the autonomy level of the system.</p>
             </div>
-            
+
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {[
                 { id: 'guided', name: 'Guided', risk: 'Low', desc: 'System proposes actions, requires explicit user approval for every step.' },
@@ -535,11 +674,11 @@ export default function SettingsPage() {
                 { id: 'autonomous', name: 'Autonomous', risk: 'High', desc: 'System operates independently across most tasks. Requires minimal oversight.' },
                 { id: 'fully_autonomous', name: 'Fully Autonomous', risk: 'Extreme', desc: 'Unbounded execution. Self-directed goal generation. Use with caution.', danger: true },
               ].map((mode) => (
-                <div 
+                <div
                   key={mode.id}
                   onClick={() => handleModeChange(mode.id)}
                   className={`border-4 border-primary p-6 flex flex-col gap-4 relative overflow-hidden group hover:neo-shadow-lg transition-all cursor-pointer ${
-                    operatingMode === mode.id 
+                    operatingMode === mode.id
                       ? mode.danger ? 'bg-secondary text-on-error neo-shadow-lg translate-x-[-2px] translate-y-[-2px]' : 'bg-primary-container text-on-primary-container neo-shadow-lg translate-x-[-2px] translate-y-[-2px]'
                       : 'bg-surface'
                   }`}
@@ -549,14 +688,14 @@ export default function SettingsPage() {
                       {mode.name} {operatingMode === mode.id && <span className="material-symbols-outlined">check_circle</span>}
                     </h3>
                     <span className={`text-xs font-bold uppercase px-2 py-1 border-2 border-primary ${
-                      mode.risk === 'Extreme' ? 'bg-secondary text-on-error' : 
-                      mode.risk === 'High' ? 'bg-tertiary text-on-tertiary' : 
+                      mode.risk === 'Extreme' ? 'bg-secondary text-on-error' :
+                      mode.risk === 'High' ? 'bg-tertiary text-on-tertiary' :
                       'bg-surface-container-high'
                     }`}>Risk: {mode.risk}</span>
                   </div>
                   <p className="font-body text-sm flex-1">{mode.desc}</p>
                   <div className="mt-4 flex items-center gap-2 font-bold text-sm uppercase">
-                    <span className="material-symbols-outlined">{operatingMode === mode.id ? 'radio_button_checked' : 'radio_button_unchecked'}</span> 
+                    <span className="material-symbols-outlined">{operatingMode === mode.id ? 'radio_button_checked' : 'radio_button_unchecked'}</span>
                     {operatingMode === mode.id ? 'Active Default' : 'Select Mode'}
                   </div>
                 </div>
@@ -572,7 +711,7 @@ export default function SettingsPage() {
               <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Permissions Hierarchy</h2>
               <p className="font-body text-on-surface-variant mt-2">Adjust clearance limits and agent boundaries.</p>
             </div>
-            
+
             <div className="flex flex-col neo-border bg-surface-container-low">
               {[
                 { id: 'observe', level: 1, name: 'Observe', desc: 'Read-only access to logs and state.' },
@@ -581,7 +720,7 @@ export default function SettingsPage() {
                 { id: 'root', level: 4, name: 'Root', desc: 'Unrestricted clearance. Destructive capability across hosts.', danger: true },
               ].map((p) => (
                 <div key={p.id} className={`flex items-center p-4 border-b-4 border-primary ${
-                  permissionBoundary === p.id 
+                  permissionBoundary === p.id
                     ? p.danger ? 'bg-secondary text-on-error' : 'bg-primary-container text-on-primary-container'
                     : 'bg-surface'
                 }`}>
@@ -593,15 +732,15 @@ export default function SettingsPage() {
                     </h4>
                     <p className="text-sm font-body">{p.desc}</p>
                   </div>
-                  <button 
+                  <button
                     onClick={async () => {
                       setPermissionBoundary(p.id);
                       await updateSettingAction('permission_boundary', p.id);
                       showToast(`Enforced ${p.name} security tier ✓`);
                     }}
                     className={`px-4 py-2 neo-border font-bold text-sm uppercase transition-colors ${
-                      permissionBoundary === p.id 
-                        ? 'bg-primary text-on-primary' 
+                      permissionBoundary === p.id
+                        ? 'bg-primary text-on-primary'
                         : 'bg-background hover:bg-surface-container'
                     }`}
                   >
@@ -629,19 +768,19 @@ export default function SettingsPage() {
               <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2 mb-2">
                 <span className="material-symbols-outlined text-primary">key</span> Global Providers & Fallbacks
               </h3>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">MiniMax M2.7 API Key</label>
                   <div className="flex gap-2">
-                    <input 
-                      type="password" 
+                    <input
+                      type="password"
                       value={globalMinimaxKey}
                       onChange={(e) => setGlobalMinimaxKey(e.target.value)}
                       className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
                       placeholder="sk-..."
                     />
-                    <button 
+                    <button
                       onClick={() => handleUpdateSetting('global_minimax_key', globalMinimaxKey, 'Global MiniMax key saved ✓')}
                       className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
                     >Save</button>
@@ -652,14 +791,14 @@ export default function SettingsPage() {
                 <div>
                   <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Gemini API Key</label>
                   <div className="flex gap-2">
-                    <input 
-                      type="password" 
+                    <input
+                      type="password"
                       value={globalGeminiKey}
                       onChange={(e) => setGlobalGeminiKey(e.target.value)}
                       className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
                       placeholder="AIzaSy..."
                     />
-                    <button 
+                    <button
                       onClick={() => handleUpdateSetting('global_gemini_key', globalGeminiKey, 'Global Gemini key saved ✓')}
                       className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
                     >Save</button>
@@ -674,8 +813,8 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup Name</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={globalBackupName}
                     onChange={(e) => setGlobalBackupName(e.target.value)}
                     className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-bold"
@@ -684,8 +823,8 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup Model Name</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={globalBackupModel}
                     onChange={(e) => setGlobalBackupModel(e.target.value)}
                     className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
@@ -694,8 +833,8 @@ export default function SettingsPage() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup API Base URL</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={globalBackupUrl}
                     onChange={(e) => setGlobalBackupUrl(e.target.value)}
                     className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
@@ -705,14 +844,14 @@ export default function SettingsPage() {
                 <div className="md:col-span-2">
                   <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup API Key</label>
                   <div className="flex gap-2">
-                    <input 
-                      type="password" 
+                    <input
+                      type="password"
                       value={globalBackupKey}
                       onChange={(e) => setGlobalBackupKey(e.target.value)}
                       className="flex-1 bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
                       placeholder="sk-..."
                     />
-                    <button 
+                    <button
                       onClick={async () => {
                         await Promise.all([
                           updateSettingAction('global_backup_name', globalBackupName),
@@ -734,14 +873,14 @@ export default function SettingsPage() {
               <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
                 <span className="material-symbols-outlined text-primary">diversity_3</span> Agent Customization Override
               </h3>
-              
+
               <p className="font-body text-xs text-on-surface-variant leading-relaxed">
-                By default, all agents inherit the global priority flow (MiniMax → Gemini → Backup). 
+                By default, all agents inherit the global priority flow (MiniMax → Gemini → Backup).
                 Override specific agents below to run them on separate providers or custom models on the fly!
               </p>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                
+
                 {/* Supr Override */}
                 <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
                   <div className="flex justify-between items-center border-b border-primary pb-2">
@@ -752,8 +891,8 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
-                    <select 
-                      value={suprProvider} 
+                    <select
+                      value={suprProvider}
                       onChange={(e) => setSuprProvider(e.target.value)}
                       className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
                     >
@@ -765,23 +904,23 @@ export default function SettingsPage() {
                   </div>
                   {suprProvider !== 'default' && (
                     <div className="space-y-2 animate-fadeIn text-[10px]">
-                      <input 
-                        type="password" 
+                      <input
+                        type="password"
                         value={suprKey}
                         onChange={(e) => setSuprKey(e.target.value)}
                         placeholder="Custom API Key (leave blank to inherit global)"
                         className="w-full bg-surface neo-border p-1 text-xs font-mono"
                       />
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={suprModel}
                         onChange={(e) => setSuprModel(e.target.value)}
                         placeholder="Custom Model Name Override"
                         className="w-full bg-surface neo-border p-1 text-xs"
                       />
                       {suprProvider === 'openai_compat' && (
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           value={suprUrl}
                           onChange={(e) => setSuprUrl(e.target.value)}
                           placeholder="Custom Endpoint URL Override"
@@ -790,7 +929,7 @@ export default function SettingsPage() {
                       )}
                     </div>
                   )}
-                  <button 
+                  <button
                     onClick={async () => {
                       await Promise.all([
                         updateSettingAction('llm_provider_supr', suprProvider),
@@ -814,8 +953,8 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
-                    <select 
-                      value={codeProvider} 
+                    <select
+                      value={codeProvider}
                       onChange={(e) => setCodeProvider(e.target.value)}
                       className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
                     >
@@ -827,23 +966,23 @@ export default function SettingsPage() {
                   </div>
                   {codeProvider !== 'default' && (
                     <div className="space-y-2 animate-fadeIn text-[10px]">
-                      <input 
-                        type="password" 
+                      <input
+                        type="password"
                         value={codeKey}
                         onChange={(e) => setCodeKey(e.target.value)}
                         placeholder="Custom API Key (leave blank to inherit global)"
                         className="w-full bg-surface neo-border p-1 text-xs font-mono"
                       />
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={codeModel}
                         onChange={(e) => setCodeModel(e.target.value)}
                         placeholder="Custom Model Name Override"
                         className="w-full bg-surface neo-border p-1 text-xs"
                       />
                       {codeProvider === 'openai_compat' && (
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           value={codeUrl}
                           onChange={(e) => setCodeUrl(e.target.value)}
                           placeholder="Custom Endpoint URL Override"
@@ -852,7 +991,7 @@ export default function SettingsPage() {
                       )}
                     </div>
                   )}
-                  <button 
+                  <button
                     onClick={async () => {
                       await Promise.all([
                         updateSettingAction('llm_provider_code', codeProvider),
@@ -876,8 +1015,8 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
-                    <select 
-                      value={researchProvider} 
+                    <select
+                      value={researchProvider}
                       onChange={(e) => setResearchProvider(e.target.value)}
                       className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
                     >
@@ -889,23 +1028,23 @@ export default function SettingsPage() {
                   </div>
                   {researchProvider !== 'default' && (
                     <div className="space-y-2 animate-fadeIn text-[10px]">
-                      <input 
-                        type="password" 
+                      <input
+                        type="password"
                         value={researchKey}
                         onChange={(e) => setResearchKey(e.target.value)}
                         placeholder="Custom API Key (leave blank to inherit global)"
                         className="w-full bg-surface neo-border p-1 text-xs font-mono"
                       />
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={researchModel}
                         onChange={(e) => setResearchModel(e.target.value)}
                         placeholder="Custom Model Name Override"
                         className="w-full bg-surface neo-border p-1 text-xs"
                       />
                       {researchProvider === 'openai_compat' && (
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           value={researchUrl}
                           onChange={(e) => setResearchUrl(e.target.value)}
                           placeholder="Custom Endpoint URL Override"
@@ -914,7 +1053,7 @@ export default function SettingsPage() {
                       )}
                     </div>
                   )}
-                  <button 
+                  <button
                     onClick={async () => {
                       await Promise.all([
                         updateSettingAction('llm_provider_research', researchProvider),
@@ -938,8 +1077,8 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
-                    <select 
-                      value={subProvider} 
+                    <select
+                      value={subProvider}
                       onChange={(e) => setSubProvider(e.target.value)}
                       className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
                     >
@@ -951,23 +1090,23 @@ export default function SettingsPage() {
                   </div>
                   {subProvider !== 'default' && (
                     <div className="space-y-2 animate-fadeIn text-[10px]">
-                      <input 
-                        type="password" 
+                      <input
+                        type="password"
                         value={subKey}
                         onChange={(e) => setSubKey(e.target.value)}
                         placeholder="Custom API Key (leave blank to inherit global)"
                         className="w-full bg-surface neo-border p-1 text-xs font-mono"
                       />
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={subModel}
                         onChange={(e) => setSubModel(e.target.value)}
                         placeholder="Custom Model Name Override"
                         className="w-full bg-surface neo-border p-1 text-xs"
                       />
                       {subProvider === 'openai_compat' && (
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           value={subUrl}
                           onChange={(e) => setSubUrl(e.target.value)}
                           placeholder="Custom Endpoint URL Override"
@@ -976,7 +1115,7 @@ export default function SettingsPage() {
                       )}
                     </div>
                   )}
-                  <button 
+                  <button
                     onClick={async () => {
                       await Promise.all([
                         updateSettingAction('llm_provider_sub', subProvider),
@@ -1058,7 +1197,7 @@ export default function SettingsPage() {
                   { id: 'cyberpunk', name: 'Neon Cyberpunk', desc: 'Deep purple canvas with hot pink highlights and heavy glowing neon bevels.', icon: 'palette' },
                   { id: 'minimalist', name: 'Minimalist Clean', desc: 'Sleek professional white space design with extremely soft card borders.', icon: 'space_dashboard' },
                 ].map(theme => (
-                  <div 
+                  <div
                     key={theme.id}
                     onClick={() => handleThemeChange(theme.id)}
                     className={`p-4 border-2 border-primary bg-background cursor-pointer hover:bg-surface-container transition-all flex flex-col justify-between min-h-[140px] shadow-[2px_2px_0px_0px_var(--color-primary)] ${
@@ -1155,13 +1294,13 @@ export default function SettingsPage() {
             </div>
 
             <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-6">
-              
+
               {/* Composio */}
               <div>
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Composio API Connection Key</label>
                 <div className="flex gap-2">
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     value={integrationComposio}
                     onChange={(e) => {
                       setIntegrationComposio(e.target.value);
@@ -1170,7 +1309,7 @@ export default function SettingsPage() {
                     className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
                     placeholder="••••••••••••••••••••"
                   />
-                  <button 
+                  <button
                     onClick={() => handleUpdateSetting('integrations_composio', integrationComposio, 'Composio key updated ✓')}
                     className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
                   >Save</button>
@@ -1182,8 +1321,8 @@ export default function SettingsPage() {
               <div>
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">GitHub Personal Access Token (PAT)</label>
                 <div className="flex gap-2">
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     value={integrationGithub}
                     onChange={(e) => {
                       setIntegrationGithub(e.target.value);
@@ -1192,7 +1331,7 @@ export default function SettingsPage() {
                     className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
                     placeholder="ghp_••••••••••••••••••••"
                   />
-                  <button 
+                  <button
                     onClick={() => handleUpdateSetting('integrations_github', integrationGithub, 'GitHub token updated ✓')}
                     className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
                   >Save</button>
@@ -1204,8 +1343,8 @@ export default function SettingsPage() {
               <div>
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Slack Webhook URL</label>
                 <div className="flex gap-2">
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     value={integrationSlack}
                     onChange={(e) => {
                       setIntegrationSlack(e.target.value);
@@ -1214,7 +1353,7 @@ export default function SettingsPage() {
                     className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
                     placeholder="https://hooks.slack.com/services/••••••••"
                   />
-                  <button 
+                  <button
                     onClick={() => handleUpdateSetting('integrations_slack', integrationSlack, 'Slack webhook updated ✓')}
                     className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
                   >Save</button>
@@ -1226,8 +1365,8 @@ export default function SettingsPage() {
               <div>
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Gmail App Password / Access Code</label>
                 <div className="flex gap-2">
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     value={integrationGmail}
                     onChange={(e) => {
                       setIntegrationGmail(e.target.value);
@@ -1236,7 +1375,7 @@ export default function SettingsPage() {
                     className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
                     placeholder="•••• •••• •••• ••••"
                   />
-                  <button 
+                  <button
                     onClick={() => handleUpdateSetting('integrations_gmail', integrationGmail, 'Gmail credential updated ✓')}
                     className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
                   >Save</button>
@@ -1257,7 +1396,7 @@ export default function SettingsPage() {
                 <p className="font-body text-on-surface-variant mt-2">Manage learned context across different retention layers.</p>
               </div>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
                 { name: 'User', icon: 'person', type: 'Persistent', bg: 'bg-primary-container', border: 'border-l-secondary' },
@@ -1281,7 +1420,7 @@ export default function SettingsPage() {
                       </div>
                     </div>
                     <div className="grid grid-cols-2 border-t-4 border-primary">
-                      <button 
+                      <button
                         onClick={() => {
                           setActiveMemoryBank(m.name);
                           setShowMemoryModal(true);
@@ -1290,7 +1429,7 @@ export default function SettingsPage() {
                       >
                          <span className="material-symbols-outlined text-sm">visibility</span> View Items
                       </button>
-                      <button 
+                      <button
                         onClick={() => handlePurgeBank(m.name)}
                         className="p-3 font-bold uppercase text-[10px] text-error hover:bg-error hover:text-on-error transition-colors flex justify-center items-center gap-1"
                       >
@@ -1311,7 +1450,7 @@ export default function SettingsPage() {
               <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Operational Standards</h2>
               <p className="font-body text-on-surface-variant mt-2">Fine-tune verification rules applied to all active deployments.</p>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
                 { id: 'cite_evidence', name: 'Evidence Required', desc: 'Agents must cite sources before execution.' },
@@ -1319,13 +1458,13 @@ export default function SettingsPage() {
                 { id: 'scope_approval', name: 'Scope Approval', desc: 'Require human sign-off if mission parameters shift.' },
               ].map((s) => (
                 <label key={s.id} className="flex items-start gap-4 p-4 border-4 border-primary bg-surface cursor-pointer group hover:bg-surface-container transition-colors">
-                  <input 
-                    type="checkbox" 
-                    defaultChecked 
+                  <input
+                    type="checkbox"
+                    defaultChecked
                     onChange={(e) => {
                       handleUpdateSetting(`standard_${s.id}`, e.target.checked ? 'true' : 'false', `${s.name} rule updated ✓`);
                     }}
-                    className="w-6 h-6 border-2 border-primary rounded-none text-primary focus:ring-primary focus:ring-offset-0 mt-1" 
+                    className="w-6 h-6 border-2 border-primary rounded-none text-primary focus:ring-primary focus:ring-offset-0 mt-1"
                   />
                   <div>
                     <span className="block font-bold uppercase text-sm mb-1 group-hover:text-tertiary transition-colors">{s.name}</span>
@@ -1352,7 +1491,7 @@ export default function SettingsPage() {
                   <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">telegram</span> Telegram Chatbot Connection
                   </h3>
-                  <button 
+                  <button
                     onClick={() => handleToggleChannel('telegram', telegramEnabled, 'Telegram Channel')}
                     className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary transition-all ${
                       telegramEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
@@ -1361,12 +1500,12 @@ export default function SettingsPage() {
                     {telegramEnabled ? 'Connected ✓' : 'Disconnected'}
                   </button>
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
                   <div>
                     <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Bot Token</label>
-                    <input 
-                      type="password" 
+                    <input
+                      type="password"
                       value={telegramToken}
                       onChange={(e) => {
                         setTelegramToken(e.target.value);
@@ -1378,8 +1517,8 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Chat ID / Group Channel</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={telegramChatId}
                       onChange={(e) => {
                         setTelegramChatId(e.target.value);
@@ -1402,7 +1541,7 @@ export default function SettingsPage() {
                   <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">share</span> Twitter / X Broadcast Connection
                   </h3>
-                  <button 
+                  <button
                     onClick={() => handleToggleChannel('social', socialEnabled, 'X/Twitter Broadcast')}
                     className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary transition-all ${
                       socialEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
@@ -1411,11 +1550,11 @@ export default function SettingsPage() {
                     {socialEnabled ? 'Connected ✓' : 'Disconnected'}
                   </button>
                 </div>
-                
+
                 <div>
                   <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Linked X Account Handle</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={twitterHandle}
                     onChange={(e) => {
                       setTwitterHandle(e.target.value);
@@ -1437,7 +1576,7 @@ export default function SettingsPage() {
                   <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">mail</span> Email Alerts Hook
                   </h3>
-                  <button 
+                  <button
                     onClick={() => handleToggleChannel('email', emailEnabled, 'Email Notifications')}
                     className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary transition-all ${
                       emailEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
@@ -1455,7 +1594,7 @@ export default function SettingsPage() {
                   <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">chat_bubble</span> Slack Webhook hook
                   </h3>
-                  <button 
+                  <button
                     onClick={() => handleToggleChannel('slack', slackEnabled, 'Slack webhook channel')}
                     className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary transition-all ${
                       slackEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
@@ -1467,6 +1606,180 @@ export default function SettingsPage() {
                 <p className="font-body text-xs text-on-surface-variant">Triggers notification pings to designated Slack channels when agent sandbox tasks fail or when manual overrides are intercepted.</p>
               </div>
 
+            </div>
+          </div>
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
+          {/* Portability Section */}
+          <div ref={portabilityRef} className="flex flex-col gap-6">
+            <div className="border-b-4 border-primary pb-4 mb-4">
+              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Organization Portability</h2>
+              <p className="font-body text-on-surface-variant mt-2">Export a scrubbed JSON bundle of your entire organization (projects, agents, memories) or restore database state from a backup.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Export Panel */}
+              <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
+                <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2 mb-2">
+                  <span className="material-symbols-outlined text-primary">download</span> Export Organization Data
+                </h3>
+                <p className="font-body text-xs text-on-surface-variant leading-relaxed">
+                  Generate a complete serialized JSON bundle of your workspace database. Sensitive settings like API keys, passwords, and tokens will be automatically scrubbed with [SCRUBBED] to protect credentials.
+                </p>
+                <button
+                  onClick={handleExportDatabase}
+                  className="mt-auto bg-primary text-on-primary font-bold uppercase text-xs p-4 neo-border hover:bg-tertiary hover:text-on-tertiary hover:neo-shadow transition-all flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-sm">download</span>
+                  Generate & Download Backup
+                </button>
+              </div>
+
+              {/* Import Panel */}
+              <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
+                <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2 mb-2">
+                  <span className="material-symbols-outlined text-primary">upload</span> Import / Restore Backup
+                </h3>
+                <p className="font-body text-xs text-on-surface-variant leading-relaxed mb-2">
+                  Restore organization state from a previously exported database JSON bundle. This will overlay imported records onto your existing SQLite database.
+                </p>
+
+                {importStatus === 'idle' && (
+                  <div className="relative border-2 border-dashed border-primary bg-background p-4 flex flex-col items-center justify-center min-h-[100px] cursor-pointer hover:bg-surface-container transition-colors">
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleImportFileSelect}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                    <span className="material-symbols-outlined text-3xl text-primary mb-2">cloud_upload</span>
+                    <span className="font-headline font-bold text-xs uppercase text-primary">Choose JSON Backup File</span>
+                  </div>
+                )}
+
+                {importStatus === 'reading' && (
+                  <div className="border-2 border-primary bg-background p-4 flex items-center justify-center min-h-[100px] gap-2">
+                    <span className="material-symbols-outlined animate-spin text-primary">sync</span>
+                    <span className="font-headline font-bold text-xs uppercase text-primary">Parsing file structure...</span>
+                  </div>
+                )}
+
+                {importStatus === 'ready' && importBundle && (
+                  <div className="space-y-4">
+                    {/* Manifest Preview */}
+                    <div className="bg-background border-2 border-primary p-3 space-y-2 text-xs">
+                      <div className="flex justify-between items-center border-b border-primary/20 pb-1">
+                        <span className="font-headline font-bold uppercase text-primary">Bundle Version</span>
+                        <span className="font-mono">{importBundle.version}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b border-primary/20 pb-1">
+                        <span className="font-headline font-bold uppercase text-primary">Timestamp</span>
+                        <span className="font-mono text-[10px]">{new Date(importBundle.timestamp).toLocaleString()}</span>
+                      </div>
+                      <div className="pt-1">
+                        <span className="font-headline font-bold uppercase text-xs text-primary block mb-1">Entity Breakdown</span>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px]">
+                          <div>Missions: {importBundle.data?.missions?.length || 0}</div>
+                          <div>Glidepaths: {importBundle.data?.glidepaths?.length || 0}</div>
+                          <div>Agents: {importBundle.data?.agents?.length || 0}</div>
+                          <div>Tasks: {importBundle.data?.tasks?.length || 0}</div>
+                          <div>Approvals: {importBundle.data?.approvals?.length || 0}</div>
+                          <div>Memories: {importBundle.data?.memoryItems?.length || 0}</div>
+                          <div>Settings: {importBundle.data?.settings?.length || 0}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Collision Alert Panel */}
+                    {collisions.length > 0 && (
+                      <div className="bg-secondary/15 border-4 border-secondary p-4 flex flex-col gap-2">
+                        <h4 className="font-headline font-bold uppercase text-xs text-secondary flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-sm">warning</span> Collision Overwrite Danger
+                        </h4>
+                        <p className="text-[10px] leading-relaxed text-on-surface-variant font-body">
+                          This backup contains entities with IDs matching items in your current workspace. Proceeding will overwrite existing configurations:
+                        </p>
+                        <div className="space-y-1 font-mono text-[9px] text-on-surface-variant bg-background p-2 border border-secondary">
+                          {collisions.map((c) => (
+                            <div key={c.table}>
+                              <strong>{c.table}:</strong> {c.count} match(es) (e.g. {c.examples.join(', ')})
+                            </div>
+                          ))}
+                        </div>
+                        <label className="flex items-center gap-2 mt-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={confirmOverwrite}
+                            onChange={(e) => setConfirmOverwrite(e.target.checked)}
+                            className="w-4 h-4 border-2 border-secondary rounded-none focus:ring-0 text-secondary"
+                          />
+                          <span className="font-headline font-bold uppercase text-[9px] text-secondary">
+                            I authorize overwriting existing records
+                          </span>
+                        </label>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleExecuteImport}
+                        disabled={collisions.length > 0 && !confirmOverwrite}
+                        className={`flex-1 font-headline font-bold uppercase text-xs p-3 neo-border hover:neo-shadow transition-all flex items-center justify-center gap-2 ${
+                          collisions.length > 0 && !confirmOverwrite
+                            ? 'bg-surface-variant text-on-surface-variant opacity-50 cursor-not-allowed border-outline'
+                            : 'bg-primary text-on-primary hover:bg-tertiary hover:text-on-tertiary'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-sm">restore</span>
+                        Execute Restore
+                      </button>
+                      <button
+                        onClick={() => {
+                          setImportStatus('idle');
+                          setImportBundle(null);
+                          setCollisions([]);
+                          setConfirmOverwrite(false);
+                        }}
+                        className="bg-background text-primary font-headline font-bold uppercase text-xs p-3 neo-border hover:bg-surface-container transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {importStatus === 'importing' && (
+                  <div className="border-2 border-primary bg-background p-4 flex flex-col items-center justify-center min-h-[100px] gap-2">
+                    <span className="material-symbols-outlined animate-spin text-3xl text-primary mb-2">sync</span>
+                    <span className="font-headline font-bold text-xs uppercase text-primary">Restoring database state...</span>
+                  </div>
+                )}
+
+                {/* Summary Panel */}
+                {importSummary && (
+                  <div className="bg-primary/10 border-2 border-primary p-3 text-xs space-y-2">
+                    <h4 className="font-headline font-bold uppercase text-primary flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm">verified</span> Restore Completed
+                    </h4>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px]">
+                      <div>Missions: {importSummary.Missions || 0}</div>
+                      <div>Glidepaths: {importSummary.Glidepaths || 0}</div>
+                      <div>Agents: {importSummary.Agents || 0}</div>
+                      <div>Tasks: {importSummary.Tasks || 0}</div>
+                      <div>Approvals: {importSummary.Approvals || 0}</div>
+                      <div>Memories: {importSummary.Memory_Items || 0}</div>
+                      <div>Settings: {importSummary.Settings || 0}</div>
+                    </div>
+                    <button
+                      onClick={() => setImportSummary(null)}
+                      className="w-full mt-2 bg-background border border-primary px-2 py-1 font-headline font-bold uppercase text-[9px] hover:bg-primary hover:text-on-primary"
+                    >
+                      Clear Summary
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

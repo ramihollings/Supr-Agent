@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -356,4 +356,46 @@ test('connector tests persist user-visible status and provider health state', ()
       last_error: 'No credential configured.',
     });
   });
+});
+
+test('supervisor dashboard exposes consolidated object, transcript, artifact, and runtime surfaces', () => {
+  const requiredFiles = [
+    'types/index.ts',
+    'lib/dashboard-model.ts',
+    'components/DashboardObjectDrawer.tsx',
+    'components/RunTranscriptView.tsx',
+    'components/ArtifactSourcePreview.tsx',
+    'components/RuntimeConsoleStrip.tsx',
+    'components/EvidenceSourcePanel.tsx',
+    'components/ReportManifestPanel.tsx',
+  ];
+
+  for (const file of requiredFiles) {
+    assert.equal(existsSync(file), true, `${file} should exist`);
+  }
+
+  const types = readFileSync('types/index.ts', 'utf8');
+  for (const symbol of ['DashboardObject', 'ObjectAction', 'RunEvent', 'ExecutionEvidence', 'DashboardArtifact']) {
+    assert.match(types, new RegExp(`interface ${symbol}|type ${symbol}`));
+  }
+
+  const dashboard = readFileSync('app/page.tsx', 'utf8');
+  assert.match(dashboard, /DashboardObjectDrawer/);
+  assert.match(dashboard, /RunTranscriptView/);
+  assert.match(dashboard, /RuntimeConsoleStrip/);
+
+  const library = readFileSync('app/library/page.tsx', 'utf8');
+  assert.match(library, /ArtifactSourcePreview/);
+  assert.doesNotMatch(library, /Artifact source\/preview portal/);
+
+  const research = readFileSync('app/research/page.tsx', 'utf8');
+  assert.match(research, /EvidenceSourcePanel/);
+
+  const report = readFileSync('app/mission-packet/page.tsx', 'utf8');
+  assert.match(report, /ReportManifestPanel/);
+
+  const code = readFileSync('app/code/page.tsx', 'utf8');
+  assert.match(code, /RunTranscriptView/);
+  assert.match(code, /codeRunEvents/);
+  assert.match(code, /Raw terminal/);
 });

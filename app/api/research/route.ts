@@ -1,22 +1,24 @@
 import { NextRequest } from 'next/server';
-import { getActiveProvider } from '@/lib/providers/model';
 import { addActivityLog, addArtifact, addMemoryItem, getActiveMission, getMissionById } from '@/lib/db';
 import { requireApiAuth } from '@/lib/auth';
-import { createAgentAction, executeAgentAction } from '@/lib/runtime/agent-actions';
+import { createAgentAction } from '@/lib/runtime/agent-actions';
+import { runAgentRuntimeAction } from '@/lib/runtime/agent-runtime-runner';
 
 export const dynamic = 'force-dynamic';
 
-const RESEARCH_AGENT_SYSTEM = `You are the Research Agent inside Supr, an enterprise AI orchestration platform.
-Your task is to produce a high-fidelity research intelligence brief based on the user's query and any source snippets provided.
+type ResearchSourceEvidence = {
+  id: string;
+  url: string;
+  domain: string;
+  title: string;
+  snippets: string[];
+  confidence: 'low' | 'medium' | 'high';
+  retrievedAt: string;
+};
 
-RULES:
-- Return ONLY a JSON object, no markdown fences, no extra text
-- Format: { "findings": string[], "recommendation": string, "url": string, "domain": string }
-- findings: array of 3-5 specific, technical, actionable intelligence items directly relevant to the query
-- recommendation: one clear next-step for the Code Agent or project team
-- url: source URL if snippets were provided; otherwise use simulated://research-agent
-- domain: short domain name label
-- Be specific, technical, and grounded.`;
+function sourceId(url: string) {
+  return `source-${Buffer.from(url).toString('base64url').slice(0, 24)}`;
+}
 
 async function fetchResearchSource(query: string) {
   try {
@@ -41,6 +43,8 @@ async function fetchResearchSource(query: string) {
       url,
       domain: new URL(url).hostname.replace(/^www\./, ''),
       snippets: snippets.slice(0, 6),
+      confidence: snippets.length >= 3 ? 'high' : snippets.length >= 1 ? 'medium' : 'low',
+      retrievedAt: new Date().toISOString(),
     };
   } catch (error) {
     console.error('Research source fetch failed:', error);
@@ -84,57 +88,44 @@ export async function POST(req: NextRequest) {
         await new Promise((resolve) => setTimeout(resolve, 600));
         send({ type: 'status', phase: 'browsing', content: '[RESEARCH AGENT] Web browser engaged. Scanning indexed sources...' });
 
-        let rawJson = '';
         let url = '';
         let domain = '';
         let findings: string[] = [];
         let recommendation = '';
-        let mode = 'Simulated';
+        let mode = 'no_source_evidence';
+        let completionStatus: 'complete' | 'partial' = 'partial';
+        let confidence: 'low' | 'medium' | 'high' = 'low';
+        let sources: ResearchSourceEvidence[] = [];
 
-        await executeAgentAction(action.id, async () => {
-          const liveSource = await fetchResearchSource(query);
-          if (liveSource) {
-            mode = 'Live';
-            url = liveSource.url;
-            domain = liveSource.domain;
-            findings = liveSource.snippets.slice(0, 5).map((snippet) => `[Live source] ${snippet}`);
-            recommendation = `Review ${domain} source signals and convert the strongest finding into a scoped task.`;
-          }
-
-          try {
-            const provider = await getActiveProvider('research');
-            const prompt = liveSource
-              ? `Generate a research intelligence brief for this enterprise query: "${query}". Use these source snippets as grounded evidence:\n${liveSource.snippets.map((snippet, index) => `${index + 1}. ${snippet}`).join('\n')}\nReturn the JSON object now.`
-              : `Generate a clearly simulated research intelligence brief for this enterprise query: "${query}". Return the JSON object now.`;
-
-            send({ type: 'status', phase: 'extracting', content: '[RESEARCH AGENT] Extracting structured intelligence signals...' });
-
-            rawJson = await provider.generateContent(prompt, {
-              systemInstruction: RESEARCH_AGENT_SYSTEM,
-              temperature: 0.7,
-              maxOutputTokens: 800,
-            });
-
-            rawJson = rawJson.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-            const parsed = JSON.parse(rawJson);
-            findings = parsed.findings || [];
-            recommendation = parsed.recommendation || '';
-            url = liveSource?.url || parsed.url || `simulated://research-agent/${encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'))}`;
-            domain = liveSource?.domain || parsed.domain || 'research-agent';
-          } catch (llmErr: any) {
-            console.error('Research LLM error:', llmErr);
-            findings = [
-              `[Analysis] Key patterns identified in "${query}" domain - structured schema inconsistencies present.`,
-              `[Signal] Implementation gaps found in existing documentation for "${query}".`,
-              '[Risk] Standard compliance requirements not fully documented for this workflow.',
-            ];
-            recommendation = `Review existing "${query}" implementations and apply defensive validation layers.`;
-            url = liveSource?.url || `simulated://research-agent/${encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'))}`;
-            domain = liveSource?.domain || 'research-agent';
-          }
-
-          return { query, mode, findings, recommendation, url, domain };
+        send({ type: 'status', phase: 'extracting', content: '[RESEARCH AGENT] Running governed source-evidence runtime...' });
+        const runtime = await runAgentRuntimeAction({
+          actionId: action.id,
+          budget: { maxSteps: 4, timeoutMs: 60_000 },
         });
+        const liveSource = await fetchResearchSource(query);
+        if (liveSource) {
+          mode = 'Live';
+          completionStatus = 'complete';
+          url = liveSource.url;
+          domain = liveSource.domain;
+          confidence = liveSource.confidence as 'low' | 'medium' | 'high';
+          sources = [{
+            id: sourceId(liveSource.url),
+            url: liveSource.url,
+            domain: liveSource.domain,
+            title: `${liveSource.domain} source evidence`,
+            snippets: liveSource.snippets,
+            confidence,
+            retrievedAt: liveSource.retrievedAt,
+          }];
+          findings = liveSource.snippets.slice(0, 5).map((snippet) => `[Live source] ${snippet}`);
+          recommendation = `Review ${domain} source signals and convert the strongest finding into a scoped task.`;
+        } else {
+          url = `no-source://research-agent/${encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'))}`;
+          domain = 'no-source-evidence';
+          findings = [];
+          recommendation = `No source-backed evidence was found for "${query}". Treat this research run as partial and retry with a narrower query or configured search provider.`;
+        }
 
         if (mission) {
           const filename = `research_${query.toLowerCase().replace(/\W+/g, '_').substring(0, 40)}.md`;
@@ -144,11 +135,20 @@ export async function POST(req: NextRequest) {
             '## Source Analysis',
             `- **Target Domain**: ${url}`,
             `- **Mode**: ${mode}`,
+            `- **Evidence Status**: ${completionStatus}`,
+            `- **Confidence**: ${confidence}`,
             `- **Timestamp**: ${new Date().toLocaleString()}`,
             '- **Agent**: Research Agent (WebBrowser v1.2)',
             '',
+            '## Source Manifest',
+            ...(
+              sources.length > 0
+                ? sources.map((source, index) => `${index + 1}. ${source.title} (${source.confidence}) - ${source.url}`)
+                : ['- No source evidence captured. This brief is partial and must not be treated as verified.']
+            ),
+            '',
             '## Extracted Intelligence Signals',
-            ...findings.map((finding, index) => `${index + 1}. ${finding}`),
+            ...(findings.length > 0 ? findings.map((finding, index) => `${index + 1}. ${finding}`) : ['- No source-backed findings captured.']),
             '',
             '## Supr Recommendation',
             `> ${recommendation}`,
@@ -159,19 +159,22 @@ export async function POST(req: NextRequest) {
           for (const finding of findings) {
             await addMemoryItem(mission.id, { key: 'research_finding', value: finding, importance: 'High' });
           }
+          for (const source of sources) {
+            await addMemoryItem(mission.id, { key: 'research_source', value: JSON.stringify(source), importance: source.confidence === 'high' ? 'High' : 'Medium' });
+          }
 
           await addActivityLog(mission.id, {
-            eventType: 'agent_action',
+            eventType: completionStatus === 'complete' ? 'agent_action' : 'escalation',
             actor: 'Research Agent',
             actorIcon: 'travel_explore',
-            summary: `Research brief completed for: "${query}"`,
-            detail: `${mode} research mode. ${findings.length} research signals extracted and persisted to SQLite. Markdown brief saved as ${filename}.`,
+            summary: completionStatus === 'complete' ? `Research brief completed for: "${query}"` : `Research brief partial for: "${query}"`,
+            detail: `${mode} research mode. Evidence status: ${completionStatus}. Confidence: ${confidence}. Runtime status: ${runtime.status}. ${findings.length} research signals extracted and persisted to SQLite. Markdown brief saved as ${filename}.`,
           });
         }
 
         send({
           type: 'result',
-          phase: 'done',
+          phase: completionStatus === 'complete' ? 'done' : 'partial',
           actionId: action.id,
           traceId: action.traceId,
           findings,
@@ -179,6 +182,11 @@ export async function POST(req: NextRequest) {
           url,
           domain,
           mode,
+          completionStatus,
+          confidence,
+          sources,
+          runtimeStatus: runtime.status,
+          evidenceIds: runtime.evidenceIds,
           filename: mission ? `research_${query.toLowerCase().replace(/\W+/g, '_').substring(0, 40)}.md` : null,
         });
       } catch (err: any) {

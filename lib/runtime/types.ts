@@ -12,6 +12,81 @@ export type AgentActionStatus =
   | 'cancelled';
 
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical';
+export type RuntimeMode = 'real' | 'demo' | 'offline';
+
+export interface AgentRuntimeBudget {
+  maxSteps?: number;
+  timeoutMs?: number;
+  retryLimit?: number;
+}
+
+export interface AgentRuntimeRunInput {
+  actionId: string;
+  missionId?: string;
+  agentId?: string;
+  mode?: RuntimeMode;
+  budget?: AgentRuntimeBudget;
+  cancellationToken?: { aborted?: boolean; reason?: string };
+  resumeCursor?: string | null;
+}
+
+export interface AgentRuntimeRunResult {
+  status: AgentActionStatus;
+  action: AgentActionRecord;
+  agentRunId?: string;
+  finalSummary?: string;
+  evidenceIds: string[];
+  transcriptIds: string[];
+  metricIds: string[];
+  failureReason?: string;
+  result?: unknown;
+}
+
+export type AgentRuntimeStepKind =
+  | 'model'
+  | 'tool'
+  | 'command'
+  | 'diff'
+  | 'approval'
+  | 'warning'
+  | 'final';
+
+export interface AgentRuntimeStep {
+  id: string;
+  runId: string;
+  kind: AgentRuntimeStepKind;
+  status: 'pending' | 'running' | 'succeeded' | 'warning' | 'failed';
+  summary: string;
+  detail?: string;
+  evidenceIds?: string[];
+  createdAt?: string;
+}
+
+export interface AgentContextBundle {
+  mission: Record<string, unknown>;
+  task?: Record<string, unknown> | null;
+  agent?: Record<string, unknown> | null;
+  action: AgentActionRecord;
+  memoryContext: string;
+  guidelineContext: string;
+  recentTranscript: string;
+  artifacts: Array<Record<string, unknown>>;
+  approvals: Array<Record<string, unknown>>;
+  tools: Array<Record<string, unknown>>;
+  injectedSections: string[];
+}
+
+export type ModelToolResponse =
+  | { type: 'message'; content: string }
+  | { type: 'tool_call'; toolName: string; arguments: Record<string, unknown>; rationale?: string }
+  | { type: 'needs_approval'; reason: string }
+  | { type: 'final'; summary: string; evidence?: Record<string, string[]> }
+  | { type: 'invalid'; reason: string; raw?: string };
+
+export interface CompletionEvidencePolicy {
+  capability: string;
+  requiredKinds: Array<'artifacts' | 'memory' | 'events' | 'toolCalls' | 'sources' | 'commands' | 'diffs'>;
+}
 
 export interface AgentActionInput {
   missionId: string;

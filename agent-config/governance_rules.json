@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Block Destructive Commands",
+    "enabled": true,
+    "toolMatcher": "run_command|run_command_sandbox|execute_command|shell",
+    "action": "block",
+    "conditions": [
+      {
+        "field": "command",
+        "operator": "regex_match",
+        "pattern": "(rm\\s+-rf|format\\s+|mkfs|dd\\s+if=)"
+      }
+    ],
+    "message": "Destructive shell commands are strictly blocked."
+  },
+  {
+    "name": "Require Approval for Root Config Changes",
+    "enabled": true,
+    "toolMatcher": "write_to_file|replace_file_content|multi_replace_file_content",
+    "action": "warn",
+    "conditions": [
+      {
+        "field": "file_path",
+        "operator": "regex_match",
+        "pattern": "(\\.env|package\\.json|tsconfig\\.json|next\\.config\\.(ts|js|mjs))$"
+      }
+    ],
+    "message": "Modifying project configuration files requires explicit human approval."
+  }
+]

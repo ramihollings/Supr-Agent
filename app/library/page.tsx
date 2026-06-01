@@ -2,13 +2,16 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { TopNav } from '@/components/TopNav';
+import { ArtifactSourcePreview } from '@/components/ArtifactSourcePreview';
 import { 
   fetchWorkspaceFilesAction, 
   readWorkspaceFileAction, 
   writeWorkspaceFileAction,
+  deleteWorkspaceFileAction,
   fetchAllArtifactsAction,
   sendChatMessageAction
 } from '@/app/actions';
+import type { DashboardArtifact } from '@/types';
 
 interface FileNode {
   name: string;
@@ -31,6 +34,8 @@ export default function LibraryPage() {
   const [workspaceFiles, setWorkspaceFiles] = useState<FileNode[]>([]);
   const [deliverableFiles, setDeliverableFiles] = useState<FileNode[]>([]);
   const [selectedFile, setSelectedFile] = useState<FileNode | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
@@ -97,11 +102,15 @@ export default function LibraryPage() {
   }, [chatMessages]);
 
   const selectFile = async (node: FileNode) => {
+    setIsEditing(false);
     if (node.origin === 'workspace') {
       const content = await readWorkspaceFileAction(node.name);
-      setSelectedFile({ ...node, content });
+      const file = { ...node, content };
+      setSelectedFile(file);
+      setEditContent(content);
     } else {
       setSelectedFile(node);
+      setEditContent(node.content || '');
     }
   };
 
@@ -118,6 +127,29 @@ export default function LibraryPage() {
     URL.revokeObjectURL(url);
     showToast(`Downloaded ${file.name} ✓`);
   };
+
+  const handleDownloadArtifact = (artifact: DashboardArtifact) => {
+    const blob = new Blob([artifact.source], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = artifact.exportName || artifact.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Downloaded ${artifact.filename}`);
+  };
+
+  const selectedArtifact: DashboardArtifact | null = selectedFile ? {
+    id: selectedFile.path,
+    filename: selectedFile.name,
+    type: selectedFile.type,
+    source: selectedFile.origin === 'workspace' ? editContent : selectedFile.content || '',
+    status: selectedFile.origin === 'workspace' ? 'draft' : 'approved',
+    provenance: selectedFile.origin === 'workspace' ? 'Workspace file' : `Deliverable${selectedFile.missionTitle ? ` from ${selectedFile.missionTitle}` : ''}`,
+    exportName: selectedFile.name,
+  } : null;
 
   const handleCopyToClipboard = (content?: string) => {
     if (!content) return;
@@ -141,6 +173,35 @@ export default function LibraryPage() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleSaveSelectedFile = async () => {
+    if (!selectedFile || selectedFile.origin !== 'workspace') return;
+    const res = await writeWorkspaceFileAction(selectedFile.name, editContent);
+    if (res.success) {
+      showToast(`Saved ${selectedFile.name}`);
+      const nextFile = { ...selectedFile, content: editContent, size: editContent.length };
+      setSelectedFile(nextFile);
+      setIsEditing(false);
+      await loadLibrary();
+    } else {
+      showToast(`Save failed: ${res.error}`);
+    }
+  };
+
+  const handleDeleteSelectedFile = async () => {
+    if (!selectedFile || selectedFile.origin !== 'workspace') return;
+    if (!confirm(`Delete ${selectedFile.name} from the workspace?`)) return;
+    const res = await deleteWorkspaceFileAction(selectedFile.name);
+    if (res.success) {
+      showToast(`Deleted ${selectedFile.name}`);
+      setSelectedFile(null);
+      setEditContent('');
+      setIsEditing(false);
+      await loadLibrary();
+    } else {
+      showToast(`Delete failed: ${res.error}`);
+    }
   };
 
   const handleSendChat = async () => {
@@ -299,7 +360,20 @@ export default function LibraryPage() {
 
         {/* Center Pane: File Viewer */}
         <section className="flex-1 min-w-0 bg-background flex flex-col justify-between border-r-4 border-primary">
-          {selectedFile ? (
+          {selectedArtifact && (
+            <ArtifactSourcePreview
+              artifact={selectedArtifact}
+              isEditing={isEditing}
+              editableSource={editContent}
+              onSourceChange={setEditContent}
+              onToggleEdit={selectedFile?.origin === 'workspace' ? () => setIsEditing((prev) => !prev) : undefined}
+              onSave={selectedFile?.origin === 'workspace' ? handleSaveSelectedFile : undefined}
+              onDelete={selectedFile?.origin === 'workspace' ? handleDeleteSelectedFile : undefined}
+              onCopy={(content) => handleCopyToClipboard(content)}
+              onDownload={handleDownloadArtifact}
+            />
+          )}
+          {selectedFile && !selectedArtifact ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
               <header className="p-4 border-b-4 border-primary bg-surface-variant shrink-0 flex justify-between items-center">
                 <div>
@@ -310,6 +384,29 @@ export default function LibraryPage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
+                  {selectedFile.origin === 'workspace' && (
+                    <>
+                      <button
+                        onClick={() => setIsEditing((prev) => !prev)}
+                        className="bg-background text-primary border-2 border-primary py-1 px-3 text-xs font-headline font-bold uppercase hover:bg-surface-container transition-colors"
+                      >
+                        {isEditing ? 'Preview' : 'Edit'}
+                      </button>
+                      <button
+                        onClick={handleSaveSelectedFile}
+                        disabled={!isEditing}
+                        className="bg-secondary text-on-secondary border-2 border-primary py-1 px-3 text-xs font-headline font-bold uppercase hover:bg-tertiary transition-colors disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={handleDeleteSelectedFile}
+                        className="bg-error text-on-error border-2 border-primary py-1 px-3 text-xs font-headline font-bold uppercase hover:bg-primary transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                   <button 
                     onClick={() => handleCopyToClipboard(selectedFile.content)}
                     className="bg-background text-primary border-2 border-primary py-1 px-3 text-xs font-headline font-bold uppercase hover:bg-surface-container transition-colors"
@@ -325,18 +422,27 @@ export default function LibraryPage() {
                 </div>
               </header>
               <div className="flex-1 p-6 overflow-y-auto custom-scrollbar bg-surface-container-lowest">
-                <pre className="font-mono text-xs p-5 border-2 border-primary bg-background whitespace-pre-wrap leading-relaxed overflow-x-auto text-on-background shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
-                  {selectedFile.content || '# Selected file is empty'}
-                </pre>
+                {isEditing && selectedFile.origin === 'workspace' ? (
+                  <textarea
+                    value={editContent}
+                    onChange={(event) => setEditContent(event.target.value)}
+                    className="w-full min-h-full font-mono text-xs p-5 border-2 border-primary bg-background whitespace-pre-wrap leading-relaxed overflow-x-auto text-on-background shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] focus:outline-none focus:border-tertiary resize-none"
+                    spellCheck={false}
+                  />
+                ) : (
+                  <pre className="font-mono text-xs p-5 border-2 border-primary bg-background whitespace-pre-wrap leading-relaxed overflow-x-auto text-on-background shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
+                    {selectedFile.content || '# Selected file is empty'}
+                  </pre>
+                )}
               </div>
             </div>
-          ) : (
+          ) : !selectedArtifact ? (
             <div className="flex-1 flex flex-col justify-center items-center p-8 bg-surface-container-lowest text-center">
               <span className="material-symbols-outlined text-6xl text-primary/30 mb-4 animate-bounce">folder_open</span>
               <h3 className="font-headline text-lg font-black uppercase text-primary mb-2">No File Selected</h3>
               <p className="font-body text-xs text-on-surface-variant max-w-sm">Select a document, script, or dataset from the left panel to preview it.</p>
             </div>
-          )}
+          ) : null}
         </section>
 
         {/* Right Pane: Ask Supr Chat Assistant */}

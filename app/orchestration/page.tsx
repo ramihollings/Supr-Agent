@@ -42,15 +42,6 @@ const EVENT_CONFIG: Record<string, { icon: string; color: string; verb: string }
   permission:    { icon: 'gavel',          color: 'bg-secondary-container text-secondary', verb: 'PERMISSION' }
 };
 
-const LIVE_EVENTS = [
-  { type: 'delegation', actor: 'Supr', target: 'Research Agent', summary: 'Delegated Research Agent to scan project documentation.' },
-  { type: 'review', actor: 'Supr', target: 'Code Agent', summary: 'Reviewing Code Agent workspace differences.' },
-  { type: 'handoff', actor: 'Signal Agent', target: 'QA Agent', summary: 'Forwarding activity logs to QA Agent.' },
-  { type: 'governance', actor: 'Supr', target: 'Scout Agent', summary: 'Enforcing rate-limits on external API triggers.' },
-  { type: 'approval', actor: 'Supr', target: 'Code Agent', summary: 'Approved safe workspace deployment.' },
-  { type: 'escalation', actor: 'Supr', target: 'Research Agent', summary: 'Research Agent encountered scrape limits.' }
-];
-
 function OrchestrationContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -97,25 +88,13 @@ function OrchestrationContent() {
     void loadData();
   }, [loadData]);
 
-  // Simulated live updates
+  // Poll persisted orchestration state. The feed must reflect stored runtime events only.
   useEffect(() => {
     const interval = setInterval(() => {
-      if (selectedProjectId !== 'all') return;
-      const template = LIVE_EVENTS[Math.floor(Math.random() * LIVE_EVENTS.length)];
-      const newEvent: OrchEvent = {
-        id: `live-${Date.now()}`,
-        eventType: template.type,
-        actor: template.actor,
-        targetAgent: template.target,
-        summary: template.summary,
-        detail: '',
-        timestamp: new Date().toISOString(),
-        missionId: missions[0]?.id || 'm1',
-      };
-      setEvents(prev => [newEvent, ...prev]);
+      void loadData();
     }, 8000);
     return () => clearInterval(interval);
-  }, [missions, selectedProjectId]);
+  }, [loadData]);
 
   const handleProjectFilterChange = (id: string) => {
     setSelectedProjectId(id);

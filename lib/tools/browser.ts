@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { chromium, BrowserContext, Page } from 'playwright-core';
 import { ToolDefinition, toolRegistry } from './registry';
+import { getRuntimeMode, isMockAllowed } from '../runtime/runtime-mode';
 
 // Schema for the web scraper
 const WebScrapeParams = z.object({
@@ -26,13 +27,14 @@ export const webScrapeTool: ToolDefinition<WebScrapeParamsType, string> = {
     
     // To prevent playwright-core from crashing locally if the Cloak executable isn't defined,
     // we use a mock execution pattern for diagnostic environments.
-    if (!executablePath && process.env.NODE_ENV !== 'production') {
+    const mode = await getRuntimeMode();
+    if (!executablePath && process.env.NODE_ENV !== 'production' && isMockAllowed(mode)) {
        console.warn("[CloakBrowser] Warning: CLOAKBROWSER_PATH not set. Operating in mock diagnostic mode.");
-       return `[MOCK STEALTH SCRAPE] Content from ${params.url}: "Successfully bypassed Cloudflare challenge..."`;
+       return `[${mode.toUpperCase()} STEALTH SCRAPE] Content from ${params.url}: "Diagnostic browser output; configure CLOAKBROWSER_PATH for live scraping."`;
     }
 
     if (!executablePath) {
-      throw new Error("CLOAKBROWSER_PATH environment variable is required in production.");
+      throw new Error("CLOAKBROWSER_PATH environment variable is required for live browser scraping.");
     }
 
     let browser;

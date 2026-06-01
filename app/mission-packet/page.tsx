@@ -1,6 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
+import { ReportManifestPanel } from '@/components/ReportManifestPanel';
 import { useState, useEffect, startTransition } from 'react';
 import { getActiveMissionAction } from '@/app/actions';
 import { Mission } from '@/types';
@@ -322,6 +323,13 @@ SANDBOX_CONTAINER_MEMORY=512m`}
             </div>
           </div>
         </section>
+
+        <ReportManifestPanel
+          mission={mission}
+          checklist={checklist}
+          onDownloadArtifact={(artifact) => handleDownloadSingle(artifact.filename, artifact.content)}
+          onDownloadBundle={handleDownloadBundle}
+        />
 
         {/* Deliverables Explorer */}
         {mission.artifacts && mission.artifacts.length > 0 && (

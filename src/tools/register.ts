@@ -1,0 +1,22 @@
+import "./shell";
+import "./web-search";
+import "./subagent";
+import "./todo";
+import "./skill-invoker";
+import "./plugin-dispatcher";
+import "./project-flow";
+
+import { toolRegistry } from "../../lib/tools/registry";
+
+let nativeToolsRegistered = false;
+
+export function registerNativeTools() {
+  nativeToolsRegistered = true;
+  return toolRegistry.getAllTools();
+}
+
+export function areNativeToolsRegistered() {
+  return nativeToolsRegistered;
+}
+
+registerNativeTools();

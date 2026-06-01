@@ -1,0 +1,32 @@
+{
+  "tiers": {
+    "user": {
+      "description": "Persistent cross-session identity and preferences. Never auto-purged.",
+      "access": ["supr"],
+      "purge": "manual_only",
+      "storage": "data/db.json"
+    },
+    "workspace": {
+      "description": "Shared project context — architecture decisions, style guides, repo state.",
+      "access": ["supr", "planner", "code"],
+      "purge": "manual_only",
+      "storage": "data/db.json"
+    },
+    "mission": {
+      "description": "Short-lived cache for the active mission. Purged after Mission Packet export.",
+      "access": ["supr"],
+      "purge": "on_mission_complete",
+      "maxAgeMins": 1440
+    }
+  },
+  "subagentInjection": {
+    "description": "Subagents never read memory directly. Supr extracts relevant chunks and injects them as a Memory Payload into the subagent prompt.",
+    "payloadMaxTokens": 8000,
+    "allowedChunkTypes": ["fact", "decision", "constraint", "artifact_ref"]
+  },
+  "temporaryAgents": {
+    "memoryAccess": "mission_only",
+    "inheritFromParent": false,
+    "purgeOnExpiry": true
+  }
+}

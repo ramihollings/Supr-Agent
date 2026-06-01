@@ -20,6 +20,16 @@ export interface GovernanceDecision {
   reason: string;
 }
 
+function mapRuleDecision(result: string, reason?: string): GovernanceDecision | null {
+  if (result === 'denied') {
+    return { status: 'Denied', reason: reason || 'Blocked by configured governance rule.' };
+  }
+  if (result === 'needs_approval') {
+    return { status: 'RequiresApproval', reason: reason || 'Governance rule requires explicit approval.' };
+  }
+  return null;
+}
+
 const TIER_LEVELS: Record<PermissionTier, number> = {
   'Observe': 1,
   'Draft': 2,
@@ -30,7 +40,35 @@ const TIER_LEVELS: Record<PermissionTier, number> = {
 };
 
 export class PermissionEngine {
-  
+  private static nativeRulesReady = false;
+
+  private static ensureNativeRules() {
+    if (this.nativeRulesReady) return;
+    try {
+      const { safetyRuleEngine } = require('../../src/governance/SafetyRuleEngine');
+      const { RuleEngine } = require('../../src/governance/RuleEngine');
+      if (!safetyRuleEngine.getRules().some((rule: any) => rule.name === 'ConditionRuleEngine')) {
+        safetyRuleEngine.registerRule(new RuleEngine());
+      }
+      this.nativeRulesReady = true;
+    } catch (err: any) {
+      console.warn('[PermissionEngine] Native governance rules unavailable:', err.message);
+      this.nativeRulesReady = true;
+    }
+  }
+
+  static evaluateToolRules(toolName: string, toolArgs: Record<string, any> = {}): GovernanceDecision {
+    this.ensureNativeRules();
+    try {
+      const { safetyRuleEngine } = require('../../src/governance/SafetyRuleEngine');
+      const decision = safetyRuleEngine.check(toolName, toolArgs);
+      const reason = decision.reason || decision.approvalPrompt;
+      return mapRuleDecision(decision.result, reason) || { status: 'Approved', reason: 'No configured governance rule matched.' };
+    } catch (err: any) {
+      return { status: 'RequiresApproval', reason: `Governance rule evaluation failed: ${err.message}.` };
+    }
+  }
+
   /**
    * Evaluates whether an agent has the necessary permissions to execute a tool action.
    */
@@ -44,9 +82,9 @@ export class PermissionEngine {
 
     if (agentLevel >= requiredLevel) {
       if (action.riskLevel === 'High' || action.riskLevel === 'Critical') {
-        return { 
-          status: 'RequiresApproval', 
-          reason: `Action '${action.name}' is within tier but flagged as ${action.riskLevel} risk. Human approval required.` 
+        return {
+          status: 'RequiresApproval',
+          reason: `Action '${action.name}' is within tier but flagged as ${action.riskLevel} risk. Human approval required.`
         };
       }
       return { status: 'Approved', reason: 'Agent meets required permission tier.' };
@@ -63,14 +101,25 @@ export class PermissionEngine {
    * querying the DB capabilities and agent_capabilities tables, and logging the decision in Policy_Decisions.
    */
   static async evaluateActionDynamic(
-    agentId: string, 
-    capabilityName: string, 
-    missionId: string | null = null
+    agentId: string,
+    capabilityName: string,
+    missionId: string | null = null,
+    capabilityArgs: Record<string, any> = {}
   ): Promise<GovernanceDecision> {
     try {
       const { getSqliteDb } = require('../database/init');
       const db = getSqliteDb();
-      
+
+      const ruleDecision = this.evaluateToolRules(capabilityName, capabilityArgs);
+      if (ruleDecision.status !== 'Approved') {
+        const capability = db.prepare("SELECT * FROM Capabilities WHERE name = ?").get(capabilityName) as any;
+        db.prepare(`
+          INSERT INTO Policy_Decisions (id, mission_id, agent_id, capability_id, decision, reason)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(`dec-${Date.now()}-rule`, missionId, agentId, capability?.id || null, ruleDecision.status, ruleDecision.reason);
+        return ruleDecision;
+      }
+
       // 1. Fetch agent permission tier
       const agent = db.prepare("SELECT * FROM Agents WHERE id = ?").get(agentId) as any;
       if (!agent) {
@@ -80,13 +129,12 @@ export class PermissionEngine {
       // 2. Fetch capability requirement
       const capability = db.prepare("SELECT * FROM Capabilities WHERE name = ?").get(capabilityName) as any;
       if (!capability) {
-        // If capability not in DB, allow access with warning
-        return { status: 'Approved', reason: `Capability '${capabilityName}' is not registered. Defaulting to open access.` };
+        return { status: 'Denied', reason: `Capability '${capabilityName}' is not registered. Refusing open-ended execution.` };
       }
 
       // 3. Check specific Agent_Capabilities binding
       const agentCap = db.prepare("SELECT * FROM Agent_Capabilities WHERE agent_id = ? AND capability_id = ?").get(agentId, capability.id) as any;
-      
+
       let decisionStatus: DecisionType = 'Approved';
       let reason = 'Approved by capability policy.';
 

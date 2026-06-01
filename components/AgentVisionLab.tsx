@@ -9,7 +9,7 @@ interface Props {
   onTerminalLog?: (log: string) => void;
 }
 
-interface MockPost {
+interface CommunityPost {
   id: string;
   source: 'reddit' | 'twitter';
   author: string;
@@ -94,7 +94,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
   });
 
   // Competitor Posts Feed State
-  const [posts, setPosts] = useState<MockPost[]>([
+  const [posts, setPosts] = useState<CommunityPost[]>([
     {
       id: 'p1',
       source: 'reddit',
@@ -256,7 +256,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
       
       // Inject a new post dynamically
       const isReddit = Math.random() > 0.5;
-      const newPost: MockPost = isReddit ? {
+      const newPost: CommunityPost = isReddit ? {
         id: `p-new-${Date.now()}`,
         source: 'reddit',
         author: 'u/no_code_wizard',
@@ -357,12 +357,12 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                 className={`h-8 px-2 border-2 border-primary flex items-center gap-1 hover:bg-primary-fixed hover:text-primary transition-all font-headline font-black text-[9px] uppercase shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none ${
                   isLiveMode ? 'bg-green-500 text-white' : 'bg-background text-primary'
                 }`}
-                title="Toggle Real Interactive Web vs Simulated Step Mocks"
+                title="Toggle live interactive web proxy and labeled demo fixtures"
               >
                 <span className="material-symbols-outlined text-xs">
                   {isLiveMode ? 'bolt' : 'smart_toy'}
                 </span>
-                <span>{isLiveMode ? 'Live Proxy' : 'Simulation'}</span>
+                <span>{isLiveMode ? 'Live Proxy' : 'Demo Fixture'}</span>
               </button>
 
               <button 
@@ -588,13 +588,13 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                             onClick={() => handleNavigate('https://reddit.com/r/saas/comments/supr_agentic')}
                             className="bg-background border-2 border-primary text-[10px] font-bold uppercase py-1.5 px-3 hover:bg-primary-fixed transition-colors"
                           >
-                            Load r/saas mock
+                            Load r/saas fixture
                           </button>
                           <button 
                             onClick={() => handleNavigate('https://news.ycombinator.com')}
                             className="bg-background border-2 border-primary text-[10px] font-bold uppercase py-1.5 px-3 hover:bg-primary-fixed transition-colors"
                           >
-                            Load Hacker News mock
+                            Load Hacker News fixture
                           </button>
                         </div>
                       </div>

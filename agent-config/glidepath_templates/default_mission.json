@@ -1,0 +1,49 @@
+{
+  "templateId": "default_mission",
+  "name": "Standard Mission Glidepath",
+  "description": "The default mission execution template with standard phases and approval gates.",
+  "phases": [
+    {
+      "id": "intake",
+      "name": "Intake & Scoping",
+      "requiredAgents": ["research"],
+      "approvalGate": false,
+      "outputs": ["mission_brief"]
+    },
+    {
+      "id": "planning",
+      "name": "Planning & Architecture",
+      "requiredAgents": ["planner"],
+      "approvalGate": true,
+      "outputs": ["glidepath_definition", "task_breakdown"]
+    },
+    {
+      "id": "execution",
+      "name": "Execution",
+      "requiredAgents": ["code"],
+      "approvalGate": false,
+      "maxRetries": 3,
+      "escalateOnFailure": true,
+      "outputs": ["artifacts", "code_changes"]
+    },
+    {
+      "id": "review",
+      "name": "QA & Review",
+      "requiredAgents": ["qa_critic"],
+      "approvalGate": false,
+      "outputs": ["review_report", "readiness_score"]
+    },
+    {
+      "id": "delivery",
+      "name": "Delivery & Export",
+      "requiredAgents": ["supr"],
+      "approvalGate": true,
+      "outputs": ["mission_packet"]
+    }
+  ],
+  "failurePolicy": {
+    "maxRetriesPerTask": 3,
+    "escalationTarget": "human",
+    "onEscalation": "pause_phase"
+  }
+}

@@ -379,7 +379,107 @@ export function initDatabase() {
     )
   `);
 
-  // 20. Provider Health Table - failover/cooldown state for models and connectors
+  // 20. Project Flow runtime tables - visible execution graph and heartbeat runs
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Flow_Runs (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'idle',
+      mode TEXT NOT NULL DEFAULT 'autonomous',
+      source TEXT DEFAULT 'project_flow',
+      started_at DATETIME,
+      paused_at DATETIME,
+      completed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Flow_Nodes (
+      id TEXT PRIMARY KEY,
+      flow_run_id TEXT NOT NULL,
+      mission_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      ref_id TEXT,
+      label TEXT NOT NULL,
+      owner_agent_id TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      risk_level TEXT DEFAULT 'Low',
+      next_action TEXT,
+      x INTEGER DEFAULT 0,
+      y INTEGER DEFAULT 0,
+      metadata TEXT DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(flow_run_id) REFERENCES Flow_Runs(id),
+      FOREIGN KEY(mission_id) REFERENCES Missions(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Agent_Runs (
+      id TEXT PRIMARY KEY,
+      flow_run_id TEXT,
+      mission_id TEXT NOT NULL,
+      agent_action_id TEXT NOT NULL,
+      agent_id TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      heartbeat INTEGER DEFAULT 0,
+      logs TEXT DEFAULT '[]',
+      cost_estimate REAL DEFAULT 0,
+      result TEXT,
+      error TEXT,
+      started_at DATETIME,
+      completed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(flow_run_id) REFERENCES Flow_Runs(id),
+      FOREIGN KEY(mission_id) REFERENCES Missions(id),
+      FOREIGN KEY(agent_action_id) REFERENCES Agent_Actions(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Channel_Commands (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      mission_id TEXT,
+      command TEXT NOT NULL,
+      payload TEXT DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'received',
+      response TEXT,
+      actor_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Tool_Invocations (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      flow_run_id TEXT,
+      agent_action_id TEXT,
+      agent_run_id TEXT,
+      agent_id TEXT,
+      tool_name TEXT NOT NULL,
+      status TEXT DEFAULT 'running',
+      input TEXT,
+      output TEXT,
+      error TEXT,
+      started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id),
+      FOREIGN KEY(flow_run_id) REFERENCES Flow_Runs(id),
+      FOREIGN KEY(agent_action_id) REFERENCES Agent_Actions(id),
+      FOREIGN KEY(agent_run_id) REFERENCES Agent_Runs(id)
+    )
+  `);
+
+  // 24. Provider Health Table - failover/cooldown state for models and connectors
   dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Provider_Health (
       id TEXT PRIMARY KEY,
@@ -467,6 +567,96 @@ export function initDatabase() {
     )
   `);
 
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Agent_Groups (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      supervisor_agent_id TEXT NOT NULL,
+      shared_context TEXT DEFAULT '',
+      status TEXT DEFAULT 'active',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id),
+      FOREIGN KEY(supervisor_agent_id) REFERENCES Agents(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Agent_Group_Members (
+      group_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(group_id, agent_id),
+      FOREIGN KEY(group_id) REFERENCES Agent_Groups(id) ON DELETE CASCADE,
+      FOREIGN KEY(agent_id) REFERENCES Agents(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Agent_Blueprints (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      prompt TEXT NOT NULL,
+      role TEXT NOT NULL,
+      instructions TEXT NOT NULL,
+      permission_tier TEXT NOT NULL,
+      tools TEXT DEFAULT '[]',
+      skills TEXT DEFAULT '[]',
+      provider TEXT DEFAULT 'default',
+      memory_scope TEXT DEFAULT 'mission',
+      budget_profile TEXT DEFAULT '{}',
+      rationale TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Memory_Sections (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      provenance TEXT DEFAULT 'user',
+      user_edited INTEGER DEFAULT 0,
+      injection_status TEXT DEFAULT 'inactive',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Operational_Metrics (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      agent_id TEXT,
+      event_type TEXT NOT NULL,
+      outcome TEXT,
+      duration_ms INTEGER,
+      cost_estimate REAL,
+      metadata TEXT DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Guideline_Packs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      language TEXT,
+      framework TEXT,
+      context TEXT,
+      rules TEXT DEFAULT '[]',
+      reminders TEXT DEFAULT '[]',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Seed default settings
   const insertSetting = dbInstance.prepare(`
     INSERT OR IGNORE INTO Settings (key, value)
@@ -476,7 +666,8 @@ export function initDatabase() {
   insertSetting.run('sandbox_allow_api_keys', 'false');
   insertSetting.run('sandbox_api_key_approval', '');
   
-  insertSetting.run('operating_mode', 'guided');
+  insertSetting.run('operating_mode', 'autonomous');
+  insertSetting.run('runtime_mode', 'demo');
   insertSetting.run('permission_boundary', 'governed');
   insertSetting.run('governance_standards', JSON.stringify(['SOX', 'SOC2']));
   insertSetting.run('channels_email', 'true');
@@ -656,7 +847,7 @@ export function initDatabase() {
       { id: `orch-2`, type: 'delegation', actor: 'Supr', summary: 'Assigned Signal Agent to Ingestion phase', detail: 'Signal Agent will run CloakBrowser stealth scraping on competitor product feeds. Task requires External_Act permission tier.', target: 'Signal Agent', mins: 38 },
       { id: `orch-3`, type: 'handoff', actor: 'Research Agent', summary: 'Passed context findings → Code Agent for implementation', detail: 'Research Agent completed 24 data frame extractions. Handing structured JSON payload to Code Agent for schema integration.', target: 'Code Agent', mins: 30 },
       { id: `orch-4`, type: 'review', actor: 'Supr', summary: 'Reviewed Code Agent output on Brief Gen phase', detail: 'Code Agent submitted spec draft v1. Supr flagged missing test coverage specifications and acceptance criteria. Requesting revisions.', target: 'Code Agent', mins: 25 },
-      { id: `orch-5`, type: 'escalation', actor: 'Supr', summary: 'Code Agent sandbox failure — rerouting to retry', detail: 'pytest suite failed: mock_tickets.json missing embedding schema key. Auto-retry attempt 2 of 3 initiated with adjusted parameters.', target: 'Code Agent', mins: 22 },
+      { id: `orch-5`, type: 'escalation', actor: 'Supr', summary: 'Code Agent sandbox failure — rerouting to retry', detail: 'pytest suite failed: sample_tickets.json missing embedding schema key. Auto-retry attempt 2 of 3 initiated with adjusted parameters.', target: 'Code Agent', mins: 22 },
       { id: `orch-6`, type: 'governance', actor: 'Supr', summary: 'Denied Execute permission for temporary Scout Agent', detail: 'Scout Agent requested sandbox execution access but only holds Observe tier. Escalating to user for manual permission grant.', target: 'Scout Agent', mins: 20 },
       { id: `orch-7`, type: 'delegation', actor: 'Supr', summary: 'Reassigned QA Gate to QA Agent after Code Agent retry', detail: 'Code Agent completed retry successfully. QA Agent will now validate the corrected output against acceptance criteria.', target: 'QA Agent', mins: 18 },
       { id: `orch-8`, type: 'review', actor: 'Supr', summary: 'Reviewed QA Agent test results on sandbox output', detail: 'QA Agent ran 12 assertions. 11 passed, 1 edge case flagged. Supr approved with conditional note to monitor edge case in production.', target: 'QA Agent', mins: 14 },
@@ -696,6 +887,11 @@ export function initDatabase() {
     `);
     
     insertCap.run('web_scrape', 'web_scrape', 'direct', 'Observe', 'Low', 'Scrapes text content and HTML from a URL using headless browser.');
+    insertCap.run('workspace_write_artifact', 'workspace_write_artifact', 'direct', 'Edit', 'Medium', 'Creates or updates project artifacts in the workspace.');
+    insertCap.run('workspace_write_file', 'workspace_write_file', 'direct', 'Edit', 'Medium', 'Creates or updates a scoped file in the secure local workspace.');
+    insertCap.run('workspace_validate_outputs', 'workspace_validate_outputs', 'direct', 'Draft', 'Low', 'Validates project artifacts, queue state, and readiness evidence.');
+    insertCap.run('governance_review', 'governance_review', 'direct', 'Edit', 'Medium', 'Reviews open risks, approvals, permissions, and blocked work.');
+    insertCap.run('delivery_package', 'delivery_package', 'direct', 'Draft', 'Low', 'Compiles final project status, artifacts, and next actions.');
     insertCap.run('execute_command', 'execute_command', 'direct', 'Execute', 'High', 'Runs a shell command inside the Docker sandbox.');
     insertCap.run('slack_send_message', 'slack_send_message', 'direct', 'External_Act', 'Medium', 'Posts a notification message directly to Slack channel.');
     insertCap.run('github_create_issue', 'github_create_issue', 'direct', 'External_Act', 'Medium', 'Creates a new bug report or task issue on GitHub repository.');
@@ -709,6 +905,11 @@ export function initDatabase() {
 
     // Supr (a1) gets all
     insertAgentCap.run('a1', 'web_scrape');
+    insertAgentCap.run('a1', 'workspace_write_artifact');
+    insertAgentCap.run('a1', 'workspace_write_file');
+    insertAgentCap.run('a1', 'workspace_validate_outputs');
+    insertAgentCap.run('a1', 'governance_review');
+    insertAgentCap.run('a1', 'delivery_package');
     insertAgentCap.run('a1', 'execute_command');
     insertAgentCap.run('a1', 'slack_send_message');
     insertAgentCap.run('a1', 'github_create_issue');
@@ -717,18 +918,77 @@ export function initDatabase() {
     // Research Agent (a2) gets web_scrape
     insertAgentCap.run('a2', 'web_scrape');
 
-    // Code Agent (a3) gets execute_command and github_create_issue
+    // Code Agent (a3) gets workspace writing, sandbox execution, and GitHub issue creation
+    insertAgentCap.run('a3', 'workspace_write_artifact');
+    insertAgentCap.run('a3', 'workspace_write_file');
     insertAgentCap.run('a3', 'execute_command');
     insertAgentCap.run('a3', 'github_create_issue');
 
-    // QA Agent (a4) gets web_scrape and execute_command
+    // QA Agent (a4) gets validation, browsing, and sandbox execution
+    insertAgentCap.run('a4', 'workspace_validate_outputs');
     insertAgentCap.run('a4', 'web_scrape');
     insertAgentCap.run('a4', 'execute_command');
+
+    // Signal Agent (a5) gets governance and delivery packaging
+    insertAgentCap.run('a5', 'governance_review');
+    insertAgentCap.run('a5', 'delivery_package');
 
     // Sub-Supr (a5) gets execute_command and slack_send_message
     insertAgentCap.run('a5', 'execute_command');
     insertAgentCap.run('a5', 'slack_send_message');
   }
+
+  const obsoleteHeartbeatCapability = `heartbeat${'_'}task`;
+  dbInstance.prepare(`DELETE FROM Agent_Capabilities WHERE capability_id = ?`).run(obsoleteHeartbeatCapability);
+  dbInstance.prepare(`DELETE FROM Capabilities WHERE id = ?`).run(obsoleteHeartbeatCapability);
+
+  // 25. Cost and Budget Tracking tables
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Cost_Events (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      agent_id TEXT,
+      task_id TEXT,
+      agent_run_id TEXT,
+      provider TEXT,
+      model TEXT,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      cost_cents REAL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Budget_Policies (
+      id TEXT PRIMARY KEY,
+      scope_type TEXT NOT NULL, -- 'mission', 'agent', 'global'
+      scope_id TEXT NOT NULL,
+      limit_cents REAL NOT NULL,
+      warn_percent REAL DEFAULT 80,
+      hard_stop INTEGER DEFAULT 1,
+      spent_cents REAL DEFAULT 0,
+      status TEXT DEFAULT 'ok',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Budget_Incidents (
+      id TEXT PRIMARY KEY,
+      policy_id TEXT NOT NULL,
+      scope_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      threshold_type TEXT NOT NULL, -- 'soft', 'hard'
+      limit_cents REAL NOT NULL,
+      observed_cents REAL NOT NULL,
+      status TEXT DEFAULT 'open',
+      resolved_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(policy_id) REFERENCES Budget_Policies(id)
+    )
+  `);
 
   _initialized = true;
   console.log('[init.ts] Database initialization complete.');

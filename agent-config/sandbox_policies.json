@@ -1,0 +1,12 @@
+{
+  "sandbox": {
+    "networkAccess": "restricted",
+    "allowedDomains": ["github.com", "api.github.com", "npmjs.org"],
+    "fileAccess": {
+      "readOnlyDirs": ["/usr/bin", "/etc", "./node_modules"],
+      "readWriteDirs": ["./temp", "./workspace"]
+    },
+    "maxExecutionTimeMs": 300000,
+    "allowSubprocesses": true
+  }
+}

@@ -5,6 +5,8 @@ import { useState, useEffect, useRef } from 'react';
 import { TopNav } from '@/components/TopNav';
 import { 
   fetchChatMessagesAction, 
+  updateChatMessageAction,
+  deleteChatMessageAction,
   sendChatMessageAction, 
   fetchWorkspaceFilesAction,
   readWorkspaceFileAction,
@@ -51,6 +53,8 @@ export default function SuprChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingMessageText, setEditingMessageText] = useState('');
 
   // Settings states (Toggles saved to Settings DB)
   const [activeModel, setActiveModel] = useState('gemini');
@@ -218,6 +222,37 @@ How can I assist you today? You can query data, ask me to draft/run code files i
     setChatLoading(false);
   };
 
+  const handleStartEditMessage = (message: ChatMessage) => {
+    setEditingMessageId(message.id);
+    setEditingMessageText(message.content);
+  };
+
+  const handleSaveMessageEdit = async () => {
+    if (!editingMessageId || !editingMessageText.trim()) return;
+    const res = await updateChatMessageAction(editingMessageId, editingMessageText.trim());
+    if (res.success) {
+      setEditingMessageId(null);
+      setEditingMessageText('');
+      await loadData();
+    } else {
+      alert(`Message update failed: ${res.error}`);
+    }
+  };
+
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!confirm('Delete this message from Supr Chat history?')) return;
+    const res = await deleteChatMessageAction(messageId);
+    if (res.success) {
+      if (editingMessageId === messageId) {
+        setEditingMessageId(null);
+        setEditingMessageText('');
+      }
+      await loadData();
+    } else {
+      alert(`Message delete failed: ${res.error}`);
+    }
+  };
+
   const handleToggleSandboxKeys = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const checked = e.target.checked;
     setSandboxAllowKeys(checked);
@@ -288,7 +323,7 @@ How can I assist you today? You can query data, ask me to draft/run code files i
     }
   };
 
-  // Separate simulated telemetry blocks from regular chat text
+  // Separate structured telemetry blocks from regular chat text
   const parseMessageContent = (content: string) => {
     const telemetryRegex = /```telemetry\n([\s\S]*?)```\n*/g;
     const match = telemetryRegex.exec(content);
@@ -462,11 +497,31 @@ How can I assist you today? You can query data, ask me to draft/run code files i
                 )}
 
                 {/* 3. Text Message Bubble */}
-                <div className={`p-4 neo-border font-body text-sm leading-relaxed max-w-2xl ${
+                <div className={`p-4 neo-border font-body text-sm leading-relaxed max-w-2xl group ${
                   isUser 
                     ? 'bg-primary text-on-primary shadow-[4px_4px_0px_0px_rgba(0,0,0,0.15)]' 
                     : 'bg-background text-on-background shadow-[4px_4px_0px_0px_var(--color-primary)]'
                 }`}>
+                  <div className="flex items-center justify-end gap-1 mb-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditMessage(msg)}
+                      className={`border px-2 py-0.5 font-headline font-bold uppercase text-[8px] ${
+                        isUser ? 'border-on-primary text-on-primary hover:bg-on-primary hover:text-primary' : 'border-primary text-primary hover:bg-primary hover:text-on-primary'
+                      }`}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMessage(msg.id)}
+                      className={`border px-2 py-0.5 font-headline font-bold uppercase text-[8px] ${
+                        isUser ? 'border-on-primary text-on-primary hover:bg-on-primary hover:text-primary' : 'border-error text-error hover:bg-error hover:text-on-error'
+                      }`}
+                    >
+                      Delete
+                    </button>
+                  </div>
                   
                   {/* Handle inline generated images */}
                   {msg.file?.type.startsWith('image/') && msg.file.content ? (
@@ -482,7 +537,37 @@ How can I assist you today? You can query data, ask me to draft/run code files i
                     </div>
                   ) : null}
 
-                  <div className="whitespace-pre-wrap">{text}</div>
+                  {editingMessageId === msg.id ? (
+                    <div className="space-y-2">
+                      <textarea
+                        value={editingMessageText}
+                        onChange={(event) => setEditingMessageText(event.target.value)}
+                        className="w-full min-h-[120px] bg-surface text-on-surface border-2 border-primary p-3 font-mono text-xs focus:outline-none focus:border-tertiary resize-vertical"
+                        spellCheck={false}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingMessageId(null);
+                            setEditingMessageText('');
+                          }}
+                          className="border border-primary px-3 py-1 font-headline font-bold uppercase text-[9px] hover:bg-surface-container text-primary"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveMessageEdit}
+                          className="border border-primary bg-primary text-on-primary px-3 py-1 font-headline font-bold uppercase text-[9px] hover:bg-tertiary hover:text-on-tertiary"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="whitespace-pre-wrap">{text}</div>
+                  )}
                 </div>
                 
                 <span className="text-[8px] text-on-surface-variant font-mono mt-1 px-1">
@@ -686,7 +771,7 @@ How can I assist you today? You can query data, ask me to draft/run code files i
               </div>
             )}
 
-            {/* Simulated / Real Shell Execution Output */}
+            {/* Shell Execution Output */}
             {canvasTab === 'run' && (
               <div className="flex-1 flex flex-col space-y-4">
                 <div className="border-b border-primary pb-1">

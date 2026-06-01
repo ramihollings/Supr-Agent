@@ -1,0 +1,293 @@
+"use client";
+
+import { TopNav } from "@/components/TopNav";
+import {
+  createAgentBlueprintAction,
+  createAgentGroupAction,
+  fetchSupervisorConsoleAction,
+  upsertMemorySectionAction,
+} from "@/app/actions";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+
+function SupervisorConsoleContent() {
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("id") || undefined;
+  const [data, setData] = useState<any>({
+    mission: null,
+    agents: [],
+    groups: [],
+    blueprints: [],
+    memorySections: [],
+    metrics: [],
+    guidelinePacks: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
+  const [blueprintPrompt, setBlueprintPrompt] = useState("Build a code-focused agent that can implement and verify UI/backend integration safely.");
+  const [groupName, setGroupName] = useState("Supervisor Delivery Cell");
+  const [sharedContext, setSharedContext] = useState("Coordinate implementation, approval gates, evidence, and review handoffs for this project.");
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [memoryDraft, setMemoryDraft] = useState({
+    title: "Supervisor Operating Note",
+    content: "Explain governance decisions visibly and keep task completion evidence-backed.",
+    injectionStatus: "active" as "active" | "inactive",
+  });
+
+  const activeAgents = useMemo(() => data.agents.filter((agent: any) => agent.isActive), [data.agents]);
+  const supervisor = activeAgents.find((agent: any) => agent.name?.toLowerCase() === "supr") || activeAgents[0];
+
+  const showToast = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 2500);
+  };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const next = await fetchSupervisorConsoleAction(projectId);
+    setData(next);
+    setSelectedMembers((next.agents || []).filter((agent: any) => agent.isActive && agent.name !== "Supr").slice(0, 3).map((agent: any) => agent.id));
+    setLoading(false);
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleBlueprint = async () => {
+    if (!blueprintPrompt.trim()) return;
+    const res = await createAgentBlueprintAction(blueprintPrompt, projectId);
+    showToast(res.success ? "Agent blueprint created" : res.error || "Blueprint failed");
+    if (res.success) await load();
+  };
+
+  const handleGroup = async () => {
+    if (!projectId) {
+      showToast("Open a project to create an agent group");
+      return;
+    }
+    if (!supervisor) {
+      showToast("No active supervisor agent found");
+      return;
+    }
+    const res = await createAgentGroupAction({
+      projectId,
+      name: groupName,
+      supervisorAgentId: supervisor.id,
+      memberAgentIds: selectedMembers,
+      sharedContext,
+    });
+    showToast(res.success ? "Agent group created" : res.error || "Group creation failed");
+    if (res.success) await load();
+  };
+
+  const handleMemory = async () => {
+    const res = await upsertMemorySectionAction({
+      projectId,
+      ...memoryDraft,
+    });
+    showToast(res.success ? "Memory section saved" : res.error || "Memory save failed");
+    if (res.success) await load();
+  };
+
+  return (
+    <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
+      <TopNav title="Supervisor Console" />
+
+      {toast && (
+        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm">
+          {toast}
+        </div>
+      )}
+
+      <main className="flex-1 p-6 md:p-10 overflow-y-auto">
+        <header className="border-b-4 border-primary pb-6 mb-6">
+          <h1 className="font-headline text-4xl md:text-5xl font-black uppercase tracking-tighter text-primary">Supervisor Console</h1>
+          <p className="font-body text-sm font-bold mt-2 text-on-surface-variant max-w-3xl border-l-4 border-secondary pl-3">
+            One place for governing-agent structure: team groups, agent blueprints, editable memory, privacy metrics, and review guidelines.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2 font-mono text-[10px] uppercase text-primary">
+            <span className="neo-border-sm bg-background px-2 py-1">{data.mission ? data.mission.name : "No active project selected"}</span>
+            <span className="neo-border-sm bg-background px-2 py-1">{activeAgents.length} active agents</span>
+            <span className="neo-border-sm bg-background px-2 py-1">{data.guidelinePacks.length} guideline packs</span>
+          </div>
+        </header>
+
+        {loading ? (
+          <p className="font-headline font-bold uppercase text-primary animate-pulse">Loading supervisor state...</p>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <section className="xl:col-span-2 neo-border bg-background">
+              <div className="bg-primary text-on-primary border-b-4 border-primary p-4">
+                <h2 className="font-headline font-black uppercase text-xl flex items-center gap-2">
+                  <span className="material-symbols-outlined">groups</span>
+                  Agent Groups
+                </h2>
+              </div>
+              <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-3">
+                  <input
+                    value={groupName}
+                    onChange={(event) => setGroupName(event.target.value)}
+                    className="w-full bg-surface-container neo-border p-2 font-headline font-bold uppercase text-sm"
+                  />
+                  <textarea
+                    value={sharedContext}
+                    onChange={(event) => setSharedContext(event.target.value)}
+                    className="w-full h-24 bg-surface-container neo-border p-2 font-body text-xs"
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {activeAgents.map((agent: any) => (
+                      <label key={agent.id} className="flex items-center gap-2 bg-surface-container border-2 border-primary p-2 text-xs font-bold uppercase">
+                        <input
+                          type="checkbox"
+                          checked={selectedMembers.includes(agent.id)}
+                          disabled={agent.id === supervisor?.id}
+                          onChange={(event) => {
+                            setSelectedMembers((prev) => event.target.checked ? [...prev, agent.id] : prev.filter((id) => id !== agent.id));
+                          }}
+                        />
+                        {agent.name}
+                      </label>
+                    ))}
+                  </div>
+                  <button onClick={handleGroup} className="bg-primary text-on-primary neo-border px-4 py-2 font-headline font-bold uppercase text-xs">
+                    Create Group
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {data.groups.length === 0 ? (
+                    <div className="border-4 border-dashed border-outline-variant p-6 text-center font-body text-xs text-on-surface-variant">
+                      No agent groups yet for this project.
+                    </div>
+                  ) : data.groups.map((group: any) => (
+                    <article key={group.id} className="bg-surface-container neo-border p-3">
+                      <h3 className="font-headline font-black uppercase text-primary">{group.name}</h3>
+                      <p className="font-mono text-[10px] text-on-surface-variant mt-1">Lead: {group.supervisorAgentId} | Members: {group.members.length}</p>
+                      <p className="font-body text-xs mt-2">{group.sharedContext}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="neo-border bg-background">
+              <div className="bg-secondary text-on-error border-b-4 border-primary p-4">
+                <h2 className="font-headline font-black uppercase text-xl flex items-center gap-2">
+                  <span className="material-symbols-outlined">architecture</span>
+                  Agent Builder
+                </h2>
+              </div>
+              <div className="p-4 space-y-3">
+                <textarea
+                  value={blueprintPrompt}
+                  onChange={(event) => setBlueprintPrompt(event.target.value)}
+                  className="w-full h-28 bg-surface-container neo-border p-2 font-body text-xs"
+                />
+                <button onClick={handleBlueprint} className="bg-primary text-on-primary neo-border px-4 py-2 font-headline font-bold uppercase text-xs">
+                  Generate Blueprint
+                </button>
+                <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
+                  {data.blueprints.map((blueprint: any) => (
+                    <article key={blueprint.id} className="bg-surface-container border-2 border-primary p-3">
+                      <h3 className="font-headline font-black uppercase text-primary text-sm">{blueprint.role}</h3>
+                      <p className="font-body text-[11px] mt-1">{blueprint.rationale}</p>
+                      <p className="font-mono text-[10px] mt-2">Tier: {blueprint.permissionTier} | Provider: {blueprint.provider}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="neo-border bg-background">
+              <div className="bg-tertiary text-on-tertiary border-b-4 border-primary p-4">
+                <h2 className="font-headline font-black uppercase text-xl flex items-center gap-2">
+                  <span className="material-symbols-outlined">memory</span>
+                  White-Box Memory
+                </h2>
+              </div>
+              <div className="p-4 space-y-3">
+                <input
+                  value={memoryDraft.title}
+                  onChange={(event) => setMemoryDraft((prev) => ({ ...prev, title: event.target.value }))}
+                  className="w-full bg-surface-container neo-border p-2 font-headline font-bold uppercase text-sm"
+                />
+                <textarea
+                  value={memoryDraft.content}
+                  onChange={(event) => setMemoryDraft((prev) => ({ ...prev, content: event.target.value }))}
+                  className="w-full h-24 bg-surface-container neo-border p-2 font-body text-xs"
+                />
+                <label className="flex items-center gap-2 font-headline font-bold uppercase text-xs">
+                  <input
+                    type="checkbox"
+                    checked={memoryDraft.injectionStatus === "active"}
+                    onChange={(event) => setMemoryDraft((prev) => ({ ...prev, injectionStatus: event.target.checked ? "active" : "inactive" }))}
+                  />
+                  Inject into supervisor context
+                </label>
+                <button onClick={handleMemory} className="bg-primary text-on-primary neo-border px-4 py-2 font-headline font-bold uppercase text-xs">
+                  Save Memory
+                </button>
+                <div className="space-y-2">
+                  {data.memorySections.slice(0, 4).map((section: any) => (
+                    <article key={section.id} className="bg-surface-container border-2 border-primary p-3">
+                      <h3 className="font-headline font-black uppercase text-primary text-sm">{section.title}</h3>
+                      <p className="font-mono text-[10px]">{section.provenance} | {section.injectionStatus} | edited: {String(section.userEdited)}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="neo-border bg-background">
+              <div className="bg-primary-container border-b-4 border-primary p-4">
+                <h2 className="font-headline font-black uppercase text-xl text-primary flex items-center gap-2">
+                  <span className="material-symbols-outlined">monitoring</span>
+                  Privacy Metrics
+                </h2>
+              </div>
+              <div className="p-4 space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+                {data.metrics.length === 0 ? (
+                  <p className="font-body text-xs text-on-surface-variant">No operational metrics recorded yet.</p>
+                ) : data.metrics.map((metric: any) => (
+                  <div key={metric.id} className="bg-surface-container border-2 border-primary p-2 font-mono text-[10px]">
+                    {metric.eventType} / {metric.outcome || "recorded"} / {metric.agentId || "system"}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="xl:col-span-1 neo-border bg-background">
+              <div className="bg-surface-variant border-b-4 border-primary p-4">
+                <h2 className="font-headline font-black uppercase text-xl text-primary flex items-center gap-2">
+                  <span className="material-symbols-outlined">rule</span>
+                  Guideline Packs
+                </h2>
+              </div>
+              <div className="p-4 space-y-3">
+                {data.guidelinePacks.map((pack: any) => (
+                  <article key={pack.id} className="bg-surface-container border-2 border-primary p-3">
+                    <h3 className="font-headline font-black uppercase text-primary text-sm">{pack.name}</h3>
+                    <p className="font-mono text-[10px] mb-2">{pack.language || "any"} / {pack.framework || "any"} / {pack.context || "any"}</p>
+                    <ul className="font-body text-[11px] list-disc pl-4 space-y-1">
+                      {pack.rules.slice(0, 3).map((rule: string) => <li key={rule}>{rule}</li>)}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+export default function SupervisorConsolePage() {
+  return (
+    <Suspense fallback={<div className="flex-1 md:ml-64 min-h-screen bg-surface-container p-10 font-headline font-bold uppercase text-primary">Loading Supervisor Console...</div>}>
+      <SupervisorConsoleContent />
+    </Suspense>
+  );
+}

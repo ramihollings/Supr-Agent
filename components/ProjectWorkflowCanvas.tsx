@@ -33,10 +33,34 @@ type Props = {
   graph: {
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
+    flowRun?: { id: string; status: string; mode: string; source?: string } | null;
+    agentRuns?: Array<{ id: string; status: string; agentId?: string; logs?: string[]; error?: string; createdAt?: string }>;
+    toolInvocations?: Array<{
+      id: string;
+      status: string;
+      toolName: string;
+      agentId?: string;
+      error?: string;
+      createdAt?: string;
+      output?: {
+        command?: string;
+        stdout?: string;
+        stderr?: string;
+        exitCode?: number;
+        durationMs?: number;
+      } | null;
+    }>;
     counts?: Record<string, number>;
   } | null;
   onSpawnAgent: (draft: SpawnDraft) => Promise<void>;
+  onStartFlow: () => Promise<void>;
+  onRunFlow: () => Promise<void>;
+  onPauseFlow: () => Promise<void>;
+  onResumeFlow: () => Promise<void>;
+  onRetryFailed: () => Promise<void>;
+  onApproveLowRisk: () => Promise<void>;
   isSpawning?: boolean;
+  isBusy?: boolean;
 };
 
 const statusTone: Record<string, string> = {
@@ -63,13 +87,24 @@ const kindIcon: Record<WorkflowNode['kind'], string> = {
   artifact: 'description',
 };
 
-export function ProjectWorkflowCanvas({ graph, onSpawnAgent, isSpawning = false }: Props) {
+export function ProjectWorkflowCanvas({
+  graph,
+  onSpawnAgent,
+  onStartFlow,
+  onRunFlow,
+  onPauseFlow,
+  onResumeFlow,
+  onRetryFailed,
+  onApproveLowRisk,
+  isSpawning = false,
+  isBusy = false,
+}: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [draft, setDraft] = useState<SpawnDraft>({
     role: 'Code',
     objective: '',
     permissionTier: 'Edit',
-    capability: 'project.execute_task',
+    capability: 'workspace_write_artifact',
     riskLevel: 'Medium',
   });
 
@@ -92,6 +127,26 @@ export function ProjectWorkflowCanvas({ graph, onSpawnAgent, isSpawning = false 
     };
   }, [graph]);
 
+  const workEvents = useMemo(() => [
+    ...(graph?.toolInvocations || []).map((tool) => ({
+      id: tool.id,
+      status: tool.status,
+      actor: tool.agentId || 'Tool',
+      detail: tool.error
+        || (tool.toolName === 'execute_command' && tool.output
+          ? `exitCode=${tool.output.exitCode ?? 'unknown'} stdout=${tool.output.stdout || ''} stderr=${tool.output.stderr || ''}`.trim()
+          : tool.toolName),
+      kind: 'tool',
+    })),
+    ...(graph?.agentRuns || []).map((run) => ({
+      id: run.id,
+      status: run.status,
+      actor: run.agentId || 'Agent',
+      detail: run.error || run.logs?.[0] || 'Heartbeat recorded.',
+      kind: 'agent',
+    })),
+  ], [graph]);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!draft.objective.trim()) return;
@@ -105,19 +160,33 @@ export function ProjectWorkflowCanvas({ graph, onSpawnAgent, isSpawning = false 
         <div>
           <h3 className="font-headline text-2xl font-black uppercase tracking-tight text-primary flex items-center gap-2">
             <span className="material-symbols-outlined text-tertiary">account_tree</span>
-            Project Agent Workflow
+            Live Work Graph
           </h3>
           <p className="font-body text-xs text-on-surface-variant font-bold">
-            Live graph from mission phases, tasks, agent actions, approvals, and artifacts.
+            Supr directs agents through phases, tasks, approvals, run records, and deliverables.
           </p>
         </div>
-        <div className="grid grid-cols-5 gap-2 min-w-full lg:min-w-[460px]">
-          {Object.entries(graph?.counts || { phases: 0, tasks: 0, actions: 0, approvals: 0, artifacts: 0 }).map(([key, value]) => (
+        <div className="flex flex-col gap-2 min-w-full lg:min-w-[560px]">
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            <button onClick={onStartFlow} disabled={isBusy} className="bg-primary text-on-primary border border-primary px-2 py-2 font-headline font-black uppercase text-[9px] disabled:opacity-50">Start Project Flow</button>
+            <button onClick={onRunFlow} disabled={isBusy} className="bg-background border border-primary px-2 py-2 font-headline font-black uppercase text-[9px] disabled:opacity-50">Run</button>
+            <button onClick={onPauseFlow} disabled={isBusy} className="bg-background border border-primary px-2 py-2 font-headline font-black uppercase text-[9px] disabled:opacity-50">Pause</button>
+            <button onClick={onResumeFlow} disabled={isBusy} className="bg-background border border-primary px-2 py-2 font-headline font-black uppercase text-[9px] disabled:opacity-50">Resume</button>
+            <button onClick={onRetryFailed} disabled={isBusy} className="bg-background border border-secondary px-2 py-2 font-headline font-black uppercase text-[9px] disabled:opacity-50">Retry Failed</button>
+            <button onClick={onApproveLowRisk} disabled={isBusy} className="bg-secondary text-on-secondary border border-secondary px-2 py-2 font-headline font-black uppercase text-[9px] disabled:opacity-50">Approve Low Risk</button>
+          </div>
+          <div className="grid grid-cols-6 gap-2">
+            <div className="bg-surface-container border border-outline-variant p-2 text-center">
+              <span className="block font-mono text-sm font-black text-primary">{graph?.flowRun?.status || 'idle'}</span>
+              <span className="block font-headline text-[8px] font-bold uppercase text-on-surface-variant">flow</span>
+            </div>
+            {Object.entries(graph?.counts || { phases: 0, tasks: 0, actions: 0, approvals: 0, artifacts: 0 }).map(([key, value]) => (
             <div key={key} className="bg-surface-container border border-outline-variant p-2 text-center">
               <span className="block font-mono text-sm font-black text-primary">{value}</span>
               <span className="block font-headline text-[8px] font-bold uppercase text-on-surface-variant">{key}</span>
             </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
 
@@ -125,7 +194,7 @@ export function ProjectWorkflowCanvas({ graph, onSpawnAgent, isSpawning = false 
         <div className="relative overflow-auto custom-scrollbar bg-surface-container-low border-b-4 xl:border-b-0 xl:border-r-4 border-primary">
           {!graph || graph.nodes.length === 0 ? (
             <div className="p-8 font-body text-sm text-on-surface-variant">
-              No operating graph yet. Spawn an agent or start a runbook to create actionable nodes.
+              No work graph yet. Click Start Project Flow to let Supr decompose the project, spawn agents, and queue work.
             </div>
           ) : (
             <div className="relative" style={{ width: canvasSize.width, height: canvasSize.height }}>
@@ -206,12 +275,21 @@ export function ProjectWorkflowCanvas({ graph, onSpawnAgent, isSpawning = false 
                 {['Observe', 'Draft', 'Edit', 'Execute', 'External_Act'].map((tier) => <option key={tier}>{tier}</option>)}
               </select>
             </div>
-            <input
+            <select
               value={draft.capability}
               onChange={(event) => setDraft((prev) => ({ ...prev, capability: event.target.value }))}
-              className="bg-surface-container neo-border px-3 py-2 font-body text-xs"
-              placeholder="Capability"
-            />
+              className="bg-surface-container neo-border px-3 py-2 font-headline font-bold uppercase text-[10px]"
+            >
+              {[
+                'web_scrape',
+                'workspace_write_artifact',
+                'workspace_write_file',
+                'workspace_validate_outputs',
+                'governance_review',
+                'delivery_package',
+                'execute_command',
+              ].map((capability) => <option key={capability} value={capability}>{capability}</option>)}
+            </select>
             <textarea
               value={draft.objective}
               onChange={(event) => setDraft((prev) => ({ ...prev, objective: event.target.value }))}
@@ -249,6 +327,26 @@ export function ProjectWorkflowCanvas({ graph, onSpawnAgent, isSpawning = false 
             ) : (
               <p className="font-body text-xs text-on-surface-variant">Select a node to inspect it.</p>
             )}
+          </div>
+
+          <div className="neo-border bg-background p-4 min-h-48">
+            <h4 className="font-headline font-black uppercase text-sm text-primary flex items-center gap-1.5 border-b-2 border-primary pb-2 mb-3">
+              <span className="material-symbols-outlined text-sm text-tertiary">receipt_long</span>
+              What Happened
+            </h4>
+            <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar">
+              {workEvents.length > 0 ? workEvents.map((run) => (
+                <div key={run.id} className="border-l-4 border-tertiary pl-3 py-1">
+                  <div className="flex justify-between gap-2">
+                    <span className="font-headline font-black uppercase text-[10px]">{run.actor}</span>
+                    <span className="font-mono text-[8px] uppercase text-on-surface-variant">{run.status}</span>
+                  </div>
+                  <p className="font-body text-[10px] text-on-surface-variant line-clamp-2">{run.kind === 'tool' ? `Tool: ${run.detail}` : run.detail}</p>
+                </div>
+              )) : (
+                <p className="font-body text-xs text-on-surface-variant">No agent or tool runs yet.</p>
+              )}
+            </div>
           </div>
         </aside>
       </div>

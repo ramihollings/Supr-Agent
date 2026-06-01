@@ -1,0 +1,63 @@
+{
+  "templateId": "feature_development",
+  "name": "7-Phase Feature Development Glidepath",
+  "description": "Comprehensive feature development pipeline covering Discovery, Exploration, Questions, Architecture, Implementation, Review, and Summary.",
+  "phases": [
+    {
+      "id": "discovery",
+      "name": "Discovery",
+      "requiredAgents": ["research"],
+      "approvalGate": false,
+      "outputs": ["requirements_document"]
+    },
+    {
+      "id": "exploration",
+      "name": "Exploration",
+      "requiredAgents": ["research"],
+      "approvalGate": false,
+      "outputs": ["dependency_map"]
+    },
+    {
+      "id": "questions",
+      "name": "Questions & Clarification",
+      "requiredAgents": ["planner"],
+      "approvalGate": false,
+      "outputs": ["clarifications_memo"]
+    },
+    {
+      "id": "architecture",
+      "name": "Architecture Design",
+      "requiredAgents": ["planner"],
+      "approvalGate": true,
+      "outputs": ["architecture_plan", "design_signatures"]
+    },
+    {
+      "id": "implementation",
+      "name": "Implementation & Coding",
+      "requiredAgents": ["code"],
+      "approvalGate": false,
+      "maxRetries": 3,
+      "escalateOnFailure": true,
+      "outputs": ["source_code", "unit_tests"]
+    },
+    {
+      "id": "review",
+      "name": "QA & Review Validation",
+      "requiredAgents": ["qa_critic"],
+      "approvalGate": false,
+      "outputs": ["review_report", "sandbox_logs"]
+    },
+    {
+      "id": "summary",
+      "name": "Summary & Handoff",
+      "requiredAgents": ["supr"],
+      "approvalGate": true,
+      "outputs": ["delivery_bundle", "project_summary"]
+    }
+  ],
+  "failurePolicy": {
+    "maxRetriesPerTask": 3,
+    "escalationTarget": "human",
+    "onEscalation": "pause_phase"
+  }
+}

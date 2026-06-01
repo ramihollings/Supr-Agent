@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 
 export interface ModelOptions {
   model?: string;
@@ -288,6 +289,10 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
   if (primary) return primary;
   if (backupKey) return buildBackup(backupKey, backupUrl, backupModel, backupName);
 
-  // Return standard GeminiProvider if all else fails
+  if (await getRuntimeMode() === 'real') {
+    throw new Error('No model provider is configured. Real runtime mode requires MiniMax, Gemini, or OpenAI-compatible credentials.');
+  }
+
+  // Return standard GeminiProvider if all else fails in demo/offline mode.
   return new GeminiProvider();
 }

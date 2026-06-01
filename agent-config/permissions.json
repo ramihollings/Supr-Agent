@@ -1,0 +1,34 @@
+{
+  "tiers": [
+    {
+      "level": 1,
+      "name": "Observe",
+      "allowedTools": ["read_file", "list_dir", "search_web", "view_file"]
+    },
+    {
+      "level": 2,
+      "name": "Draft",
+      "allowedTools": ["write_to_file", "create_artifact"]
+    },
+    {
+      "level": 3,
+      "name": "Edit",
+      "allowedTools": ["replace_file_content", "multi_replace_file_content"]
+    },
+    {
+      "level": 4,
+      "name": "Execute",
+      "allowedTools": ["run_command_sandbox", "test_runner"]
+    },
+    {
+      "level": 5,
+      "name": "External Act",
+      "allowedTools": ["deploy", "call_api", "commit", "push"]
+    },
+    {
+      "level": 6,
+      "name": "Root",
+      "allowedTools": ["run_command", "manage_task", "sudo"]
+    }
+  ]
+}
