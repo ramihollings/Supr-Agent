@@ -25,6 +25,8 @@ import { agentGroupService } from '@/src/services/agent-groups';
 import { guidelinePackService } from '@/src/services/guideline-packs';
 import { memorySectionService } from '@/src/services/memory-sections';
 import { operationalMetrics } from '@/src/services/operational-metrics';
+import { skillLearningService } from '@/src/services/skill-learning';
+import { probeDockerAvailability } from '@/src/services/execution-environment';
 import { PipelineGates } from '@/src/governance/PipelineGates';
 import { portabilityService } from '@/src/services/portability';
 import crypto from 'crypto';
@@ -97,18 +99,121 @@ export async function fetchSupervisorConsoleAction(projectId?: string) {
   try {
     const mission = projectId ? await getMissionById(projectId) : await getActiveMission();
     const missionId = mission?.id || null;
-    const [agents, groups, blueprints, memorySections, metrics, guidelinePacks] = await Promise.all([
+    const [
+      agents,
+      groups,
+      blueprints,
+      memorySections,
+      metrics,
+      guidelinePacks,
+      learnedSkillDrafts,
+      replanDecisions,
+      providerRouteDecisions,
+      outboundMessages,
+      executionSettings,
+    ] = await Promise.all([
       getAgents(),
       missionId ? agentGroupService.listForMission(missionId) : Promise.resolve([]),
       agentBlueprintService.list(missionId),
       memorySectionService.list(missionId),
       operationalMetrics.listRecent(25, missionId),
       guidelinePackService.list(),
+      skillLearningService.listDrafts(missionId),
+      missionId
+        ? dbClient.query<any>(`SELECT * FROM Replan_Decisions WHERE mission_id = ? ORDER BY created_at DESC LIMIT 12`, [missionId])
+        : Promise.resolve([]),
+      missionId
+        ? dbClient.query<any>(`SELECT * FROM Provider_Route_Decisions WHERE mission_id = ? ORDER BY created_at DESC LIMIT 12`, [missionId])
+        : Promise.resolve([]),
+      missionId
+        ? dbClient.query<any>(`SELECT * FROM Outbound_Messages WHERE mission_id = ? ORDER BY created_at DESC LIMIT 12`, [missionId])
+        : Promise.resolve([]),
+      dbClient.query<any>(
+        `SELECT key, value FROM Settings
+         WHERE key IN ('runtime_mode','docker_available','remote_execution_enabled','channels_slack','channels_discord','channels_telegram')`,
+      ),
     ]);
-    return { mission, agents, groups, blueprints, memorySections, metrics, guidelinePacks };
+
+    const runtimeDecisions = {
+      replanDecisions: replanDecisions.map((row: any) => ({
+        id: row.id,
+        trigger: row.trigger,
+        flowRunId: row.flow_run_id,
+        plannerSource: row.planner_source,
+        affectedNodeIds: safeJson<string[]>(row.affected_node_ids, []),
+        insertedActionIds: safeJson<string[]>(row.inserted_action_ids, []),
+        removedActionIds: safeJson<string[]>(row.removed_action_ids, []),
+        createdAt: row.created_at,
+      })),
+      providerRouteDecisions: providerRouteDecisions.map((row: any) => ({
+        id: row.id,
+        agentRunId: row.agent_run_id,
+        agentRole: row.agent_role,
+        provider: row.provider,
+        model: row.model,
+        fallbackProvider: row.fallback_provider,
+        runtimeMode: row.runtime_mode,
+        failureReason: row.failure_reason,
+        createdAt: row.created_at,
+      })),
+      outboundMessages: outboundMessages.map((row: any) => ({
+        id: row.id,
+        source: row.source,
+        actorId: row.actor_id,
+        reason: row.reason,
+        status: row.status,
+        error: row.error,
+        sentAt: row.sent_at,
+        createdAt: row.created_at,
+      })),
+      executionSettings: Object.fromEntries(executionSettings.map((row: any) => [row.key, row.value])),
+    };
+
+    return { mission, agents, groups, blueprints, memorySections, metrics, guidelinePacks, learnedSkillDrafts, runtimeDecisions };
   } catch (error: any) {
     console.error('[fetchSupervisorConsoleAction]', error);
-    return { mission: null, agents: [], groups: [], blueprints: [], memorySections: [], metrics: [], guidelinePacks: [], error: error.message };
+    return {
+      mission: null,
+      agents: [],
+      groups: [],
+      blueprints: [],
+      memorySections: [],
+      metrics: [],
+      guidelinePacks: [],
+      learnedSkillDrafts: [],
+      runtimeDecisions: { replanDecisions: [], providerRouteDecisions: [], outboundMessages: [], executionSettings: {} },
+      error: error.message,
+    };
+  }
+}
+
+export async function requestLearnedSkillReviewAction(draftId: string) {
+  try {
+    const id = z.string().min(1).max(180).parse(draftId);
+    const approvalId = await skillLearningService.requestSecurityReview(id);
+    return { success: true, approvalId };
+  } catch (error: any) {
+    return { success: false, error: error.message || String(error) };
+  }
+}
+
+export async function promoteLearnedSkillDraftAction(draftId: string) {
+  try {
+    const id = z.string().min(1).max(180).parse(draftId);
+    const path = await skillLearningService.promoteApprovedDraft(id);
+    return { success: true, path };
+  } catch (error: any) {
+    return { success: false, error: error.message || String(error) };
+  }
+}
+
+export async function rejectLearnedSkillDraftAction(draftId: string) {
+  try {
+    const id = z.string().min(1).max(180).parse(draftId);
+    const draft = await skillLearningService.rejectDraft(id);
+    return { success: true, draft };
+  } catch (error: any) {
+    return { success: false, error: error.message || String(error) };
   }
 }
 
@@ -1014,6 +1119,8 @@ const PROJECT_FLOW_CAPABILITIES = [
   'governance_review',
   'delivery_package',
   'execute_command',
+  'execute_sandboxed_command',
+  'execute_remote',
 ] as const;
 
 type DesignProfileSummary = {
@@ -1523,14 +1630,14 @@ export async function approveLowRiskActionsAction(projectId: string) {
 }
 
 export async function routeIntakeToProjectFlowAction(input: {
-  source: 'supr-chat' | 'telegram' | 'api';
+  source: 'supr-chat' | 'telegram' | 'slack' | 'discord' | 'api';
   content: string;
   projectId?: string | null;
   attachments?: unknown[];
 }) {
   try {
     const data = z.object({
-      source: z.enum(['supr-chat', 'telegram', 'api']),
+      source: z.enum(['supr-chat', 'telegram', 'slack', 'discord', 'api']),
       content: z.string().min(1).max(12000),
       projectId: z.string().min(1).max(160).nullable().optional(),
       attachments: z.array(z.unknown()).optional(),
@@ -1640,6 +1747,7 @@ export async function fetchConnectorHealthAction() {
     const connectors = [
       { id: 'gemini', name: 'Gemini', configured: settings.global_gemini_key_configured === 'true' || !!process.env.GEMINI_API_KEY, mode: 'Live' },
       { id: 'slack', name: 'Slack', configured: settings.integrations_slack_configured === 'true', mode: 'Partially Connected' },
+      { id: 'discord', name: 'Discord', configured: settings.integrations_discord_configured === 'true', mode: 'Partially Connected' },
       { id: 'github', name: 'GitHub', configured: settings.integrations_github_configured === 'true', mode: 'Partially Connected' },
       { id: 'gmail', name: 'Gmail', configured: settings.integrations_gmail_configured === 'true', mode: 'Partially Connected' },
       { id: 'composio', name: 'Composio', configured: settings.integrations_composio_configured === 'true', mode: 'Partially Connected' },
@@ -1658,9 +1766,17 @@ export async function fetchConnectorHealthAction() {
   }
 }
 
+export async function probeDockerAvailabilityAction() {
+  try {
+    return await probeDockerAvailability();
+  } catch (error: any) {
+    return { success: false, available: false, detail: error.message || String(error) };
+  }
+}
+
 export async function testConnectorAction(connectorId: string) {
   try {
-    z.enum(['gemini', 'slack', 'github', 'gmail', 'composio']).parse(connectorId);
+    z.enum(['gemini', 'slack', 'discord', 'github', 'gmail', 'composio']).parse(connectorId);
     let configured = false;
     let status = 'Offline';
     let detail = 'No credential configured.';
@@ -1688,6 +1804,12 @@ export async function testConnectorAction(connectorId: string) {
       configured = !!(await getSecretSetting('integrations_slack'));
       status = configured ? 'Partially Connected' : 'Offline';
       detail = configured ? 'Slack webhook is configured. Send tests are intentionally manual.' : detail;
+    }
+
+    if (connectorId === 'discord') {
+      configured = !!(await getSecretSetting('integrations_discord', process.env.DISCORD_WEBHOOK_URL));
+      status = configured ? 'Partially Connected' : 'Offline';
+      detail = configured ? 'Discord webhook is configured. Send tests are intentionally manual.' : detail;
     }
 
     if (connectorId === 'gmail') {

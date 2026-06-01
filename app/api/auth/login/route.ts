@@ -7,8 +7,29 @@ import {
   verifyPassword,
 } from '@/lib/auth';
 
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
+const loginAttempts = new Map<string, number[]>();
+
+function actorKey(request: Request) {
+  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'local';
+}
+
+function tooManyAttempts(request: Request) {
+  const key = actorKey(request);
+  const now = Date.now();
+  const recent = (loginAttempts.get(key) || []).filter((time) => now - time < LOGIN_WINDOW_MS);
+  recent.push(now);
+  loginAttempts.set(key, recent);
+  return recent.length > LOGIN_MAX_ATTEMPTS;
+}
+
 export async function POST(request: Request) {
   try {
+    if (tooManyAttempts(request)) {
+      return NextResponse.json({ success: false, error: 'Too many login attempts. Try again later.' }, { status: 429 });
+    }
+
     const body = await request.json();
     const { password } = body;
 

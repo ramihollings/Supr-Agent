@@ -73,6 +73,8 @@ export interface AgentContextBundle {
   artifacts: Array<Record<string, unknown>>;
   approvals: Array<Record<string, unknown>>;
   tools: Array<Record<string, unknown>>;
+  skillContext?: string;
+  skillMatches?: SkillMatch[];
   injectedSections: string[];
 }
 
@@ -117,4 +119,68 @@ export interface ExecutionResult {
   result?: unknown;
   approvalId?: string | null;
   reason?: string;
+}
+
+export interface LearnedSkillDraft {
+  id: string;
+  missionId: string;
+  agentRunId: string;
+  proposedName: string;
+  markdown: string;
+  sourceRunIds: string[];
+  evidenceIds: string[];
+  riskFindings: string[];
+  status: 'draft' | 'review_requested' | 'approved' | 'rejected' | 'promoted';
+  reviewerAgentId?: string | null;
+  approvalId?: string | null;
+}
+
+export interface SkillMatch {
+  name: string;
+  description: string;
+  path: string;
+  matchReason: string;
+  confidence: number;
+  injected: 'summary' | 'full';
+}
+
+export interface ReplanDecision {
+  id: string;
+  missionId: string;
+  flowRunId: string;
+  trigger: string;
+  affectedNodeIds: string[];
+  plannerSource: 'model' | 'preset_fallback' | 'none';
+  insertedActionIds: string[];
+  removedActionIds: string[];
+}
+
+export interface ProviderRouteDecision {
+  id: string;
+  missionId?: string | null;
+  agentRunId?: string | null;
+  agentRole: 'supr' | 'code' | 'research' | 'reflection' | 'sub';
+  provider: string;
+  model?: string | null;
+  fallbackProvider?: string | null;
+  runtimeMode: RuntimeMode;
+  failureReason?: string | null;
+}
+
+export interface MessagingGatewayAdapter {
+  source: 'telegram' | 'slack' | 'discord';
+  supportsSource(source: string): boolean;
+  normalizeActor(payload: unknown): string | null;
+  receive(payload: unknown): Promise<{ actorId: string | null; content: string; attachments?: unknown[] }>;
+  send(input: { actorId: string; text: string; missionId?: string | null; reason: string }): Promise<{ ok: boolean; deliveryId?: string; error?: string }>;
+}
+
+export interface CommandExecutionPolicy {
+  requestedCommand: string;
+  agentId?: string | null;
+  riskLevel: RiskLevel;
+  selectedEnvironment: 'local' | 'docker' | 'remote' | 'blocked';
+  approvalRequired: boolean;
+  evidenceLabel: string;
+  reason: string;
 }

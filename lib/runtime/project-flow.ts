@@ -4,6 +4,7 @@ import { createAgentAction, resumeAgentActionFromApproval } from './agent-action
 import { runAgentRuntimeAction } from './agent-runtime-runner';
 import { getActiveProvider } from '@/lib/providers/model';
 import { getRuntimeMode, hasConfiguredModelProvider } from './runtime-mode';
+import { messagingGateway } from '@/src/services/messaging-gateway';
 import type { PermissionTier } from '@/lib/services/governance';
 import type { RiskLevel, RuntimeMode } from './types';
 
@@ -26,9 +27,9 @@ const AGENT_PRESETS: Preset[] = [
   { role: 'Research', agentName: 'Research Agent', capability: 'web_scrape', permissionTier: 'Observe', riskLevel: 'Low', phase: 'Research' },
   { role: 'Code', agentName: 'Code Agent', capability: 'workspace_write_artifact', permissionTier: 'Edit', riskLevel: 'Medium', phase: 'Build' },
   { role: 'Code', agentName: 'Code Agent', capability: 'workspace_write_file', permissionTier: 'Edit', riskLevel: 'Medium', phase: 'Build' },
-  { role: 'Code', agentName: 'Code Agent', capability: 'execute_command', permissionTier: 'Execute', riskLevel: 'High', phase: 'Build' },
+  { role: 'Code', agentName: 'Code Agent', capability: 'execute_sandboxed_command', permissionTier: 'Execute', riskLevel: 'High', phase: 'Build' },
   { role: 'QA', agentName: 'QA Agent', capability: 'workspace_validate_outputs', permissionTier: 'Draft', riskLevel: 'Low', phase: 'Verify' },
-  { role: 'QA', agentName: 'QA Agent', capability: 'execute_command', permissionTier: 'Execute', riskLevel: 'High', phase: 'Verify' },
+  { role: 'QA', agentName: 'QA Agent', capability: 'execute_sandboxed_command', permissionTier: 'Execute', riskLevel: 'High', phase: 'Verify' },
   { role: 'Security', agentName: 'Security Agent', capability: 'governance_review', permissionTier: 'Edit', riskLevel: 'Medium', phase: 'Verify' },
   { role: 'Writer', agentName: 'Writer Agent', capability: 'delivery_package', permissionTier: 'Draft', riskLevel: 'Low', phase: 'Deliver' },
 ];
@@ -167,8 +168,8 @@ async function upsertFlowNode(input: {
 function buildTaskTitle(preset: Preset, objective: string) {
   const verb: Record<string, string> = {
     Research: 'Gather context for',
-    Code: preset.capability === 'execute_command' ? 'Run sandbox checks for' : 'Build or modify work for',
-    QA: preset.capability === 'execute_command' ? 'Run validation command for' : 'Validate outputs for',
+    Code: preset.capability === 'execute_sandboxed_command' ? 'Run sandbox checks for' : 'Build or modify work for',
+    QA: preset.capability === 'execute_sandboxed_command' ? 'Run validation command for' : 'Validate outputs for',
     Security: 'Review risk for',
     Writer: 'Prepare deliverables for',
   };
@@ -183,11 +184,269 @@ const PROJECT_FLOW_CAPABILITIES = new Set([
   'governance_review',
   'delivery_package',
   'execute_command',
+  'execute_sandboxed_command',
+  'execute_remote',
 ]);
 
 const PERMISSION_TIERS = new Set<PermissionTier>(['Observe', 'Draft', 'Edit', 'Execute', 'External_Act', 'Root']);
 const RISK_LEVELS = new Set<RiskLevel>(['Low', 'Medium', 'High', 'Critical']);
 const PHASES = ['Intake', 'Research', 'Build', 'Verify', 'Deliver'];
+
+async function recordReplanDecision(input: {
+  missionId: string;
+  flowRunId: string;
+  trigger: string;
+  affectedNodeIds?: string[];
+  plannerSource?: 'model' | 'preset_fallback' | 'none';
+  insertedActionIds?: string[];
+  removedActionIds?: string[];
+}) {
+  const decisionId = id('replan');
+  await dbClient.execute(
+    `INSERT INTO Replan_Decisions
+      (id, mission_id, flow_run_id, trigger, affected_node_ids, planner_source, inserted_action_ids, removed_action_ids)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      decisionId,
+      input.missionId,
+      input.flowRunId,
+      input.trigger,
+      JSON.stringify(input.affectedNodeIds || []),
+      input.plannerSource || 'none',
+      JSON.stringify(input.insertedActionIds || []),
+      JSON.stringify(input.removedActionIds || []),
+    ],
+  );
+  return decisionId;
+}
+
+async function updateReplanDecision(decisionId: string, input: {
+  plannerSource?: 'model' | 'preset_fallback' | 'none';
+  insertedActionIds?: string[];
+  removedActionIds?: string[];
+}) {
+  await dbClient.execute(
+    `UPDATE Replan_Decisions
+     SET planner_source = ?, inserted_action_ids = ?, removed_action_ids = ?
+     WHERE id = ?`,
+    [
+      input.plannerSource || 'none',
+      JSON.stringify(input.insertedActionIds || []),
+      JSON.stringify(input.removedActionIds || []),
+      decisionId,
+    ],
+  );
+}
+
+async function evaluatePhaseGate(flowRunId: string, missionId: string) {
+  const missingEvidence = await dbClient.query<any>(
+    `SELECT a.id, a.task_id, a.capability
+     FROM Agent_Actions a
+     LEFT JOIN Tool_Invocations t ON t.agent_action_id = a.id AND t.status = 'completed'
+     WHERE a.mission_id = ? AND a.status = 'completed'
+     GROUP BY a.id
+     HAVING COUNT(t.id) = 0`,
+    [missionId],
+  );
+  if (missingEvidence.length > 0) {
+    const nodes = await dbClient.query<any>(
+      `SELECT id FROM Flow_Nodes WHERE flow_run_id = ? AND kind = 'agent_action' AND ref_id IN (${missingEvidence.map(() => '?').join(',')})`,
+      [flowRunId, ...missingEvidence.map((action) => action.id)],
+    );
+    await recordReplanDecision({
+      missionId,
+      flowRunId,
+      trigger: 'phase_gate_missing_evidence',
+      affectedNodeIds: nodes.map((node) => node.id),
+    });
+    return { ok: false, missingEvidence };
+  }
+  return { ok: true, missingEvidence: [] };
+}
+
+async function maybeReplanFlow(flowRunId: string, missionId: string, trigger: string) {
+  // preserve completed nodes and their evidence; replanning only annotates or inserts downstream work.
+  const failedTwice = await dbClient.query<any>(
+    `SELECT agent_action_id, COUNT(*) as failures
+     FROM Agent_Runs
+     WHERE mission_id = ? AND status = 'failed'
+     GROUP BY agent_action_id
+     HAVING COUNT(*) >= 2`,
+    [missionId],
+  );
+  const gate = await evaluatePhaseGate(flowRunId, missionId);
+  if (failedTwice.length === 0 && gate.ok && trigger !== 'manual') return null;
+
+  const affectedActionIds = Array.from(new Set([
+    ...failedTwice.map((row) => row.agent_action_id).filter(Boolean),
+    ...gate.missingEvidence.map((row: any) => row.id),
+  ]));
+  const nodes = affectedActionIds.length
+    ? await dbClient.query<any>(
+        `SELECT id FROM Flow_Nodes WHERE flow_run_id = ? AND kind = 'agent_action' AND ref_id IN (${affectedActionIds.map(() => '?').join(',')})`,
+        [flowRunId, ...affectedActionIds],
+      )
+    : [];
+  const existingDecision = affectedActionIds.length
+    ? await dbClient.queryOne<any>(
+        `SELECT id FROM Replan_Decisions
+         WHERE mission_id = ? AND flow_run_id = ? AND removed_action_ids LIKE ?
+         ORDER BY created_at DESC LIMIT 1`,
+        [missionId, flowRunId, `%${affectedActionIds[0]}%`],
+      )
+    : null;
+  if (existingDecision) return existingDecision.id;
+
+  const decisionId = await recordReplanDecision({
+    missionId,
+    flowRunId,
+    trigger,
+    affectedNodeIds: nodes.map((node) => node.id),
+    plannerSource: 'none',
+  });
+  const removedActionIds = await cancelIncompleteDownstreamWork(flowRunId, missionId, affectedActionIds, decisionId);
+  const recovery = await buildReplanRecoveryWork(flowRunId, missionId, trigger, decisionId, removedActionIds);
+  await updateReplanDecision(decisionId, {
+    plannerSource: recovery.plannerSource,
+    insertedActionIds: recovery.insertedActionIds,
+    removedActionIds,
+  });
+  await logFlowEvent(missionId, 'supr_decision', 'Supr', 'Replan decision recorded', `Decision ${decisionId}: ${trigger}`);
+  return decisionId;
+}
+
+async function cancelIncompleteDownstreamWork(flowRunId: string, missionId: string, affectedActionIds: string[], decisionId: string) {
+  if (affectedActionIds.length === 0) return [];
+  const actions = await dbClient.query<any>(
+    `SELECT * FROM Agent_Actions
+     WHERE mission_id = ? AND id IN (${affectedActionIds.map(() => '?').join(',')})
+       AND status IN ('draft','approved','running','pending_approval','failed')`,
+    [missionId, ...affectedActionIds],
+  );
+  const removedActionIds = actions.map((action) => action.id);
+  if (removedActionIds.length === 0) return [];
+  await dbClient.execute(
+    `UPDATE Agent_Actions SET status = 'cancelled', error = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id IN (${removedActionIds.map(() => '?').join(',')})`,
+    [`Superseded by replan ${decisionId}`, ...removedActionIds],
+  );
+  await dbClient.execute(
+    `UPDATE Flow_Nodes SET status = 'cancelled', next_action = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE flow_run_id = ? AND kind = 'agent_action' AND ref_id IN (${removedActionIds.map(() => '?').join(',')})`,
+    [`Superseded by replan ${decisionId}`, flowRunId, ...removedActionIds],
+  );
+  const taskIds = actions.map((action) => action.task_id).filter(Boolean);
+  if (taskIds.length > 0) {
+    await dbClient.execute(
+      `UPDATE Tasks SET status = 'Blocked', blocker_reason = ?
+       WHERE id IN (${taskIds.map(() => '?').join(',')}) AND status != 'Done'`,
+      [`Superseded by replan ${decisionId}`, ...taskIds],
+    );
+    await dbClient.execute(
+      `UPDATE Flow_Nodes SET status = 'Blocked', next_action = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE flow_run_id = ? AND kind = 'task' AND ref_id IN (${taskIds.map(() => '?').join(',')})`,
+      [`Superseded by replan ${decisionId}`, flowRunId, ...taskIds],
+    );
+  }
+  return removedActionIds;
+}
+
+async function buildReplanRecoveryWork(flowRunId: string, missionId: string, trigger: string, decisionId: string, removedActionIds: string[]) {
+  const mission = await getMissionById(missionId);
+  const objective = [
+    'Recover incomplete Supr project flow work.',
+    `Original objective: ${mission?.objective || mission?.name || missionId}`,
+    `Trigger: ${trigger}`,
+    `Superseded actions: ${removedActionIds.join(', ') || 'none'}`,
+    'Create only replacement validation, repair, or delivery work needed after preserving completed nodes.',
+  ].join('\n');
+
+  let plannerSource: 'model' | 'preset_fallback' = 'preset_fallback';
+  let plan: PlannedWork[] = [];
+  try {
+    const built = await buildProjectPlan(objective);
+    plannerSource = built.plannerSource === 'model' ? 'model' : 'preset_fallback';
+    plan = built.plan;
+  } catch {
+    plan = presetPlan(objective);
+  }
+
+  const insertedActionIds: string[] = [];
+  const recoveryPlan = plan
+    .filter((item) => item.capability !== 'web_scrape')
+    .slice(0, 3);
+  const baseX = 120 + Math.max(0, removedActionIds.length) * 80;
+  const existingNodeCount = await dbClient.queryOne<any>(`SELECT COUNT(*) as count FROM Flow_Nodes WHERE flow_run_id = ?`, [flowRunId]);
+  const offset = Number(existingNodeCount?.count || 0);
+
+  for (const [index, planned] of recoveryPlan.entries()) {
+    const agent = await ensurePresetAgent(planned);
+    const title = `[Replan ${decisionId.slice(0, 12)}] ${planned.title}`.slice(0, 240);
+    const taskId = id('task');
+    await dbClient.execute(
+      `INSERT INTO Tasks (id, mission_id, phase_id, title, status, owner_agent_id, required_permission, blocker_reason)
+       VALUES (?, ?, ?, ?, 'Pending', ?, ?, ?)`,
+      [taskId, missionId, `phase-${planned.phase.toLowerCase()}`, title, agent.id, planned.permissionTier, `Inserted by replan ${decisionId}`],
+    );
+    const action = await createAgentAction({
+      missionId,
+      taskId,
+      agentId: agent.id,
+      capability: planned.capability,
+      intent: title,
+      inputs: { ...planned.inputs, objective, replanDecisionId: decisionId, supersedesActionIds: removedActionIds },
+      riskLevel: planned.riskLevel,
+      requiredPermission: planned.permissionTier,
+      metadata: {
+        flowRunId,
+        role: planned.role,
+        agentName: planned.agentName,
+        requiresEvidence: true,
+        plannerSource,
+        replanDecisionId: decisionId,
+        supersedesActionIds: removedActionIds,
+      },
+    });
+    insertedActionIds.push(action.id);
+    await upsertFlowNode({
+      flowRunId,
+      missionId,
+      kind: 'task',
+      refId: taskId,
+      label: title,
+      ownerAgentId: agent.id,
+      status: 'Pending',
+      riskLevel: planned.riskLevel,
+      nextAction: `Run recovery ${planned.agentName}`,
+      x: baseX + (offset + index) * 190,
+      y: 780,
+      metadata: { phase: planned.phase, plannerSource, replanDecisionId: decisionId, supersedesActionIds: removedActionIds },
+    });
+    await upsertFlowNode({
+      flowRunId,
+      missionId,
+      kind: 'agent_action',
+      refId: action.id,
+      label: planned.capability,
+      ownerAgentId: agent.id,
+      status: action.status || 'draft',
+      riskLevel: planned.riskLevel,
+      nextAction: 'Recovery action queued',
+      x: baseX + (offset + index) * 190,
+      y: 930,
+      metadata: { taskId, traceId: action.traceId, plannerSource, replanDecisionId: decisionId, supersedesActionIds: removedActionIds },
+    });
+  }
+
+  return { plannerSource, insertedActionIds };
+}
+
+async function getOriginatingChannel(missionId: string) {
+  return dbClient.queryOne<any>(
+    `SELECT source, actor_id FROM Channel_Commands WHERE mission_id = ? AND actor_id IS NOT NULL ORDER BY created_at ASC LIMIT 1`,
+    [missionId],
+  );
+}
 
 function normalizePlanItem(raw: any, objective: string, mode: RuntimeMode): PlannedWork | null {
   const capability = String(raw?.capability || '').trim();
@@ -196,7 +455,9 @@ function normalizePlanItem(raw: any, objective: string, mode: RuntimeMode): Plan
   const agentName = String(raw?.agentName || `${role} Agent`).slice(0, 80);
   const phase = PHASES.includes(String(raw?.phase)) ? String(raw.phase) : 'Build';
   const permissionTier = PERMISSION_TIERS.has(raw?.permissionTier) ? raw.permissionTier as PermissionTier : 'Draft';
-  const riskLevel = RISK_LEVELS.has(raw?.riskLevel) ? raw.riskLevel as RiskLevel : capability === 'execute_command' ? 'High' : 'Medium';
+  const riskLevel = RISK_LEVELS.has(raw?.riskLevel)
+    ? raw.riskLevel as RiskLevel
+    : capability.includes('execute') ? 'High' : 'Medium';
   const title = String(raw?.title || buildTaskTitle({ role, agentName, capability, permissionTier, riskLevel, phase }, objective)).slice(0, 240);
   const inputs = raw?.inputs && typeof raw.inputs === 'object' && !Array.isArray(raw.inputs)
     ? raw.inputs as Record<string, unknown>
@@ -236,7 +497,7 @@ async function buildModelProjectPlan(objective: string, mode: RuntimeMode): Prom
     'Each task must include: phase, role, agentName, capability, permissionTier, riskLevel, title, inputs.',
     `Allowed phases: ${PHASES.join(', ')}`,
     `Allowed capabilities: ${Array.from(PROJECT_FLOW_CAPABILITIES).join(', ')}`,
-    'Use execute_command only when validation is necessary because it requires approval.',
+    'Use execute_command for governed local validation and execute_sandboxed_command only when Docker sandbox execution is required.',
     'Create 4-8 tasks. Include research, build, validation/governance, and delivery when relevant.',
     '',
     `Objective: ${objective}`,
@@ -481,12 +742,38 @@ export async function runProjectFlow(projectId: string) {
       if (execution.status === 'completed') {
         completed += 1;
         await recordAgentRun(flowRun.id, actionRow, 'completed', `Runtime completed ${actionRow.capability}`, execution.result);
+        const origin = await getOriginatingChannel(projectId);
+        await messagingGateway.notify({
+          source: origin?.source,
+          actorId: origin?.actor_id,
+          missionId: projectId,
+          reason: 'action completed',
+          text: `Action completed: ${actionRow.capability}`,
+        });
+        await maybeReplanFlow(flowRun.id, projectId, 'action_completed');
       } else if (execution.status === 'pending_approval') {
         gated += 1;
         await recordAgentRun(flowRun.id, actionRow, 'pending_approval', `Runtime paused for approval: ${execution.failureReason || actionRow.capability}`);
+        const origin = await getOriginatingChannel(projectId);
+        await messagingGateway.notify({
+          source: origin?.source,
+          actorId: origin?.actor_id,
+          missionId: projectId,
+          reason: 'approval needed',
+          text: `Approval needed: ${execution.failureReason || actionRow.capability}`,
+        });
       } else if (execution.status === 'failed') {
         failed += 1;
         await recordAgentRun(flowRun.id, actionRow, 'failed', execution.failureReason || 'Action failed', null, execution.failureReason);
+        const origin = await getOriginatingChannel(projectId);
+        await messagingGateway.notify({
+          source: origin?.source,
+          actorId: origin?.actor_id,
+          missionId: projectId,
+          reason: 'action failed',
+          text: `Action failed: ${execution.failureReason || actionRow.capability}`,
+        });
+        await maybeReplanFlow(flowRun.id, projectId, 'action_failed');
       }
     } catch (error: any) {
       failed += 1;
@@ -504,6 +791,16 @@ export async function runProjectFlow(projectId: string) {
     `UPDATE Flow_Runs SET status = ?, completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [status, status, flowRun.id],
   );
+  if (status === 'completed') {
+    const origin = await getOriginatingChannel(projectId);
+    await messagingGateway.notify({
+      source: origin?.source,
+      actorId: origin?.actor_id,
+      missionId: projectId,
+      reason: 'mission finished',
+      text: `Mission finished: ${projectId}`,
+    });
+  }
   await logFlowEvent(projectId, 'supr_decision', 'Supr', 'Project Flow heartbeat finished', `${completed} completed, ${gated} waiting for approval, ${failed} failed.`);
   return { success: true, flowRunId: flowRun.id, completed, gated, failed, status };
 }
@@ -552,7 +849,7 @@ export async function approveLowRiskActions(projectId: string) {
 }
 
 export async function routeIntakeToProjectFlow(input: {
-  source: 'supr-chat' | 'telegram' | 'api';
+  source: 'supr-chat' | 'telegram' | 'slack' | 'discord' | 'api';
   content: string;
   projectId?: string | null;
   actorId?: string | null;

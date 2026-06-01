@@ -217,7 +217,7 @@ async function getSetting(key: string): Promise<string | null> {
 // requested agent role, checking SQLite overrides first, then falling back to
 // global settings, and finally process.env.
 // ─────────────────────────────────────────────────────────────────────────────
-export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research' | 'sub'): Promise<ModelProvider> {
+export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research' | 'reflection' | 'sub'): Promise<ModelProvider> {
   // 1. Resolve Global Keys (SQLite overrides first, then process.env)
   const minimaxKey  = await getSecretSetting('global_minimax_key', process.env.MINIMAX_API_KEY);
   const geminiKey   = await getSecretSetting('global_gemini_key', process.env.GEMINI_API_KEY);

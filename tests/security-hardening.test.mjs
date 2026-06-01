@@ -21,14 +21,33 @@ test('auth routes do not issue literal boolean auth cookies', () => {
   const setupRoute = readFileSync('app/api/auth/setup/route.ts', 'utf8');
   assert.equal(/supr_auth_token['"]\s*,\s*['"]true/.test(loginRoute + setupRoute), false);
   assert.match(loginRoute, /createSessionToken/);
+  assert.match(loginRoute, /LOGIN_MAX_ATTEMPTS/);
   assert.match(setupRoute, /hashPassword/);
+  assert.match(setupRoute, /SETUP_MAX_ATTEMPTS/);
 });
 
 test('global auth gate uses the Next proxy convention', () => {
   const proxyRoute = readFileSync('proxy.ts', 'utf8');
   assert.match(proxyRoute, /export async function proxy/);
   assert.match(proxyRoute, /verifySessionToken/);
+  assert.match(proxyRoute, /api\/slack/);
+  assert.match(proxyRoute, /api\/discord/);
+  assert.match(proxyRoute, /api\/telegram/);
   assert.equal(existsSync('middleware.ts'), false);
+});
+
+test('theme bootstrap only applies whitelisted appearance classes', () => {
+  const layout = readFileSync('app/layout.tsx', 'utf8');
+  const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
+
+  assert.match(layout, /allowedThemes/);
+  assert.match(layout, /allowedPalettes/);
+  assert.match(layout, /allowedThemes\.indexOf\(theme\) === -1/);
+  assert.match(layout, /allowedPalettes\.indexOf\(palette\) === -1/);
+  assert.match(settingsPage, /sanitizeTheme/);
+  assert.match(settingsPage, /sanitizePalette/);
+  assert.match(settingsPage, /ALLOWED_THEMES/);
+  assert.match(settingsPage, /ALLOWED_PALETTES/);
 });
 
 test('non-auth API routes use the shared auth guard', () => {
@@ -443,4 +462,118 @@ test('real runtime mode blocks diagnostic mock successes', () => {
   assert.match(composio, /requires COMPOSIO_API_KEY in real runtime mode/);
   assert.match(httpProvider, /EXTERNAL_AGENT_ENDPOINT must point to a live provider in real runtime mode/);
   assert.match(modelProvider, /Real runtime mode requires/);
+});
+
+test('gap closure wires governed learning, replanning, messaging, streaming, and execution policy', () => {
+  const initSql = readFileSync('lib/database/init.ts', 'utf8');
+  const runtimeTypes = readFileSync('lib/runtime/types.ts', 'utf8');
+  const runner = readFileSync('lib/runtime/agent-runtime-runner.ts', 'utf8');
+  const projectFlow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
+  const contextAssembler = readFileSync('lib/runtime/context-assembler.ts', 'utf8');
+  const skillLearning = readFileSync('src/services/skill-learning.ts', 'utf8');
+  const messaging = readFileSync('src/services/messaging-gateway.ts', 'utf8');
+  const executionPolicy = readFileSync('src/services/command-execution-policy.ts', 'utf8');
+  const shellTool = readFileSync('src/tools/shell.ts', 'utf8');
+  const browser = readFileSync('lib/tools/browser.ts', 'utf8');
+  const agentBlueprints = readFileSync('src/services/agent-blueprints.ts', 'utf8');
+
+  for (const table of ['Learned_Skill_Drafts', 'Outbound_Messages', 'Replan_Decisions', 'Provider_Route_Decisions']) {
+    assert.match(initSql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+
+  for (const symbol of ['LearnedSkillDraft', 'SkillMatch', 'ReplanDecision', 'ProviderRouteDecision', 'MessagingGatewayAdapter', 'CommandExecutionPolicy']) {
+    assert.match(runtimeTypes, new RegExp(`interface ${symbol}|type ${symbol}`));
+  }
+
+  assert.match(skillLearning, /MIN_COMPLEX_TOOL_CALLS = 3/);
+  assert.match(skillLearning, /learned_skill_draft/);
+  assert.match(skillLearning, /parseSkillMd/);
+  assert.match(skillLearning, /distillSkillMarkdown/);
+  assert.match(skillLearning, /getActiveProvider/);
+  assert.match(skillLearning, /governance_review/);
+  assert.match(skillLearning, /requestSecurityReview/);
+  assert.match(skillLearning, /rejectDraft/);
+  assert.match(skillLearning, /listDrafts/);
+  assert.match(skillLearning, /Approval is required before writing learned skills/);
+  assert.match(skillLearning, /\.agents[\\/\\\\]skills/);
+  assert.match(agentBlueprints, /SIAL Agent/);
+  assert.doesNotMatch(projectFlow, /Reflection['"]\s*,/);
+
+  assert.match(contextAssembler, /skillCatalog/);
+  assert.match(contextAssembler, /SkillMatch/);
+  assert.match(contextAssembler, /matching_skill_summaries/);
+  assert.match(runner, /streamContent/);
+  assert.match(runner, /runtime_model_stream/);
+  assert.match(runner, /providerRouteDecisionService/);
+  assert.match(runner, /skillLearningService\.evaluateCompletedRun/);
+  assert.match(runner, /requestSecurityReview/);
+
+  assert.match(projectFlow, /evaluatePhaseGate/);
+  assert.match(projectFlow, /maybeReplanFlow/);
+  assert.match(projectFlow, /buildReplanRecoveryWork/);
+  assert.match(projectFlow, /cancelIncompleteDownstreamWork/);
+  assert.match(projectFlow, /Replan_Decisions/);
+  assert.match(projectFlow, /insertedActionIds/);
+  assert.match(projectFlow, /removedActionIds/);
+  assert.match(projectFlow, /status = 'cancelled'/);
+  assert.match(projectFlow, /preserve completed nodes/);
+
+  assert.match(messaging, /telegramGatewayAdapter/);
+  assert.match(messaging, /slackGatewayAdapter/);
+  assert.match(messaging, /discordGatewayAdapter/);
+  assert.match(messaging, /Outbound_Messages/);
+  assert.match(messaging, /SLACK_WEBHOOK_URL/);
+  assert.match(messaging, /DISCORD_WEBHOOK_URL/);
+  assert.match(messaging, /fetch\(webhookUrl/);
+  assert.match(messaging, /action completed|approval needed|mission finished/);
+
+  const slackRoute = readFileSync('app/api/slack/route.ts', 'utf8');
+  const discordRoute = readFileSync('app/api/discord/route.ts', 'utf8');
+  assert.match(slackRoute, /verifySlackSignature/);
+  assert.match(slackRoute, /x-slack-signature/);
+  assert.match(slackRoute, /routeIntakeToProjectFlow/);
+  assert.match(slackRoute, /url_verification/);
+  assert.match(discordRoute, /verifyDiscordToken/);
+  assert.match(discordRoute, /DISCORD_WEBHOOK_TOKEN/);
+  assert.match(discordRoute, /routeIntakeToProjectFlow/);
+
+  assert.match(executionPolicy, /resolveCommandExecutionPolicy/);
+  assert.match(executionPolicy, /docker_available/);
+  assert.match(executionPolicy, /remote_disabled/);
+  const executionEnvironment = readFileSync('src/services/execution-environment.ts', 'utf8');
+  const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
+  const actions = readFileSync('app/actions.ts', 'utf8');
+  assert.match(executionEnvironment, /probeDockerAvailability/);
+  assert.match(executionEnvironment, /docker_last_probe/);
+  assert.match(settingsPage, /Probe Docker/);
+  assert.match(settingsPage, /Remote Execution/);
+  assert.match(settingsPage, /Discord Webhook Hook/);
+  assert.match(actions, /probeDockerAvailabilityAction/);
+  assert.match(shellTool, /resolveCommandExecutionPolicy/);
+  assert.match(shellTool, /executionPolicy/);
+  assert.match(shellTool, /execute_sandboxed_command/);
+  assert.match(shellTool, /execute_remote/);
+  assert.match(shellTool, /runLocalCommand/);
+  assert.match(shellTool, /selectedEnvironment !== "docker"/);
+  assert.match(shellTool, /selectedEnvironment !== "remote"/);
+  assert.match(initSql, /execute_sandboxed_command/);
+  assert.match(initSql, /execute_remote/);
+  assert.match(browser, /executionMode/);
+
+  const supervisorPage = readFileSync('app/supervisor/page.tsx', 'utf8');
+  assert.match(actions, /requestLearnedSkillReviewAction/);
+  assert.match(actions, /promoteLearnedSkillDraftAction/);
+  assert.match(actions, /rejectLearnedSkillDraftAction/);
+  assert.match(actions, /learnedSkillDrafts/);
+  assert.match(actions, /runtimeDecisions/);
+  assert.match(actions, /Provider_Route_Decisions/);
+  assert.match(actions, /Outbound_Messages/);
+  assert.match(actions, /Replan_Decisions/);
+  assert.match(supervisorPage, /Learned Skill Drafts/);
+  assert.match(supervisorPage, /handlePromoteSkill/);
+  assert.match(supervisorPage, /handleRejectSkill/);
+  assert.match(supervisorPage, /Runtime Decisions/);
+  assert.match(supervisorPage, /Sandbox Choice/);
+  assert.match(supervisorPage, /Provider Routing/);
+  assert.match(supervisorPage, /Outbound Messages/);
 });

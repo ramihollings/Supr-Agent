@@ -13,6 +13,7 @@ import {
   applyDesignProfileAction,
   fetchConnectorHealthAction,
   testConnectorAction,
+  probeDockerAvailabilityAction,
   exportOrganizationAction,
   importOrganizationAction,
   fetchMissionsAction,
@@ -49,6 +50,47 @@ interface ConnectorHealth {
   configured: boolean;
   status: string;
   lastChecked: string;
+}
+
+const ALLOWED_THEMES = new Set([
+  'neobrutalist',
+  'openclaw',
+  'hermes',
+  'google-neural',
+  'crt',
+  'cyberpunk',
+  'minimalist',
+  'design-notion',
+  'design-verge',
+  'design-carbon',
+]);
+
+const ALLOWED_PALETTES = new Set([
+  'classic',
+  'cyberpunk-neon',
+  'nordic-frost',
+  'forest-moss',
+  'vintage-orange',
+  'matrix-digital',
+  'sunset-glow',
+  'ocean-breeze',
+  'royal-velvet',
+  'sakura-pastel',
+  'minimal-monochrome',
+  'desert-cactus',
+  'corporate-tech',
+  'toxic-spill',
+  'warm-autumn',
+  'design-notion',
+  'design-verge',
+]);
+
+function sanitizeTheme(theme: string) {
+  return ALLOWED_THEMES.has(theme) ? theme : 'neobrutalist';
+}
+
+function sanitizePalette(palette: string) {
+  return ALLOWED_PALETTES.has(palette) ? palette : 'classic';
 }
 
 export default function SettingsPage() {
@@ -89,8 +131,13 @@ export default function SettingsPage() {
   // Channels States
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [slackEnabled, setSlackEnabled] = useState(true);
+  const [discordEnabled, setDiscordEnabled] = useState(false);
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [socialEnabled, setSocialEnabled] = useState(false);
+  const [dockerAvailable, setDockerAvailable] = useState(false);
+  const [dockerLastProbe, setDockerLastProbe] = useState('');
+  const [remoteExecutionEnabled, setRemoteExecutionEnabled] = useState(false);
+  const [remoteExecutionHost, setRemoteExecutionHost] = useState('');
 
   const [telegramToken, setTelegramToken] = useState('718290382:AAFlk1829aB...');
   const [telegramChatId, setTelegramChatId] = useState('-100192830182');
@@ -136,6 +183,7 @@ export default function SettingsPage() {
   const [integrationComposio, setIntegrationComposio] = useState('');
   const [integrationGithub, setIntegrationGithub] = useState('');
   const [integrationSlack, setIntegrationSlack] = useState('');
+  const [integrationDiscord, setIntegrationDiscord] = useState('');
   const [integrationGmail, setIntegrationGmail] = useState('');
 
   // Load settings and memories from SQLite
@@ -157,18 +205,21 @@ export default function SettingsPage() {
       setExistingAgents(agents || []);
 
       if (settings.appearance_theme) {
-        setCurrentTheme(settings.appearance_theme);
-        localStorage.setItem('supr_theme', settings.appearance_theme);
+        const safeTheme = sanitizeTheme(settings.appearance_theme);
+        setCurrentTheme(safeTheme);
+        localStorage.setItem('supr_theme', safeTheme);
       }
       if (settings.appearance_palette) {
-        setCurrentPalette(settings.appearance_palette);
-        localStorage.setItem('supr_palette', settings.appearance_palette);
+        const safePalette = sanitizePalette(settings.appearance_palette);
+        setCurrentPalette(safePalette);
+        localStorage.setItem('supr_palette', safePalette);
       }
       if (settings.active_design_profile) setActiveDesignProfile(settings.active_design_profile);
 
       if (settings.integrations_composio) setIntegrationComposio(settings.integrations_composio);
       if (settings.integrations_github) setIntegrationGithub(settings.integrations_github);
       if (settings.integrations_slack) setIntegrationSlack(settings.integrations_slack);
+      if (settings.integrations_discord) setIntegrationDiscord(settings.integrations_discord);
       if (settings.integrations_gmail) setIntegrationGmail(settings.integrations_gmail);
 
       if (settings.operating_mode) setOperatingMode(settings.operating_mode);
@@ -208,8 +259,13 @@ export default function SettingsPage() {
 
       setEmailEnabled(settings.channels_email === 'true');
       setSlackEnabled(settings.channels_slack === 'true');
+      setDiscordEnabled(settings.channels_discord === 'true');
       setTelegramEnabled(settings.channels_telegram === 'true');
       setSocialEnabled(settings.channels_social === 'true');
+      setDockerAvailable(settings.docker_available === 'true');
+      if (settings.docker_last_probe) setDockerLastProbe(settings.docker_last_probe);
+      setRemoteExecutionEnabled(settings.remote_execution_enabled === 'true');
+      if (settings.remote_execution_host) setRemoteExecutionHost(settings.remote_execution_host);
 
       if (settings.telegram_token) setTelegramToken(settings.telegram_token);
       if (settings.telegram_chat_id) setTelegramChatId(settings.telegram_chat_id);
@@ -238,34 +294,40 @@ export default function SettingsPage() {
   };
 
   const handleThemeChange = (theme: string) => {
-    setCurrentTheme(theme);
-    localStorage.setItem('supr_theme', theme);
+    const safeTheme = sanitizeTheme(theme);
+    theme = safeTheme;
+    setCurrentTheme(safeTheme);
+    localStorage.setItem('supr_theme', safeTheme);
     const htmlClasses = document.documentElement.className.split(' ');
     const cleanedClasses = htmlClasses.filter(c => !c.startsWith('theme-'));
-    document.documentElement.className = `theme-${theme} ` + cleanedClasses.join(' ');
+    document.documentElement.className = `theme-${safeTheme} ` + cleanedClasses.join(' ');
     handleUpdateSetting('appearance_theme', theme, `Theme set to ${theme.toUpperCase()} ✓`);
   };
 
   const handlePaletteChange = (palette: string) => {
-    setCurrentPalette(palette);
-    localStorage.setItem('supr_palette', palette);
+    const safePalette = sanitizePalette(palette);
+    palette = safePalette;
+    setCurrentPalette(safePalette);
+    localStorage.setItem('supr_palette', safePalette);
     const htmlClasses = document.documentElement.className.split(' ');
     const cleanedClasses = htmlClasses.filter(c => !c.startsWith('palette-'));
-    document.documentElement.className = `palette-${palette} ` + cleanedClasses.join(' ');
+    document.documentElement.className = `palette-${safePalette} ` + cleanedClasses.join(' ');
     handleUpdateSetting('appearance_palette', palette, `Color Palette set to ${palette.toUpperCase()} ✓`);
   };
 
   const handleDesignProfileApply = async (profileId: string) => {
     const res = await applyDesignProfileAction(profileId);
     if (res.success && res.profile) {
+      const safeTheme = sanitizeTheme(res.profile.theme);
+      const safePalette = sanitizePalette(res.profile.palette);
       setActiveDesignProfile(res.profile.id);
-      setCurrentTheme(res.profile.theme);
-      setCurrentPalette(res.profile.palette);
-      localStorage.setItem('supr_theme', res.profile.theme);
-      localStorage.setItem('supr_palette', res.profile.palette);
+      setCurrentTheme(safeTheme);
+      setCurrentPalette(safePalette);
+      localStorage.setItem('supr_theme', safeTheme);
+      localStorage.setItem('supr_palette', safePalette);
       const htmlClasses = document.documentElement.className.split(' ');
       const cleanedClasses = htmlClasses.filter(c => !c.startsWith('theme-') && !c.startsWith('palette-'));
-      document.documentElement.className = `theme-${res.profile.theme} palette-${res.profile.palette} ` + cleanedClasses.join(' ');
+      document.documentElement.className = `theme-${safeTheme} palette-${safePalette} ` + cleanedClasses.join(' ');
       showToast(`Applied ${res.profile.name} design profile`);
     } else {
       showToast(res.error || 'Design profile could not be applied');
@@ -280,6 +342,9 @@ export default function SettingsPage() {
     } else if (channel === 'slack') {
       setSlackEnabled(newVal);
       handleUpdateSetting('channels_slack', newVal ? 'true' : 'false', `${label} ${newVal ? 'Enabled' : 'Disabled'} ✓`);
+    } else if (channel === 'discord') {
+      setDiscordEnabled(newVal);
+      handleUpdateSetting('channels_discord', newVal ? 'true' : 'false', `${label} ${newVal ? 'Enabled' : 'Disabled'} âœ“`);
     } else if (channel === 'telegram') {
       setTelegramEnabled(newVal);
       handleUpdateSetting('channels_telegram', newVal ? 'true' : 'false', `${label} ${newVal ? 'Enabled' : 'Disabled'} ✓`);
@@ -332,6 +397,14 @@ export default function SettingsPage() {
     const res = await testConnectorAction(connectorId);
     showToast(`${name}: ${res.status}`);
     setConnectorHealth(await fetchConnectorHealthAction());
+  };
+
+  const handleDockerProbe = async () => {
+    showToast('Checking Docker availability...');
+    const res = await probeDockerAvailabilityAction();
+    setDockerAvailable(!!res.available);
+    setDockerLastProbe(new Date().toISOString());
+    showToast(res.available ? 'Docker sandbox is available' : `Docker unavailable: ${res.detail || 'probe failed'}`);
   };
 
   const handleExportDatabase = async () => {
@@ -748,6 +821,71 @@ export default function SettingsPage() {
                   </button>
                 </div>
               ))}
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
+                <div className="flex items-start justify-between gap-4 border-b-2 border-primary pb-3">
+                  <div>
+                    <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary">deployed_code</span> Docker Sandbox
+                    </h3>
+                    <p className="font-body text-xs text-on-surface-variant mt-1">Controls whether `execute_sandboxed_command` can run in a real Docker environment.</p>
+                  </div>
+                  <span className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary ${dockerAvailable ? 'bg-primary text-on-primary' : 'bg-surface-dim text-on-surface-variant'}`}>
+                    {dockerAvailable ? 'Available' : 'Not Enabled'}
+                  </span>
+                </div>
+                <div className="font-mono text-[10px] text-on-surface-variant">
+                  Last probe: {dockerLastProbe ? new Date(dockerLastProbe).toLocaleString() : 'never'}
+                </div>
+                <button
+                  onClick={handleDockerProbe}
+                  className="bg-primary text-on-primary font-bold uppercase text-xs p-3 neo-border hover:bg-tertiary hover:text-on-tertiary transition-colors flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-sm">fact_check</span>
+                  Probe Docker
+                </button>
+              </div>
+
+              <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
+                <div className="flex items-start justify-between gap-4 border-b-2 border-primary pb-3">
+                  <div>
+                    <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary">dns</span> Remote Execution
+                    </h3>
+                    <p className="font-body text-xs text-on-surface-variant mt-1">Disabled by default. `execute_remote` remains blocked unless a host is configured and this switch is enabled.</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const next = !remoteExecutionEnabled;
+                      setRemoteExecutionEnabled(next);
+                      await handleUpdateSetting('remote_execution_enabled', next ? 'true' : 'false', `Remote execution ${next ? 'enabled' : 'disabled'}`);
+                    }}
+                    className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary transition-all ${remoteExecutionEnabled ? 'bg-secondary text-on-error neo-shadow' : 'bg-surface-dim text-on-surface-variant'}`}
+                  >
+                    {remoteExecutionEnabled ? 'Enabled' : 'Disabled'}
+                  </button>
+                </div>
+                <div>
+                  <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Remote Host Reference</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={remoteExecutionHost}
+                      onChange={(event) => setRemoteExecutionHost(event.target.value)}
+                      className="flex-1 bg-background neo-border p-3 font-mono text-xs focus:outline-none focus:border-tertiary"
+                      placeholder="ssh://host-alias or disabled"
+                    />
+                    <button
+                      onClick={() => handleUpdateSetting('remote_execution_host', remoteExecutionHost, 'Remote host reference saved')}
+                      className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1361,6 +1499,28 @@ export default function SettingsPage() {
                 <span className="text-[9px] text-on-surface-variant block mt-1">Webhooks enabling direct pings to your channels for approval alerts and deployment traces.</span>
               </div>
 
+              {/* Discord */}
+              <div>
+                <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Discord Webhook URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={integrationDiscord}
+                    onChange={(e) => {
+                      setIntegrationDiscord(e.target.value);
+                      handleUpdateSetting('integrations_discord', e.target.value);
+                    }}
+                    className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                    placeholder="https://discord.com/api/webhooks/..."
+                  />
+                  <button
+                    onClick={() => handleUpdateSetting('integrations_discord', integrationDiscord, 'Discord webhook updated')}
+                    className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
+                  >Save</button>
+                </div>
+                <span className="text-[9px] text-on-surface-variant block mt-1">Webhook used by the Messaging Gateway for approval, failure, and mission completion notifications.</span>
+              </div>
+
               {/* Gmail */}
               <div>
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Gmail App Password / Access Code</label>
@@ -1604,6 +1764,24 @@ export default function SettingsPage() {
                   </button>
                 </div>
                 <p className="font-body text-xs text-on-surface-variant">Triggers notification pings to designated Slack channels when agent sandbox tasks fail or when manual overrides are intercepted.</p>
+              </div>
+
+              {/* Discord Connector */}
+              <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
+                <div className="flex justify-between items-center border-b-2 border-primary pb-3">
+                  <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary">forum</span> Discord Webhook Hook
+                  </h3>
+                  <button
+                    onClick={() => handleToggleChannel('discord', discordEnabled, 'Discord webhook channel')}
+                    className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary transition-all ${
+                      discordEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
+                    }`}
+                  >
+                    {discordEnabled ? 'Active âœ“' : 'Inactive'}
+                  </button>
+                </div>
+                <p className="font-body text-xs text-on-surface-variant">Receives governed Discord webhook commands and sends approval/completion notifications through the Messaging Gateway.</p>
               </div>
 
             </div>

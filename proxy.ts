@@ -31,13 +31,14 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isAuthRoute = pathname.startsWith('/api/auth');
+  const isWebhookRoute = pathname === '/api/slack' || pathname === '/api/discord' || pathname === '/api/telegram';
   const isLoginPage = pathname === '/login';
   const isStaticFile =
     pathname.startsWith('/_next') ||
     pathname.includes('.') ||
     pathname.startsWith('/static');
 
-  if (isAuthRoute || isLoginPage || isStaticFile) {
+  if (isAuthRoute || isWebhookRoute || isLoginPage || isStaticFile) {
     return NextResponse.next();
   }
 
@@ -60,6 +61,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico|supr_logo.svg).*)',
+    '/((?!api/auth|api/proxy|api/slack|api/discord|api/telegram|_next/static|_next/image|favicon.ico|supr_logo.svg).*)',
   ],
 };

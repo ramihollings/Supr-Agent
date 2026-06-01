@@ -5,6 +5,9 @@ import {
   createAgentBlueprintAction,
   createAgentGroupAction,
   fetchSupervisorConsoleAction,
+  promoteLearnedSkillDraftAction,
+  rejectLearnedSkillDraftAction,
+  requestLearnedSkillReviewAction,
   upsertMemorySectionAction,
 } from "@/app/actions";
 import { useSearchParams } from "next/navigation";
@@ -21,6 +24,8 @@ function SupervisorConsoleContent() {
     memorySections: [],
     metrics: [],
     guidelinePacks: [],
+    learnedSkillDrafts: [],
+    runtimeDecisions: { replanDecisions: [], providerRouteDecisions: [], outboundMessages: [], executionSettings: {} },
   });
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
@@ -36,6 +41,7 @@ function SupervisorConsoleContent() {
 
   const activeAgents = useMemo(() => data.agents.filter((agent: any) => agent.isActive), [data.agents]);
   const supervisor = activeAgents.find((agent: any) => agent.name?.toLowerCase() === "supr") || activeAgents[0];
+  const runtimeDecisions = data.runtimeDecisions || { replanDecisions: [], providerRouteDecisions: [], outboundMessages: [], executionSettings: {} };
 
   const showToast = (message: string) => {
     setToast(message);
@@ -90,6 +96,24 @@ function SupervisorConsoleContent() {
     if (res.success) await load();
   };
 
+  const handleRequestSkillReview = async (draftId: string) => {
+    const res = await requestLearnedSkillReviewAction(draftId);
+    showToast(res.success ? "Skill review requested" : res.error || "Review request failed");
+    if (res.success) await load();
+  };
+
+  const handlePromoteSkill = async (draftId: string) => {
+    const res = await promoteLearnedSkillDraftAction(draftId);
+    showToast(res.success ? "Learned skill promoted" : res.error || "Promotion failed");
+    if (res.success) await load();
+  };
+
+  const handleRejectSkill = async (draftId: string) => {
+    const res = await rejectLearnedSkillDraftAction(draftId);
+    showToast(res.success ? "Learned skill rejected" : res.error || "Reject failed");
+    if (res.success) await load();
+  };
+
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Supervisor Console" />
@@ -117,6 +141,70 @@ function SupervisorConsoleContent() {
           <p className="font-headline font-bold uppercase text-primary animate-pulse">Loading supervisor state...</p>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <section className="xl:col-span-3 neo-border bg-background">
+              <div className="bg-surface-variant border-b-4 border-primary p-4">
+                <h2 className="font-headline font-black uppercase text-xl text-primary flex items-center gap-2">
+                  <span className="material-symbols-outlined">account_tree</span>
+                  Runtime Decisions
+                </h2>
+              </div>
+              <div className="p-4 grid grid-cols-1 lg:grid-cols-4 gap-4">
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Sandbox Choice</h3>
+                  <dl className="mt-2 space-y-1 font-mono text-[10px]">
+                    <div className="flex justify-between gap-3"><dt>Mode</dt><dd>{runtimeDecisions.executionSettings.runtime_mode || "demo"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Docker</dt><dd>{runtimeDecisions.executionSettings.docker_available === "true" ? "available" : "not enabled"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Remote</dt><dd>{runtimeDecisions.executionSettings.remote_execution_enabled === "true" ? "enabled" : "disabled"}</dd></div>
+                  </dl>
+                </article>
+
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Provider Routing</h3>
+                  <div className="mt-2 space-y-2 max-h-36 overflow-y-auto custom-scrollbar">
+                    {runtimeDecisions.providerRouteDecisions.length === 0 ? (
+                      <p className="font-body text-[11px] text-on-surface-variant">No provider route decisions recorded.</p>
+                    ) : runtimeDecisions.providerRouteDecisions.map((decision: any) => (
+                      <div key={decision.id} className="font-mono text-[10px] border-b border-outline-variant pb-2">
+                        {decision.agentRole}: {decision.provider}{decision.model ? ` / ${decision.model}` : ""}
+                        {decision.fallbackProvider ? ` -> ${decision.fallbackProvider}` : ""}
+                        {decision.failureReason ? <p className="text-error mt-1">{decision.failureReason}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Replans</h3>
+                  <div className="mt-2 space-y-2 max-h-36 overflow-y-auto custom-scrollbar">
+                    {runtimeDecisions.replanDecisions.length === 0 ? (
+                      <p className="font-body text-[11px] text-on-surface-variant">No replans recorded.</p>
+                    ) : runtimeDecisions.replanDecisions.map((decision: any) => (
+                      <div key={decision.id} className="font-mono text-[10px] border-b border-outline-variant pb-2">
+                        {decision.trigger} / {decision.plannerSource}
+                        <p className="text-on-surface-variant mt-1">
+                          +{decision.insertedActionIds.length} inserted / -{decision.removedActionIds.length} removed
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Outbound Messages</h3>
+                  <div className="mt-2 space-y-2 max-h-36 overflow-y-auto custom-scrollbar">
+                    {runtimeDecisions.outboundMessages.length === 0 ? (
+                      <p className="font-body text-[11px] text-on-surface-variant">No outbound notifications recorded.</p>
+                    ) : runtimeDecisions.outboundMessages.map((message: any) => (
+                      <div key={message.id} className="font-mono text-[10px] border-b border-outline-variant pb-2">
+                        {message.source} / {message.reason} / {message.status}
+                        {message.error ? <p className="text-error mt-1">{message.error}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              </div>
+            </section>
+
             <section className="xl:col-span-2 neo-border bg-background">
               <div className="bg-primary text-on-primary border-b-4 border-primary p-4">
                 <h2 className="font-headline font-black uppercase text-xl flex items-center gap-2">
@@ -197,6 +285,50 @@ function SupervisorConsoleContent() {
                     </article>
                   ))}
                 </div>
+              </div>
+            </section>
+
+            <section className="xl:col-span-2 neo-border bg-background">
+              <div className="bg-primary text-on-primary border-b-4 border-primary p-4">
+                <h2 className="font-headline font-black uppercase text-xl flex items-center gap-2">
+                  <span className="material-symbols-outlined">school</span>
+                  Learned Skill Drafts
+                </h2>
+              </div>
+              <div className="p-4 space-y-3 max-h-[32rem] overflow-y-auto custom-scrollbar">
+                {data.learnedSkillDrafts.length === 0 ? (
+                  <div className="border-4 border-dashed border-outline-variant p-6 text-center font-body text-xs text-on-surface-variant">
+                    No SIAL drafts yet. Complex completed runs with three or more tool calls will appear here for review.
+                  </div>
+                ) : data.learnedSkillDrafts.map((draft: any) => (
+                  <article key={draft.id} className="bg-surface-container neo-border p-3">
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                      <div>
+                        <h3 className="font-headline font-black uppercase text-primary">{draft.proposedName}</h3>
+                        <p className="font-mono text-[10px] text-on-surface-variant mt-1">
+                          {draft.status} | run {draft.agentRunId} | evidence {draft.evidenceIds?.length || 0}
+                        </p>
+                        {draft.approvalId && (
+                          <p className="font-mono text-[10px] text-on-surface-variant mt-1">Approval: {draft.approvalId}</p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => handleRequestSkillReview(draft.id)} className="bg-secondary text-on-error neo-border px-3 py-2 font-headline font-bold uppercase text-[10px]">
+                          Review
+                        </button>
+                        <button onClick={() => handlePromoteSkill(draft.id)} className="bg-primary text-on-primary neo-border px-3 py-2 font-headline font-bold uppercase text-[10px]">
+                          Promote
+                        </button>
+                        <button onClick={() => handleRejectSkill(draft.id)} className="bg-error text-on-error neo-border px-3 py-2 font-headline font-bold uppercase text-[10px]">
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                    <pre className="mt-3 bg-background border-2 border-primary p-3 font-mono text-[10px] whitespace-pre-wrap max-h-48 overflow-y-auto">
+                      {draft.markdown}
+                    </pre>
+                  </article>
+                ))}
               </div>
             </section>
 

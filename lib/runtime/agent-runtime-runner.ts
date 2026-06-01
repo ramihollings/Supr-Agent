@@ -3,6 +3,8 @@ import dbClient from '@/lib/database/db_client';
 import { toolRegistry } from '@/lib/tools/registry';
 import { getActiveProvider } from '@/lib/providers/model';
 import { operationalMetrics } from '@/src/services/operational-metrics';
+import { providerRouteDecisionService } from '@/src/services/provider-route-decisions';
+import { skillLearningService } from '@/src/services/skill-learning';
 import { executeAgentAction, getAgentAction } from './agent-actions';
 import { assembleAgentContext } from './context-assembler';
 import { getRuntimeMode, hasConfiguredModelProvider, isMockAllowed } from './runtime-mode';
@@ -153,6 +155,9 @@ function buildRuntimePrompt(action: AgentActionRecord, context: AgentContextBund
     'Memory:',
     context.memoryContext || '(none)',
     '',
+    'Matching skills:',
+    context.skillContext || '(none)',
+    '',
     'Available tools:',
     JSON.stringify(context.tools),
     '',
@@ -186,6 +191,74 @@ async function createAgentRun(action: AgentActionRecord, flowRunId?: string | nu
     [runId, flowRunId || null, action.missionId, action.id, action.agentId],
   );
   return runId;
+}
+
+function inferProviderRole(action: AgentActionRecord): 'supr' | 'code' | 'research' | 'reflection' | 'sub' {
+  if (action.capability.includes('web')) return 'research';
+  if (action.capability.includes('workspace') || action.capability.includes('execute')) return 'code';
+  if (action.capability.includes('skill') || /sial|reflection|learn/i.test(action.intent || '')) return 'reflection';
+  return 'supr';
+}
+
+async function getModelResponse(input: {
+  action: AgentActionRecord;
+  context: AgentContextBundle;
+  toolResults: Array<Record<string, unknown>>;
+  runId: string;
+  mode: RuntimeMode;
+  deadline: number | null;
+  transcriptIds: string[];
+}) {
+  const role = inferProviderRole(input.action);
+  const provider = await getActiveProvider(role);
+  await providerRouteDecisionService.record({
+    missionId: input.action.missionId,
+    agentRunId: input.runId,
+    agentRole: role,
+    provider: provider.name,
+    model: null,
+    fallbackProvider: provider.name.includes('fallback') ? provider.name : null,
+    runtimeMode: input.mode,
+    failureReason: null,
+  });
+  const prompt = buildRuntimePrompt(input.action, input.context, input.toolResults);
+  let streamed = '';
+  try {
+    for await (const chunk of provider.streamContent(prompt, {
+      systemInstruction: 'Return only one JSON object matching the Supr runtime protocol. Do not include markdown.',
+      temperature: 0.1,
+      maxOutputTokens: 1200,
+    })) {
+      streamed += chunk;
+      if (chunk.trim()) {
+        input.transcriptIds.push(await recordStep({
+          missionId: input.action.missionId,
+          agentId: input.action.agentId,
+          runId: input.runId,
+          eventType: 'runtime_model_stream',
+          summary: chunk.slice(0, 500),
+          metadata: { provider: provider.name, role },
+        }));
+      }
+    }
+    return streamed;
+  } catch (error: any) {
+    await providerRouteDecisionService.record({
+      missionId: input.action.missionId,
+      agentRunId: input.runId,
+      agentRole: role,
+      provider: provider.name,
+      model: null,
+      fallbackProvider: null,
+      runtimeMode: input.mode,
+      failureReason: error.message || String(error),
+    });
+    return withRuntimeTimeout(provider.generateContent(prompt, {
+      systemInstruction: 'Return only one JSON object matching the Supr runtime protocol. Do not include markdown.',
+      temperature: 0.1,
+      maxOutputTokens: 1200,
+    }), input.deadline, 'model response');
+  }
 }
 
 async function updateAgentRun(runId: string, status: string, result?: unknown, error?: string, logs: string[] = []) {
@@ -325,11 +398,14 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           if (mode === 'real' && !await hasConfiguredModelProvider()) {
             throw new Error('Real runtime mode requires a configured model provider.');
           }
-          const provider = await getActiveProvider(action.capability.includes('web') ? 'research' : action.capability.includes('workspace') || action.capability.includes('execute') ? 'code' : 'supr');
-          const raw = await withRuntimeTimeout(provider.generateContent(buildRuntimePrompt(action, context, toolResults), {
-            systemInstruction: 'Return only one JSON object matching the Supr runtime protocol. Do not include markdown.',
-            temperature: 0.1,
-            maxOutputTokens: 1200,
+          const raw = await withRuntimeTimeout(getModelResponse({
+            action,
+            context,
+            toolResults,
+            runId,
+            mode,
+            deadline,
+            transcriptIds,
           }), deadline, 'model response');
           response = parseModelToolResponse(raw);
           if (response.type === 'invalid' && isMockAllowed(mode)) {
@@ -405,6 +481,10 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
             injectedSections: context.injectedSections,
           };
           await updateAgentRun(runId, 'completed', result, undefined, logs);
+          const learnedSkillDraft = await skillLearningService.evaluateCompletedRun(runId);
+          if (learnedSkillDraft?.status === 'draft') {
+            await skillLearningService.requestSecurityReview(learnedSkillDraft.id);
+          }
           const metric = await operationalMetrics.record({
             missionId: action.missionId,
             agentId: action.agentId,

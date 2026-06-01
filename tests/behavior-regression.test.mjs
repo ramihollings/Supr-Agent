@@ -122,6 +122,72 @@ function createSchema(db) {
       last_error TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE Agent_Runs (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      agent_id TEXT,
+      agent_action_id TEXT,
+      status TEXT,
+      result TEXT
+    );
+
+    CREATE TABLE Tool_Invocations (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      agent_run_id TEXT,
+      tool_name TEXT,
+      status TEXT,
+      output TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE Learned_Skill_Drafts (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      agent_run_id TEXT NOT NULL,
+      proposed_name TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      source_run_ids TEXT DEFAULT '[]',
+      evidence_ids TEXT DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'draft',
+      approval_id TEXT
+    );
+
+    CREATE TABLE Flow_Runs (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      status TEXT
+    );
+
+    CREATE TABLE Flow_Nodes (
+      id TEXT PRIMARY KEY,
+      flow_run_id TEXT NOT NULL,
+      mission_id TEXT NOT NULL,
+      kind TEXT,
+      ref_id TEXT,
+      status TEXT
+    );
+
+    CREATE TABLE Replan_Decisions (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      flow_run_id TEXT NOT NULL,
+      trigger TEXT NOT NULL,
+      affected_node_ids TEXT DEFAULT '[]',
+      inserted_action_ids TEXT DEFAULT '[]',
+      removed_action_ids TEXT DEFAULT '[]'
+    );
+
+    CREATE TABLE Outbound_Messages (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      source TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      text TEXT NOT NULL,
+      status TEXT NOT NULL,
+      error TEXT
+    );
   `);
 }
 
@@ -237,6 +303,66 @@ function recordConnectorResult(db, connectorId, status, detail) {
       ON CONFLICT(id) DO UPDATE SET status = excluded.status, last_error = excluded.last_error
     `).run(connectorId, connectorId, 'connector', status, detail);
   }
+}
+
+function maybeCreateLearnedSkillDraft(db, agentRunId) {
+  const run = db.prepare("SELECT * FROM Agent_Runs WHERE id = ? AND status = 'completed'").get(agentRunId);
+  if (!run) return null;
+  const tools = db.prepare("SELECT * FROM Tool_Invocations WHERE agent_run_id = ? AND status = 'completed' ORDER BY id").all(agentRunId);
+  if (tools.length < 3) return null;
+  const existing = db.prepare('SELECT * FROM Learned_Skill_Drafts WHERE agent_run_id = ?').get(agentRunId);
+  if (existing) return existing;
+  const draftId = `draft-${agentRunId}`;
+  db.prepare(`
+    INSERT INTO Learned_Skill_Drafts (id, mission_id, agent_run_id, proposed_name, markdown, source_run_ids, evidence_ids, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')
+  `).run(
+    draftId,
+    run.mission_id,
+    agentRunId,
+    'code-agent-runtime-pattern',
+    '---\nname: code-agent-runtime-pattern\ndescription: Learned pattern\n---\n\n## Procedure\nStore durable evidence.',
+    JSON.stringify([agentRunId]),
+    JSON.stringify(tools.map((tool) => tool.id)),
+  );
+  return db.prepare('SELECT * FROM Learned_Skill_Drafts WHERE id = ?').get(draftId);
+}
+
+function promoteLearnedSkillDraft(db, draftId) {
+  const draft = db.prepare('SELECT * FROM Learned_Skill_Drafts WHERE id = ?').get(draftId);
+  if (!draft?.approval_id) return { success: false, error: 'Approval is required before writing learned skills.' };
+  const approval = db.prepare("SELECT * FROM Approvals WHERE id = ? AND status = 'approved'").get(draft.approval_id);
+  if (!approval) return { success: false, error: 'Approval is required before writing learned skills.' };
+  db.prepare("UPDATE Learned_Skill_Drafts SET status = 'promoted' WHERE id = ?").run(draftId);
+  return { success: true };
+}
+
+function replanIncompleteDownstream(db, flowRunId, failedActionId) {
+  const flowRun = db.prepare('SELECT * FROM Flow_Runs WHERE id = ?').get(flowRunId);
+  const affected = db
+    .prepare("SELECT * FROM Flow_Nodes WHERE flow_run_id = ? AND status NOT IN ('completed','done') AND ref_id != ?")
+    .all(flowRunId, failedActionId);
+  for (const node of affected) {
+    db.prepare("UPDATE Flow_Nodes SET status = 'cancelled' WHERE id = ?").run(node.id);
+  }
+  db.prepare(`
+    INSERT INTO Replan_Decisions (id, mission_id, flow_run_id, trigger, affected_node_ids, inserted_action_ids, removed_action_ids)
+    VALUES (?, ?, ?, 'action_failed', ?, ?, ?)
+  `).run(
+    `replan-${failedActionId}`,
+    flowRun.mission_id,
+    flowRunId,
+    JSON.stringify(affected.map((node) => node.id)),
+    JSON.stringify([`recovery-${failedActionId}`]),
+    JSON.stringify(affected.map((node) => node.ref_id)),
+  );
+}
+
+function recordOutboundMessage(db, source, status, error = null) {
+  db.prepare(`
+    INSERT INTO Outbound_Messages (id, mission_id, source, reason, text, status, error)
+    VALUES (?, 'mission-msg', ?, 'approval needed', 'Approval needed for action action-1.', ?, ?)
+  `).run(`out-${source}-${status}`, source, status, error);
 }
 
 test('runbook launch creates an active mission with ordered agent tasks and timeline context', () => {
@@ -355,6 +481,107 @@ test('connector tests persist user-visible status and provider health state', ()
       last_success: null,
       last_error: 'No credential configured.',
     });
+  });
+});
+
+test('learned skills require a complex completed run and approved review before promotion', () => {
+  withDb((db) => {
+    db.prepare('INSERT INTO Missions (id, name, status) VALUES (?, ?, ?)').run('mission-sial', 'SIAL', 'Active');
+    db.prepare('INSERT INTO Agent_Runs (id, mission_id, agent_id, agent_action_id, status, result) VALUES (?, ?, ?, ?, ?, ?)').run(
+      'run-simple',
+      'mission-sial',
+      'code-agent',
+      'action-simple',
+      'completed',
+      JSON.stringify({ summary: 'too small' }),
+    );
+    db.prepare('INSERT INTO Tool_Invocations (id, mission_id, agent_run_id, tool_name, status) VALUES (?, ?, ?, ?, ?)').run(
+      'tool-1',
+      'mission-sial',
+      'run-simple',
+      'workspace_write_file',
+      'completed',
+    );
+    assert.equal(maybeCreateLearnedSkillDraft(db, 'run-simple'), null);
+
+    db.prepare('INSERT INTO Agent_Runs (id, mission_id, agent_id, agent_action_id, status, result) VALUES (?, ?, ?, ?, ?, ?)').run(
+      'run-complex',
+      'mission-sial',
+      'code-agent',
+      'action-complex',
+      'completed',
+      JSON.stringify({ summary: 'complex evidence-backed run' }),
+    );
+    for (const toolId of ['tool-a', 'tool-b', 'tool-c']) {
+      db.prepare('INSERT INTO Tool_Invocations (id, mission_id, agent_run_id, tool_name, status) VALUES (?, ?, ?, ?, ?)').run(
+        toolId,
+        'mission-sial',
+        'run-complex',
+        'workspace_write_file',
+        'completed',
+      );
+    }
+
+    const draft = maybeCreateLearnedSkillDraft(db, 'run-complex');
+    assert.equal(draft.status, 'draft');
+    assert.deepEqual(JSON.parse(draft.evidence_ids), ['tool-a', 'tool-b', 'tool-c']);
+    assert.deepEqual(promoteLearnedSkillDraft(db, draft.id), {
+      success: false,
+      error: 'Approval is required before writing learned skills.',
+    });
+
+    db.prepare(`
+      INSERT INTO Approvals (id, mission_id, requesting_agent_id, action, required_permission, risk_level, reason, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('approval-sial', 'mission-sial', 'security-agent', 'governance_review', 'Edit', 'Medium', 'Review learned skill', 'approved');
+    db.prepare("UPDATE Learned_Skill_Drafts SET status = 'review_requested', approval_id = ? WHERE id = ?").run('approval-sial', draft.id);
+    assert.deepEqual(promoteLearnedSkillDraft(db, draft.id), { success: true });
+    assert.equal(db.prepare('SELECT status FROM Learned_Skill_Drafts WHERE id = ?').get(draft.id).status, 'promoted');
+  });
+});
+
+test('replanning cancels only incomplete downstream work and preserves completed evidence', () => {
+  withDb((db) => {
+    db.prepare('INSERT INTO Missions (id, name, status) VALUES (?, ?, ?)').run('mission-replan', 'Replan', 'Active');
+    db.prepare('INSERT INTO Flow_Runs (id, mission_id, status) VALUES (?, ?, ?)').run('flow-1', 'mission-replan', 'running');
+    for (const node of [
+      ['node-done', 'task-done', 'completed'],
+      ['node-failed', 'action-failed', 'failed'],
+      ['node-open', 'action-open', 'queued'],
+    ]) {
+      db.prepare('INSERT INTO Flow_Nodes (id, flow_run_id, mission_id, kind, ref_id, status) VALUES (?, ?, ?, ?, ?, ?)').run(
+        node[0],
+        'flow-1',
+        'mission-replan',
+        'agent_action',
+        node[1],
+        node[2],
+      );
+    }
+
+    replanIncompleteDownstream(db, 'flow-1', 'action-failed');
+
+    assert.equal(db.prepare('SELECT status FROM Flow_Nodes WHERE id = ?').get('node-done').status, 'completed');
+    assert.equal(db.prepare('SELECT status FROM Flow_Nodes WHERE id = ?').get('node-open').status, 'cancelled');
+    const decision = db.prepare('SELECT * FROM Replan_Decisions WHERE id = ?').get('replan-action-failed');
+    assert.deepEqual(JSON.parse(decision.removed_action_ids), ['action-open']);
+    assert.deepEqual(JSON.parse(decision.inserted_action_ids), ['recovery-action-failed']);
+  });
+});
+
+test('outbound messaging records delivery state without persisting prompt bodies', () => {
+  withDb((db) => {
+    recordOutboundMessage(db, 'slack', 'sent');
+    recordOutboundMessage(db, 'discord', 'failed', 'discord webhook is not configured.');
+
+    const rows = db.prepare('SELECT source, reason, text, status, error FROM Outbound_Messages ORDER BY source DESC').all();
+    assert.deepEqual(rows, [
+      { source: 'slack', reason: 'approval needed', text: 'Approval needed for action action-1.', status: 'sent', error: null },
+      { source: 'discord', reason: 'approval needed', text: 'Approval needed for action action-1.', status: 'failed', error: 'discord webhook is not configured.' },
+    ]);
+    for (const row of rows) {
+      assert.doesNotMatch(row.text, /raw prompt|system instruction|secret/i);
+    }
   });
 });
 

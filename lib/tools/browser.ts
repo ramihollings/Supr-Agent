@@ -30,7 +30,8 @@ export const webScrapeTool: ToolDefinition<WebScrapeParamsType, string> = {
     const mode = await getRuntimeMode();
     if (!executablePath && process.env.NODE_ENV !== 'production' && isMockAllowed(mode)) {
        console.warn("[CloakBrowser] Warning: CLOAKBROWSER_PATH not set. Operating in mock diagnostic mode.");
-       return `[${mode.toUpperCase()} STEALTH SCRAPE] Content from ${params.url}: "Diagnostic browser output; configure CLOAKBROWSER_PATH for live scraping."`;
+       const executionMode = `${mode}_diagnostic`;
+       return `[${executionMode.toUpperCase()} STEALTH SCRAPE] Content from ${params.url}: "Diagnostic browser output; configure CLOAKBROWSER_PATH for live scraping."`;
     }
 
     if (!executablePath) {

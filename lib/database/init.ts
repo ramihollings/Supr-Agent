@@ -657,6 +657,76 @@ export function initDatabase() {
     )
   `);
 
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Learned_Skill_Drafts (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      agent_run_id TEXT NOT NULL,
+      proposed_name TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      source_run_ids TEXT DEFAULT '[]',
+      evidence_ids TEXT DEFAULT '[]',
+      risk_findings TEXT DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'draft',
+      reviewer_agent_id TEXT,
+      approval_id TEXT,
+      promoted_path TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id),
+      FOREIGN KEY(agent_run_id) REFERENCES Agent_Runs(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Replan_Decisions (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      flow_run_id TEXT NOT NULL,
+      trigger TEXT NOT NULL,
+      affected_node_ids TEXT DEFAULT '[]',
+      planner_source TEXT DEFAULT 'none',
+      inserted_action_ids TEXT DEFAULT '[]',
+      removed_action_ids TEXT DEFAULT '[]',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id),
+      FOREIGN KEY(flow_run_id) REFERENCES Flow_Runs(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Provider_Route_Decisions (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      agent_run_id TEXT,
+      agent_role TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT,
+      fallback_provider TEXT,
+      runtime_mode TEXT NOT NULL,
+      failure_reason TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id),
+      FOREIGN KEY(agent_run_id) REFERENCES Agent_Runs(id)
+    )
+  `);
+
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS Outbound_Messages (
+      id TEXT PRIMARY KEY,
+      mission_id TEXT,
+      source TEXT NOT NULL,
+      actor_id TEXT,
+      reason TEXT NOT NULL,
+      text TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      sent_at DATETIME,
+      FOREIGN KEY(mission_id) REFERENCES Missions(id)
+    )
+  `);
+
   // Seed default settings
   const insertSetting = dbInstance.prepare(`
     INSERT OR IGNORE INTO Settings (key, value)
@@ -665,6 +735,10 @@ export function initDatabase() {
   
   insertSetting.run('sandbox_allow_api_keys', 'false');
   insertSetting.run('sandbox_api_key_approval', '');
+  insertSetting.run('docker_available', 'false');
+  insertSetting.run('docker_last_probe', '');
+  insertSetting.run('remote_execution_enabled', 'false');
+  insertSetting.run('remote_execution_host', '');
   
   insertSetting.run('operating_mode', 'autonomous');
   insertSetting.run('runtime_mode', 'demo');
@@ -672,6 +746,7 @@ export function initDatabase() {
   insertSetting.run('governance_standards', JSON.stringify(['SOX', 'SOC2']));
   insertSetting.run('channels_email', 'true');
   insertSetting.run('channels_slack', 'true');
+  insertSetting.run('channels_discord', 'false');
   insertSetting.run('channels_telegram', 'false');
   insertSetting.run('channels_social', 'false');
   
@@ -681,6 +756,9 @@ export function initDatabase() {
   insertSetting.run('integrations_composio', '');
   insertSetting.run('integrations_github', '');
   insertSetting.run('integrations_slack', '');
+  insertSetting.run('integrations_discord', '');
+  insertSetting.run('slack_signing_secret', '');
+  insertSetting.run('discord_webhook_token', '');
   insertSetting.run('integrations_gmail', '');
 
   const insertProviderHealth = dbInstance.prepare(`
@@ -892,7 +970,9 @@ export function initDatabase() {
     insertCap.run('workspace_validate_outputs', 'workspace_validate_outputs', 'direct', 'Draft', 'Low', 'Validates project artifacts, queue state, and readiness evidence.');
     insertCap.run('governance_review', 'governance_review', 'direct', 'Edit', 'Medium', 'Reviews open risks, approvals, permissions, and blocked work.');
     insertCap.run('delivery_package', 'delivery_package', 'direct', 'Draft', 'Low', 'Compiles final project status, artifacts, and next actions.');
-    insertCap.run('execute_command', 'execute_command', 'direct', 'Execute', 'High', 'Runs a shell command inside the Docker sandbox.');
+    insertCap.run('execute_command', 'execute_command', 'direct', 'Execute', 'High', 'Runs a governed local shell command with policy evidence.');
+    insertCap.run('execute_sandboxed_command', 'execute_sandboxed_command', 'direct', 'Execute', 'High', 'Runs a command inside the Docker sandbox only when Docker is available.');
+    insertCap.run('execute_remote', 'execute_remote', 'direct', 'External_Act', 'Critical', 'Requests remote command execution; disabled until explicit host configuration exists.');
     insertCap.run('slack_send_message', 'slack_send_message', 'direct', 'External_Act', 'Medium', 'Posts a notification message directly to Slack channel.');
     insertCap.run('github_create_issue', 'github_create_issue', 'direct', 'External_Act', 'Medium', 'Creates a new bug report or task issue on GitHub repository.');
     insertCap.run('obra_superpowers', 'obra_superpowers', 'direct', 'Root', 'Critical', 'Executes highly-privileged system administration modifications.');
@@ -911,6 +991,8 @@ export function initDatabase() {
     insertAgentCap.run('a1', 'governance_review');
     insertAgentCap.run('a1', 'delivery_package');
     insertAgentCap.run('a1', 'execute_command');
+    insertAgentCap.run('a1', 'execute_sandboxed_command');
+    insertAgentCap.run('a1', 'execute_remote');
     insertAgentCap.run('a1', 'slack_send_message');
     insertAgentCap.run('a1', 'github_create_issue');
     insertAgentCap.run('a1', 'obra_superpowers');
@@ -922,12 +1004,14 @@ export function initDatabase() {
     insertAgentCap.run('a3', 'workspace_write_artifact');
     insertAgentCap.run('a3', 'workspace_write_file');
     insertAgentCap.run('a3', 'execute_command');
+    insertAgentCap.run('a3', 'execute_sandboxed_command');
     insertAgentCap.run('a3', 'github_create_issue');
 
     // QA Agent (a4) gets validation, browsing, and sandbox execution
     insertAgentCap.run('a4', 'workspace_validate_outputs');
     insertAgentCap.run('a4', 'web_scrape');
     insertAgentCap.run('a4', 'execute_command');
+    insertAgentCap.run('a4', 'execute_sandboxed_command');
 
     // Signal Agent (a5) gets governance and delivery packaging
     insertAgentCap.run('a5', 'governance_review');

@@ -22,6 +22,10 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
             try {
               var theme = localStorage.getItem('supr_theme') || 'neobrutalist';
               var palette = localStorage.getItem('supr_palette') || 'classic';
+              var allowedThemes = ['neobrutalist', 'openclaw', 'hermes', 'google-neural', 'crt', 'cyberpunk', 'minimalist', 'design-notion', 'design-verge', 'design-carbon'];
+              var allowedPalettes = ['classic', 'cyberpunk-neon', 'nordic-frost', 'forest-moss', 'vintage-orange', 'matrix-digital', 'sunset-glow', 'ocean-breeze', 'royal-velvet', 'sakura-pastel', 'minimal-monochrome', 'desert-cactus', 'corporate-tech', 'toxic-spill', 'warm-autumn', 'design-notion', 'design-verge'];
+              if (allowedThemes.indexOf(theme) === -1) theme = 'neobrutalist';
+              if (allowedPalettes.indexOf(palette) === -1) palette = 'classic';
               document.documentElement.className = 'theme-' + theme + ' palette-' + palette + ' ' + document.documentElement.className;
             } catch (e) {}
           })()

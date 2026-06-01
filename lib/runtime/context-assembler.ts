@@ -2,7 +2,7 @@ import dbClient from '@/lib/database/db_client';
 import { toolRegistry } from '@/lib/tools/registry';
 import { guidelinePackService } from '@/src/services/guideline-packs';
 import { memorySectionService } from '@/src/services/memory-sections';
-import type { AgentActionRecord, AgentContextBundle } from './types';
+import type { AgentActionRecord, AgentContextBundle, SkillMatch } from './types';
 
 function safeJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
@@ -32,6 +32,53 @@ function detectFramework(artifacts: Array<Record<string, unknown>>) {
   return 'next';
 }
 
+async function findSkillMatches(action: AgentActionRecord): Promise<{ matches: SkillMatch[]; context: string }> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    return { matches: [], context: '' };
+  }
+
+  const runtimeRequire = eval('require') as NodeRequire;
+  const { skillCatalog } = runtimeRequire('../../src/services/skill-catalog') as typeof import('@/src/services/skill-catalog');
+  const haystack = [
+    action.capability,
+    action.intent,
+    JSON.stringify(action.inputs || {}),
+  ].join(' ').toLowerCase();
+  const skills = await skillCatalog.listSkills();
+  const matches: SkillMatch[] = [];
+
+  for (const skill of skills) {
+    const tokens = [skill.name, skill.description, ...Object.values(skill.metadata || {})]
+      .join(' ')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 4);
+    const overlap = tokens.filter((token) => haystack.includes(token));
+    if (overlap.length === 0) continue;
+    const confidence = Math.min(0.95, 0.35 + overlap.length * 0.15);
+    matches.push({
+      name: skill.name,
+      description: skill.description,
+      path: skill.path,
+      matchReason: `Matched ${overlap.slice(0, 4).join(', ')}`,
+      confidence,
+      injected: confidence >= 0.65 ? 'full' : 'summary',
+    });
+  }
+
+  const top = matches.sort((a, b) => b.confidence - a.confidence).slice(0, 3);
+  const contextBlocks: string[] = [];
+  for (const match of top) {
+    if (match.injected === 'full') {
+      const body = await skillCatalog.getSkillPrompt(match.name).catch(() => '');
+      contextBlocks.push(`## ${match.name}\n${body.slice(0, 6000)}`);
+    } else {
+      contextBlocks.push(`## ${match.name}\n${match.description}\nReason: ${match.matchReason}`);
+    }
+  }
+  return { matches: top, context: contextBlocks.join('\n\n') };
+}
+
 export async function assembleAgentContext(action: AgentActionRecord): Promise<AgentContextBundle> {
   await ensureNativeToolsRegistered();
 
@@ -50,6 +97,7 @@ export async function assembleAgentContext(action: AgentActionRecord): Promise<A
   const packs = await guidelinePackService.select({ language, framework, context: contextKind });
   const guidelineContext = guidelinePackService.composeReviewContext(packs);
   const memoryContext = await memorySectionService.composePromptContext(action.missionId);
+  const skillSelection = await findSkillMatches(action);
   const tools = toolRegistry.getAllTools().map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -71,12 +119,15 @@ export async function assembleAgentContext(action: AgentActionRecord): Promise<A
     artifacts,
     approvals,
     tools,
+    skillContext: skillSelection.context,
+    skillMatches: skillSelection.matches,
     injectedSections: [
       'mission',
       task ? 'task' : '',
       agent ? 'agent' : '',
       memoryContext ? 'memory_sections' : '',
       guidelineContext ? 'guideline_packs' : '',
+      skillSelection.matches.length ? 'matching_skill_summaries' : '',
       'tool_manifest',
       'recent_transcript',
     ].filter(Boolean),

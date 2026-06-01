@@ -24,6 +24,7 @@ function id() {
 function inferRole(prompt: string) {
   const lower = prompt.toLowerCase();
   if (lower.includes("review") || lower.includes("test") || lower.includes("qa")) return "QA Reviewer";
+  if (lower.includes("sial") || lower.includes("learned skill") || lower.includes("reflection") || lower.includes("skill draft")) return "SIAL Agent";
   if (lower.includes("code") || lower.includes("build") || lower.includes("implement")) return "Code Agent";
   if (lower.includes("research") || lower.includes("analyze")) return "Research Agent";
   if (lower.includes("publish") || lower.includes("notify") || lower.includes("deliver")) return "Signal Agent";
@@ -37,27 +38,32 @@ export class AgentBlueprintService {
     const isCode = role === "Code Agent";
     const isExternal = role === "Signal Agent";
     const isReview = role === "QA Reviewer";
+    const isSial = role === "SIAL Agent";
 
     const tools = isCode
-      ? ["workspace_write_file", "workspace_validate_outputs", "execute_command"]
+      ? ["workspace_write_file", "workspace_validate_outputs", "execute_command", "execute_sandboxed_command"]
       : isExternal
         ? ["delivery_package", "slack_send_message"]
         : isReview
           ? ["workspace_validate_outputs", "governance_review"]
-          : ["web_scrape", "governance_review"];
+          : isSial
+            ? ["workspace_write_artifact", "governance_review"]
+            : ["web_scrape", "governance_review"];
 
     const skills = isCode
       ? ["code-refactor", "frontend-design"]
       : isReview
         ? ["code-refactor", "webapp-testing"]
-        : ["pdf", "docx"];
+        : isSial
+          ? ["skill-creator", "code-refactor"]
+          : ["pdf", "docx"];
 
     return {
       missionId: input.missionId || null,
       prompt,
       role,
       instructions: `Act as ${role}. Keep work evidence-backed, explain governance-sensitive choices, and hand results back to the supervisor for review.`,
-      permissionTier: isExternal ? "External_Act" : isCode ? "Execute" : isReview ? "Draft" : "Observe",
+      permissionTier: isExternal ? "External_Act" : isCode ? "Execute" : isReview || isSial ? "Draft" : "Observe",
       tools,
       skills,
       provider: input.provider || "default",
