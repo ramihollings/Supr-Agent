@@ -13,6 +13,7 @@ import {
   updateAgentCapabilityPolicyAction
 } from '@/app/actions';
 import { Agent } from '@/types';
+import { DEFAULT_GEMINI_MODEL, PROVIDER_MODEL_OPTIONS } from '@/lib/providers/catalog';
 
 export default function AgentsPage() {
   const router = useRouter();
@@ -24,7 +25,6 @@ export default function AgentsPage() {
   // Agent custom LLM and capability policy overrides
   const [agentSettings, setAgentSettings] = useState<Record<string, {
     model: string;
-    temperature: number;
     maxTokens: number;
     capabilities: string[];
     autonomy: string;
@@ -45,8 +45,7 @@ export default function AgentsPage() {
       data.forEach(a => {
         const isHighTier = ['Root', 'Execute', 'External_Act'].includes(a.permissionTier);
         initialSettings[a.id] = {
-          model: a.name.toLowerCase() === 'supr' ? 'gemini-1.5-pro' : 'gemini-1.5-flash',
-          temperature: a.permissionTier === 'Edit' ? 0.3 : 0.7,
+          model: DEFAULT_GEMINI_MODEL,
           maxTokens: isHighTier ? 8192 : 4096,
           capabilities: getDefaultsForTier(a.permissionTier),
           autonomy: isHighTier ? 'approval-gated' : 'supervised',
@@ -99,7 +98,7 @@ export default function AgentsPage() {
     });
   };
 
-  const handleUpdateLLM = (agentId: string, field: 'model' | 'temperature' | 'maxTokens', value: any) => {
+  const handleUpdateLLM = (agentId: string, field: 'model' | 'maxTokens', value: any) => {
     setAgentSettings(prev => ({
       ...prev,
       [agentId]: {
@@ -195,8 +194,7 @@ export default function AgentsPage() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
             {activeAgents.map(agent => {
               const settings = agentSettings[agent.id] || {
-                model: 'gemini-1.5-flash',
-                temperature: 0.7,
+                model: DEFAULT_GEMINI_MODEL,
                 maxTokens: 4096,
                 capabilities: [],
                 autonomy: 'supervised',
@@ -244,26 +242,10 @@ export default function AgentsPage() {
                             onChange={(e) => handleUpdateLLM(agent.id, 'model', e.target.value)}
                             className="bg-background border-2 border-primary px-2 py-1 font-mono font-bold uppercase text-[10px]"
                           >
-                            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Balanced)</option>
-                            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast)</option>
-                            <option value="gemini-2.0-experimental">Gemini 2.0 Experimental</option>
+                            {PROVIDER_MODEL_OPTIONS.gemini.map((model) => (
+                              <option key={model.value} value={model.value}>{model.label}</option>
+                            ))}
                           </select>
-                        </div>
-
-                        <div className="text-xs">
-                          <div className="flex justify-between font-body font-bold uppercase text-on-surface-variant mb-1">
-                            <span>Temperature</span>
-                            <span className="font-mono">{settings.temperature}</span>
-                          </div>
-                          <input 
-                            type="range" 
-                            min="0" 
-                            max="1" 
-                            step="0.1" 
-                            value={settings.temperature} 
-                            onChange={(e) => handleUpdateLLM(agent.id, 'temperature', parseFloat(e.target.value))}
-                            className="w-full cursor-pointer accent-primary" 
-                          />
                         </div>
 
                         <div className="flex justify-between items-center text-xs">

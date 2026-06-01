@@ -50,7 +50,6 @@ Please perform the work and write a comprehensive summary of your findings or im
 
       const response = await provider.generateContent(prompt, {
         systemInstruction: `You are ${params.name}, acting as the ${params.role}. Provide a detailed, premium solution to the user's task. Only respond with original, high-quality work.`,
-        temperature: 0.2
       });
 
       return `[Subagent ${params.name} Response]\n\nProfile Path: ${profilePath}\n\n${response}`;

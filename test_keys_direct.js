@@ -23,7 +23,7 @@ async function testMiniMax() {
     console.log('❌ MiniMax key test skipped: Key not found.');
     return;
   }
-  console.log('⚡ Testing MiniMax M2.7...');
+  console.log('⚡ Testing MiniMax M3...');
   try {
     const res = await fetch('https://api.minimax.io/v1/chat/completions', {
       method: 'POST',
@@ -32,9 +32,8 @@ async function testMiniMax() {
         'Authorization': `Bearer ${minimaxKey}`
       },
       body: JSON.stringify({
-        model: 'MiniMax-M2.7',
-        messages: [{ role: 'user', content: 'Say hello!' }],
-        temperature: 0.1
+        model: 'MiniMax-M3',
+        messages: [{ role: 'user', content: 'Say hello!' }]
       })
     });
 
@@ -56,9 +55,9 @@ async function testGemini() {
     console.log('❌ Gemini key test skipped: Key not found.');
     return;
   }
-  console.log('⚡ Testing Gemini 2.0 Flash...');
+  console.log('⚡ Testing Gemini 3 Pro Preview...');
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=${geminiKey}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

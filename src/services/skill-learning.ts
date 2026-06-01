@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import dbClient from "../../lib/database/db_client";
 import { getActiveProvider } from "../../lib/providers/model";
+import { stripModelThinking } from "../../lib/runtime/model-json";
 import { getRuntimeMode, hasConfiguredModelProvider } from "../../lib/runtime/runtime-mode";
 import { parseSkillMd, validateSkillDirName } from "./skill-parser";
 import type { LearnedSkillDraft } from "../../lib/runtime/types";
@@ -34,7 +35,7 @@ function slugifySkillName(value: string) {
 }
 
 function stripMarkdownFence(raw: string) {
-  return raw.replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  return stripModelThinking(raw).replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/i, "").trim();
 }
 
 function buildSkillMarkdown(input: { proposedName: string; summary: string; evidenceIds: string[]; toolSequence?: string[] }) {
@@ -107,7 +108,6 @@ export class SkillLearningService {
       ].join("\n");
       const raw = await provider.generateContent(prompt, {
         systemInstruction: "You are Supr SIAL. Produce valid reviewed-draft SKILL.md markdown only.",
-        temperature: 0.2,
         maxOutputTokens: 1800,
       });
       const markdown = stripMarkdownFence(raw);

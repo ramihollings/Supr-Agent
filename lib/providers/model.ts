@@ -1,10 +1,18 @@
 import { GoogleGenAI } from '@google/genai';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import {
+  DEFAULT_ANTHROPIC_MODEL,
+  DEFAULT_BACKUP_MODEL,
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_MINIMAX_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  OPENAI_COMPATIBLE_BASE_URLS,
+  defaultModelForProvider,
+} from '@/lib/providers/catalog';
 
 export interface ModelOptions {
   model?: string;
-  temperature?: number;
   maxOutputTokens?: number;
   systemInstruction?: string;
 }
@@ -14,6 +22,7 @@ export interface ModelOptions {
 // ─────────────────────────────────────────────────────────────────────────────
 export abstract class ModelProvider {
   abstract readonly name: string;
+  abstract readonly modelName: string;
 
   /** Generates a complete text response for a given prompt. */
   abstract generateContent(prompt: string, options?: ModelOptions): Promise<string>;
@@ -27,12 +36,15 @@ export abstract class ModelProvider {
 // ─────────────────────────────────────────────────────────────────────────────
 export class GeminiProvider extends ModelProvider {
   readonly name = 'Gemini';
+  readonly modelName: string;
   private ai: GoogleGenAI;
-  private defaultModel = 'gemini-2.0-flash';
+  private defaultModel: string;
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, defaultModel = DEFAULT_GEMINI_MODEL) {
     super();
     this.ai = new GoogleGenAI(apiKey ? { apiKey } : {});
+    this.defaultModel = defaultModel;
+    this.modelName = defaultModel;
   }
 
   async generateContent(prompt: string, options?: ModelOptions): Promise<string> {
@@ -41,7 +53,6 @@ export class GeminiProvider extends ModelProvider {
       contents: prompt,
       config: {
         systemInstruction: options?.systemInstruction,
-        temperature: options?.temperature,
         maxOutputTokens: options?.maxOutputTokens,
       }
     });
@@ -54,7 +65,6 @@ export class GeminiProvider extends ModelProvider {
       contents: prompt,
       config: {
         systemInstruction: options?.systemInstruction,
-        temperature: options?.temperature,
         maxOutputTokens: options?.maxOutputTokens,
       }
     });
@@ -69,6 +79,7 @@ export class GeminiProvider extends ModelProvider {
 // ─────────────────────────────────────────────────────────────────────────────
 export class OpenAICompatibleProvider extends ModelProvider {
   readonly name: string;
+  readonly modelName: string;
   private apiKey: string;
   private baseUrl: string;
   private defaultModel: string;
@@ -84,6 +95,7 @@ export class OpenAICompatibleProvider extends ModelProvider {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl.replace(/\/$/, ''); // strip trailing slash
     this.defaultModel = config.defaultModel;
+    this.modelName = config.defaultModel;
   }
 
   private buildMessages(prompt: string, systemInstruction?: string) {
@@ -105,7 +117,6 @@ export class OpenAICompatibleProvider extends ModelProvider {
       body: JSON.stringify({
         model: options?.model || this.defaultModel,
         messages: this.buildMessages(prompt, options?.systemInstruction),
-        temperature: options?.temperature ?? 0.7,
         max_tokens: options?.maxOutputTokens ?? 2048,
       }),
     });
@@ -129,7 +140,6 @@ export class OpenAICompatibleProvider extends ModelProvider {
       body: JSON.stringify({
         model: options?.model || this.defaultModel,
         messages: this.buildMessages(prompt, options?.systemInstruction),
-        temperature: options?.temperature ?? 0.7,
         max_tokens: options?.maxOutputTokens ?? 2048,
         stream: true,
       }),
@@ -165,11 +175,55 @@ export class OpenAICompatibleProvider extends ModelProvider {
   }
 }
 
+export class AnthropicProvider extends ModelProvider {
+  readonly name = 'Anthropic';
+  readonly modelName: string;
+  private apiKey: string;
+
+  constructor(apiKey: string, model = DEFAULT_ANTHROPIC_MODEL) {
+    super();
+    this.apiKey = apiKey;
+    this.modelName = model;
+  }
+
+  async generateContent(prompt: string, options?: ModelOptions): Promise<string> {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: options?.model || this.modelName,
+        system: options?.systemInstruction,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: options?.maxOutputTokens ?? 2048,
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error(`${this.name} API error ${response.status}: ${errBody}`);
+    }
+
+    const data = await response.json();
+    return Array.isArray(data.content)
+      ? data.content.map((part: any) => typeof part?.text === 'string' ? part.text : '').join('')
+      : '';
+  }
+
+  async *streamContent(prompt: string, options?: ModelOptions): AsyncGenerator<string> {
+    yield await this.generateContent(prompt, options);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Fallback Provider
 // ─────────────────────────────────────────────────────────────────────────────
 export class FallbackProvider extends ModelProvider {
   readonly name: string;
+  readonly modelName: string;
   private primary: ModelProvider;
   private backup: ModelProvider;
 
@@ -177,7 +231,8 @@ export class FallbackProvider extends ModelProvider {
     super();
     this.primary = primary;
     this.backup = backup;
-    this.name = `${primary.name} → ${backup.name} (fallback)`;
+    this.name = `${primary.name} -> ${backup.name} (fallback)`;
+    this.modelName = primary.modelName;
   }
 
   async generateContent(prompt: string, options?: ModelOptions): Promise<string> {
@@ -221,20 +276,27 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
   // 1. Resolve Global Keys (SQLite overrides first, then process.env)
   const minimaxKey  = await getSecretSetting('global_minimax_key', process.env.MINIMAX_API_KEY);
   const geminiKey   = await getSecretSetting('global_gemini_key', process.env.GEMINI_API_KEY);
+  const openaiKey   = await getSecretSetting('global_openai_key', process.env.OPENAI_API_KEY);
+  const anthropicKey = await getSecretSetting('global_anthropic_key', process.env.ANTHROPIC_API_KEY);
+  const xaiKey      = await getSecretSetting('global_xai_key', process.env.XAI_API_KEY);
+  const openrouterKey = await getSecretSetting('global_openrouter_key', process.env.OPENROUTER_API_KEY);
+  const groqKey     = await getSecretSetting('global_groq_key', process.env.GROQ_API_KEY);
+  const mistralKey  = await getSecretSetting('global_mistral_key', process.env.MISTRAL_API_KEY);
+  const deepseekKey = await getSecretSetting('global_deepseek_key', process.env.DEEPSEEK_API_KEY);
   const backupKey   = await getSecretSetting('global_backup_key', process.env.BACKUP_LLM_API_KEY);
   const backupUrl   = await getSetting('global_backup_url')   || process.env.BACKUP_LLM_BASE_URL || 'https://api.openai.com/v1';
-  const backupModel = await getSetting('global_backup_model') || process.env.BACKUP_LLM_MODEL   || 'gpt-4o-mini';
+  const backupModel = await getSetting('global_backup_model') || process.env.BACKUP_LLM_MODEL   || DEFAULT_BACKUP_MODEL;
   const backupName  = await getSetting('global_backup_name')  || process.env.BACKUP_LLM_NAME    || 'OpenAI';
 
   // 2. Helper builders
-  const buildMinimax = (key: string, model: string = 'MiniMax-M2.7') => new OpenAICompatibleProvider({
-    name: 'MiniMax-M2.7',
+  const buildMinimax = (key: string, model: string = DEFAULT_MINIMAX_MODEL) => new OpenAICompatibleProvider({
+    name: 'MiniMax',
     apiKey: key,
     baseUrl: 'https://api.minimax.io/v1',
     defaultModel: model,
   });
 
-  const buildGemini = (key?: string) => new GeminiProvider(key);
+  const buildGemini = (key?: string, model: string = DEFAULT_GEMINI_MODEL) => new GeminiProvider(key, model);
 
   const buildBackup = (key: string, url: string, model: string, name: string) => new OpenAICompatibleProvider({
     name: name,
@@ -242,6 +304,23 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
     baseUrl: url,
     defaultModel: model,
   });
+
+  const buildOpenAICompatiblePreset = (provider: string, key: string, model?: string | null) => new OpenAICompatibleProvider({
+    name: provider === 'openai' ? 'OpenAI' : provider,
+    apiKey: key,
+    baseUrl: OPENAI_COMPATIBLE_BASE_URLS[provider],
+    defaultModel: model || defaultModelForProvider(provider) || DEFAULT_OPENAI_MODEL,
+  });
+
+  const providerKeys: Record<string, string | null | undefined> = {
+    minimax: minimaxKey,
+    openai: openaiKey,
+    xai: xaiKey,
+    openrouter: openrouterKey,
+    groq: groqKey,
+    mistral: mistralKey,
+    deepseek: deepseekKey,
+  };
 
   // 3. Resolve role-specific custom settings if provided
   if (agentRole) {
@@ -253,14 +332,28 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
     if (roleProvider !== 'default') {
       if (roleProvider === 'gemini') {
         const key = roleKey || geminiKey;
-        return buildGemini(key || undefined);
+        return buildGemini(key || undefined, roleModel || DEFAULT_GEMINI_MODEL);
       }
       if (roleProvider === 'minimax') {
         const key = roleKey || minimaxKey;
         if (!key) {
           throw new Error(`MiniMax API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
         }
-        return buildMinimax(key, roleModel || 'MiniMax-M2.7');
+        return buildMinimax(key, roleModel || DEFAULT_MINIMAX_MODEL);
+      }
+      if (roleProvider === 'anthropic') {
+        const key = roleKey || anthropicKey;
+        if (!key) {
+          throw new Error(`Anthropic API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
+        }
+        return new AnthropicProvider(key, roleModel || DEFAULT_ANTHROPIC_MODEL);
+      }
+      if (OPENAI_COMPATIBLE_BASE_URLS[roleProvider]) {
+        const key = roleKey || providerKeys[roleProvider];
+        if (!key) {
+          throw new Error(`${roleProvider} API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
+        }
+        return buildOpenAICompatiblePreset(roleProvider, key, roleModel);
       }
       if (roleProvider === 'openai_compat') {
         const key = roleKey || backupKey;
@@ -280,6 +373,10 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
     primary = buildMinimax(minimaxKey);
   } else if (geminiKey) {
     primary = buildGemini(geminiKey);
+  } else if (openaiKey) {
+    primary = buildOpenAICompatiblePreset('openai', openaiKey, DEFAULT_OPENAI_MODEL);
+  } else if (anthropicKey) {
+    primary = new AnthropicProvider(anthropicKey, DEFAULT_ANTHROPIC_MODEL);
   }
 
   if (primary && backupKey) {

@@ -18,6 +18,7 @@ import {
   fetchAgentStatuses,
   fetchMissionsAction
 } from '@/app/actions';
+import { PROVIDER_MODEL_OPTIONS, PROVIDER_OPTIONS, defaultModelForProvider } from '@/lib/providers/catalog';
 
 interface ChatMessage {
   id: string;
@@ -58,7 +59,7 @@ export default function SuprChatPage() {
 
   // Settings states (Toggles saved to Settings DB)
   const [activeModel, setActiveModel] = useState('gemini');
-  const [temperature, setTemperature] = useState('0.7');
+  const [activeModelName, setActiveModelName] = useState(defaultModelForProvider('gemini'));
   const [autonomyMode, setAutonomyMode] = useState('guided');
   const [sandboxAllowKeys, setSandboxAllowKeys] = useState(false);
 
@@ -107,8 +108,8 @@ export default function SuprChatPage() {
 
     setAgentStatuses(statuses);
     if (settings.llm_provider_supr) setActiveModel(settings.llm_provider_supr);
+    if (settings.llm_model_supr) setActiveModelName(settings.llm_model_supr);
     if (settings.operating_mode) setAutonomyMode(settings.operating_mode);
-    if (settings.llm_temperature_supr) setTemperature(settings.llm_temperature_supr);
     if (settings.sandbox_allow_api_keys) setSandboxAllowKeys(settings.sandbox_allow_api_keys === 'true');
 
     let processedMsgs = [...msgs];
@@ -262,10 +263,16 @@ How can I assist you today? You can query data, ask me to draft/run code files i
   const handleApplyChatSettings = async () => {
     await Promise.all([
       updateSettingAction('llm_provider_supr', activeModel),
+      updateSettingAction('llm_model_supr', activeModelName),
       updateSettingAction('operating_mode', autonomyMode),
-      updateSettingAction('llm_temperature_supr', temperature)
     ]);
     alert("Controls applied successfully.");
+  };
+
+  const handleProviderChange = (provider: string) => {
+    setActiveModel(provider);
+    const defaultModel = defaultModelForProvider(provider);
+    setActiveModelName(defaultModel);
   };
 
   // Open Canvas File
@@ -351,15 +358,35 @@ How can I assist you today? You can query data, ask me to draft/run code files i
               <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Model Provider</label>
               <select 
                 value={activeModel} 
-                onChange={(e) => setActiveModel(e.target.value)}
+                onChange={(e) => handleProviderChange(e.target.value)}
                 className="w-full bg-surface neo-border p-1.5 font-bold focus:outline-none"
               >
-                <option value="default">Default (Global Flow)</option>
-                <option value="gemini">Gemini 2.0 Flash</option>
-                <option value="minimax">MiniMax M2.7</option>
-                <option value="openai_compat">OpenAI-Compatible</option>
+                {PROVIDER_OPTIONS.map((provider) => (
+                  <option key={provider.value} value={provider.value}>{provider.label}</option>
+                ))}
               </select>
             </div>
+
+            {activeModel !== 'default' && (
+              <div>
+                <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Model</label>
+                <input
+                  type="text"
+                  value={activeModelName}
+                  onChange={(e) => setActiveModelName(e.target.value)}
+                  list={PROVIDER_MODEL_OPTIONS[activeModel]?.length ? 'chat-model-options' : undefined}
+                  className="w-full bg-surface neo-border p-1.5 font-bold focus:outline-none"
+                  placeholder={activeModel === 'openai_compat' ? 'Custom model name' : 'Select or enter model'}
+                />
+                {PROVIDER_MODEL_OPTIONS[activeModel]?.length ? (
+                  <datalist id="chat-model-options">
+                    {PROVIDER_MODEL_OPTIONS[activeModel].map((model) => (
+                      <option key={model.value} value={model.value}>{model.label}</option>
+                    ))}
+                  </datalist>
+                ) : null}
+              </div>
+            )}
 
             <div>
               <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Autonomy Clearance</label>
@@ -372,19 +399,6 @@ How can I assist you today? You can query data, ask me to draft/run code files i
                 <option value="supervisor">Supervisor (Managed)</option>
                 <option value="autonomous">Full Autonomy</option>
               </select>
-            </div>
-
-            <div>
-              <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Temperature ({temperature})</label>
-              <input 
-                type="range" 
-                min="0.1" 
-                max="1.0" 
-                step="0.1" 
-                value={temperature}
-                onChange={(e) => setTemperature(e.target.value)}
-                className="w-full accent-primary" 
-              />
             </div>
 
             {/* Sandbox keys allow toggle */}

@@ -311,8 +311,7 @@ export async function updateAgentCapabilityPolicyAction(agentId: string, policy:
   try {
     z.string().min(1).max(120).parse(agentId);
     const sanitized = {
-      model: String(policy.model || 'gemini-1.5-flash').slice(0, 120),
-      temperature: Math.max(0, Math.min(1, Number(policy.temperature ?? 0.7))),
+      model: String(policy.model || 'gemini-3-pro-preview').slice(0, 120),
       maxTokens: Math.max(256, Math.min(32768, Number(policy.maxTokens ?? 4096))),
       capabilities: Array.isArray(policy.capabilities) ? policy.capabilities.map(String).slice(0, 16) : [],
       autonomy: String(policy.autonomy || 'supervised').slice(0, 60),

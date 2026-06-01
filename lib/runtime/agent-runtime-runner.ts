@@ -8,6 +8,7 @@ import { skillLearningService } from '@/src/services/skill-learning';
 import { executeAgentAction, getAgentAction } from './agent-actions';
 import { assembleAgentContext } from './context-assembler';
 import { getRuntimeMode, hasConfiguredModelProvider, isMockAllowed } from './runtime-mode';
+import { parseModelJson } from './model-json';
 import type {
   AgentActionRecord,
   AgentContextBundle,
@@ -37,9 +38,8 @@ function summarize(value: unknown, max = 8000) {
 
 function parseModelToolResponse(raw: string): ModelToolResponse {
   if (!raw.trim()) return { type: 'invalid', reason: 'Model returned empty output.', raw };
-  const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
   try {
-    const parsed = JSON.parse(cleaned);
+    const parsed = parseModelJson(raw);
     if (parsed.type === 'tool_call' && parsed.toolName && parsed.arguments && typeof parsed.arguments === 'object') {
       return {
         type: 'tool_call',
@@ -216,7 +216,7 @@ async function getModelResponse(input: {
     agentRunId: input.runId,
     agentRole: role,
     provider: provider.name,
-    model: null,
+    model: provider.modelName,
     fallbackProvider: provider.name.includes('fallback') ? provider.name : null,
     runtimeMode: input.mode,
     failureReason: null,
@@ -226,7 +226,6 @@ async function getModelResponse(input: {
   try {
     for await (const chunk of provider.streamContent(prompt, {
       systemInstruction: 'Return only one JSON object matching the Supr runtime protocol. Do not include markdown.',
-      temperature: 0.1,
       maxOutputTokens: 1200,
     })) {
       streamed += chunk;
@@ -248,14 +247,13 @@ async function getModelResponse(input: {
       agentRunId: input.runId,
       agentRole: role,
       provider: provider.name,
-      model: null,
+      model: provider.modelName,
       fallbackProvider: null,
       runtimeMode: input.mode,
       failureReason: error.message || String(error),
     });
     return withRuntimeTimeout(provider.generateContent(prompt, {
       systemInstruction: 'Return only one JSON object matching the Supr runtime protocol. Do not include markdown.',
-      temperature: 0.1,
       maxOutputTokens: 1200,
     }), input.deadline, 'model response');
   }

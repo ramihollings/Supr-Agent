@@ -7,6 +7,7 @@ import { createAgentAction, evaluateAgentAction } from '@/lib/runtime/agent-acti
 import { runAgentRuntimeAction } from '@/lib/runtime/agent-runtime-runner';
 import { getActiveProvider } from '@/lib/providers/model';
 import { getRuntimeMode, hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';
+import { parseModelJson } from '@/lib/runtime/model-json';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,10 +17,6 @@ type CodePatchPlan = {
   fixedCode: string;
   changed: boolean;
 };
-
-function stripJsonFence(value: string) {
-  return value.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-}
 
 async function proposeCodePatch(input: {
   filename: string;
@@ -63,10 +60,9 @@ async function proposeCodePatch(input: {
 
   const raw = await provider.generateContent(prompt, {
     systemInstruction: 'You are Supr Code Agent. Produce a complete, safe code patch as JSON only. No markdown.',
-    temperature: 0.1,
     maxOutputTokens: 4000,
   });
-  const parsed = JSON.parse(stripJsonFence(raw));
+  const parsed = parseModelJson(raw);
   const fixedCode = typeof parsed.fixedCode === 'string' ? parsed.fixedCode : input.fileContent;
   return {
     diagnosis: typeof parsed.diagnosis === 'string' ? parsed.diagnosis : 'Code Agent returned no diagnosis.',

@@ -37,9 +37,7 @@ Your current task instructions:
 Please complete the task strictly adhering to the guidelines and specifications in the skill guide. Provide a comprehensive output.`;
 
     try {
-      const response = await provider.generateContent(prompt, {
-        temperature: 0.1
-      });
+      const response = await provider.generateContent(prompt);
       return response;
     } catch (error: any) {
       throw new Error(`Skill invocation failed: ${error.message}`);

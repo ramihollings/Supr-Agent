@@ -4,6 +4,7 @@ import { createAgentAction, resumeAgentActionFromApproval } from './agent-action
 import { runAgentRuntimeAction } from './agent-runtime-runner';
 import { getActiveProvider } from '@/lib/providers/model';
 import { getRuntimeMode, hasConfiguredModelProvider } from './runtime-mode';
+import { parseModelJson } from './model-json';
 import { messagingGateway } from '@/src/services/messaging-gateway';
 import type { PermissionTier } from '@/lib/services/governance';
 import type { RiskLevel, RuntimeMode } from './types';
@@ -505,11 +506,9 @@ async function buildModelProjectPlan(objective: string, mode: RuntimeMode): Prom
 
   const raw = await provider.generateContent(prompt, {
     systemInstruction: 'You are Supr Planner. Return only valid JSON with a tasks array.',
-    temperature: 0.2,
     maxOutputTokens: 1600,
   });
-  const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-  const parsed = JSON.parse(cleaned);
+  const parsed = parseModelJson(raw);
   const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
   const normalized = tasks
     .map((task: any) => normalizePlanItem(task, objective, mode))

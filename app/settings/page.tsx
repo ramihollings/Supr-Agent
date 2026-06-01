@@ -19,6 +19,7 @@ import {
   fetchMissionsAction,
   fetchAgentsState
 } from '@/app/actions';
+import { DEFAULT_BACKUP_MODEL, DEFAULT_MINIMAX_MODEL, PROVIDER_MODEL_OPTIONS, PROVIDER_OPTIONS, defaultModelForProvider } from '@/lib/providers/catalog';
 
 interface MemoryItem {
   id: string;
@@ -93,6 +94,10 @@ function sanitizePalette(palette: string) {
   return ALLOWED_PALETTES.has(palette) ? palette : 'classic';
 }
 
+function modelOptionsForProvider(provider: string) {
+  return PROVIDER_MODEL_OPTIONS[provider] || [];
+}
+
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState('Operating Mode');
   const [operatingMode, setOperatingMode] = useState('Supervisor');
@@ -102,9 +107,16 @@ export default function SettingsPage() {
   // Global LLM Keys States
   const [globalMinimaxKey, setGlobalMinimaxKey] = useState('');
   const [globalGeminiKey, setGlobalGeminiKey] = useState('');
+  const [globalOpenaiKey, setGlobalOpenaiKey] = useState('');
+  const [globalAnthropicKey, setGlobalAnthropicKey] = useState('');
+  const [globalXaiKey, setGlobalXaiKey] = useState('');
+  const [globalOpenrouterKey, setGlobalOpenrouterKey] = useState('');
+  const [globalGroqKey, setGlobalGroqKey] = useState('');
+  const [globalMistralKey, setGlobalMistralKey] = useState('');
+  const [globalDeepseekKey, setGlobalDeepseekKey] = useState('');
   const [globalBackupKey, setGlobalBackupKey] = useState('');
   const [globalBackupUrl, setGlobalBackupUrl] = useState('');
-  const [globalBackupModel, setGlobalBackupModel] = useState('');
+  const [globalBackupModel, setGlobalBackupModel] = useState(DEFAULT_BACKUP_MODEL);
   const [globalBackupName, setGlobalBackupName] = useState('');
 
   // Role Overrides States
@@ -228,6 +240,13 @@ export default function SettingsPage() {
       // Global Keys
       if (settings.global_minimax_key) setGlobalMinimaxKey(settings.global_minimax_key);
       if (settings.global_gemini_key) setGlobalGeminiKey(settings.global_gemini_key);
+      if (settings.global_openai_key) setGlobalOpenaiKey(settings.global_openai_key);
+      if (settings.global_anthropic_key) setGlobalAnthropicKey(settings.global_anthropic_key);
+      if (settings.global_xai_key) setGlobalXaiKey(settings.global_xai_key);
+      if (settings.global_openrouter_key) setGlobalOpenrouterKey(settings.global_openrouter_key);
+      if (settings.global_groq_key) setGlobalGroqKey(settings.global_groq_key);
+      if (settings.global_mistral_key) setGlobalMistralKey(settings.global_mistral_key);
+      if (settings.global_deepseek_key) setGlobalDeepseekKey(settings.global_deepseek_key);
       if (settings.global_backup_key) setGlobalBackupKey(settings.global_backup_key);
       if (settings.global_backup_url) setGlobalBackupUrl(settings.global_backup_url);
       if (settings.global_backup_model) setGlobalBackupModel(settings.global_backup_model);
@@ -286,6 +305,12 @@ export default function SettingsPage() {
     if (res.success && toastMsg) {
       showToast(toastMsg);
     }
+  };
+
+  const selectRoleProvider = (provider: string, setProvider: (value: string) => void, setModel: (value: string) => void) => {
+    setProvider(provider);
+    const defaultModel = defaultModelForProvider(provider);
+    setModel(defaultModel);
   };
 
   const handleModeChange = (mode: string) => {
@@ -539,6 +564,16 @@ export default function SettingsPage() {
     setActiveSection(section);
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+
+  const providerKeyControls = [
+    { label: 'OpenAI API Key', key: 'global_openai_key', value: globalOpenaiKey, setter: setGlobalOpenaiKey, placeholder: 'sk-...' },
+    { label: 'Anthropic API Key', key: 'global_anthropic_key', value: globalAnthropicKey, setter: setGlobalAnthropicKey, placeholder: 'sk-ant-...' },
+    { label: 'xAI API Key', key: 'global_xai_key', value: globalXaiKey, setter: setGlobalXaiKey, placeholder: 'xai-...' },
+    { label: 'OpenRouter API Key', key: 'global_openrouter_key', value: globalOpenrouterKey, setter: setGlobalOpenrouterKey, placeholder: 'sk-or-...' },
+    { label: 'Groq API Key', key: 'global_groq_key', value: globalGroqKey, setter: setGlobalGroqKey, placeholder: 'gsk_...' },
+    { label: 'Mistral API Key', key: 'global_mistral_key', value: globalMistralKey, setter: setGlobalMistralKey, placeholder: '...' },
+    { label: 'DeepSeek API Key', key: 'global_deepseek_key', value: globalDeepseekKey, setter: setGlobalDeepseekKey, placeholder: 'sk-...' },
+  ];
 
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
@@ -909,7 +944,7 @@ export default function SettingsPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">MiniMax M2.7 API Key</label>
+                  <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">MiniMax API Key</label>
                   <div className="flex gap-2">
                     <input
                       type="password"
@@ -923,7 +958,7 @@ export default function SettingsPage() {
                       className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
                     >Save</button>
                   </div>
-                  <span className="text-[9px] text-on-surface-variant block mt-1">Primary LLM if set. API: https://api.minimax.io/v1</span>
+                  <span className="text-[9px] text-on-surface-variant block mt-1">Primary LLM if set. Default model: {DEFAULT_MINIMAX_MODEL}. API: https://api.minimax.io/v1</span>
                 </div>
 
                 <div>
@@ -943,6 +978,24 @@ export default function SettingsPage() {
                   </div>
                   <span className="text-[9px] text-on-surface-variant block mt-1">Secondary primary LLM. Used if MiniMax key is missing.</span>
                 </div>
+                {providerKeyControls.map((control) => (
+                  <div key={control.key}>
+                    <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">{control.label}</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={control.value}
+                        onChange={(e) => control.setter(e.target.value)}
+                        className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                        placeholder={control.placeholder}
+                      />
+                      <button
+                        onClick={() => handleUpdateSetting(control.key, control.value, `${control.label} saved`)}
+                        className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
+                      >Save</button>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div className="w-full h-0.5 bg-outline-variant my-2"></div>
@@ -1031,13 +1084,12 @@ export default function SettingsPage() {
                     <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
                     <select
                       value={suprProvider}
-                      onChange={(e) => setSuprProvider(e.target.value)}
+                      onChange={(e) => selectRoleProvider(e.target.value, setSuprProvider, setSuprModel)}
                       className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
                     >
-                      <option value="default">Default (Global Flow)</option>
-                      <option value="gemini">Gemini</option>
-                      <option value="minimax">MiniMax M2.7</option>
-                      <option value="openai_compat">OpenAI-Compatible</option>
+                      {PROVIDER_OPTIONS.map((provider) => (
+                        <option key={provider.value} value={provider.value}>{provider.label}</option>
+                      ))}
                     </select>
                   </div>
                   {suprProvider !== 'default' && (
@@ -1053,9 +1105,17 @@ export default function SettingsPage() {
                         type="text"
                         value={suprModel}
                         onChange={(e) => setSuprModel(e.target.value)}
-                        placeholder="Custom Model Name Override"
+                        list={modelOptionsForProvider(suprProvider).length ? 'supr-model-options' : undefined}
+                        placeholder={suprProvider === 'openai_compat' ? 'Custom Model Name Override' : 'Select or enter model'}
                         className="w-full bg-surface neo-border p-1 text-xs"
                       />
+                      {modelOptionsForProvider(suprProvider).length > 0 && (
+                        <datalist id="supr-model-options">
+                          {modelOptionsForProvider(suprProvider).map((model) => (
+                            <option key={model.value} value={model.value}>{model.label}</option>
+                          ))}
+                        </datalist>
+                      )}
                       {suprProvider === 'openai_compat' && (
                         <input
                           type="text"
@@ -1093,13 +1153,12 @@ export default function SettingsPage() {
                     <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
                     <select
                       value={codeProvider}
-                      onChange={(e) => setCodeProvider(e.target.value)}
+                      onChange={(e) => selectRoleProvider(e.target.value, setCodeProvider, setCodeModel)}
                       className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
                     >
-                      <option value="default">Default (Global Flow)</option>
-                      <option value="gemini">Gemini</option>
-                      <option value="minimax">MiniMax M2.7</option>
-                      <option value="openai_compat">OpenAI-Compatible</option>
+                      {PROVIDER_OPTIONS.map((provider) => (
+                        <option key={provider.value} value={provider.value}>{provider.label}</option>
+                      ))}
                     </select>
                   </div>
                   {codeProvider !== 'default' && (
@@ -1115,9 +1174,17 @@ export default function SettingsPage() {
                         type="text"
                         value={codeModel}
                         onChange={(e) => setCodeModel(e.target.value)}
-                        placeholder="Custom Model Name Override"
+                        list={modelOptionsForProvider(codeProvider).length ? 'code-model-options' : undefined}
+                        placeholder={codeProvider === 'openai_compat' ? 'Custom Model Name Override' : 'Select or enter model'}
                         className="w-full bg-surface neo-border p-1 text-xs"
                       />
+                      {modelOptionsForProvider(codeProvider).length > 0 && (
+                        <datalist id="code-model-options">
+                          {modelOptionsForProvider(codeProvider).map((model) => (
+                            <option key={model.value} value={model.value}>{model.label}</option>
+                          ))}
+                        </datalist>
+                      )}
                       {codeProvider === 'openai_compat' && (
                         <input
                           type="text"
@@ -1155,13 +1222,12 @@ export default function SettingsPage() {
                     <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
                     <select
                       value={researchProvider}
-                      onChange={(e) => setResearchProvider(e.target.value)}
+                      onChange={(e) => selectRoleProvider(e.target.value, setResearchProvider, setResearchModel)}
                       className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
                     >
-                      <option value="default">Default (Global Flow)</option>
-                      <option value="gemini">Gemini</option>
-                      <option value="minimax">MiniMax M2.7</option>
-                      <option value="openai_compat">OpenAI-Compatible</option>
+                      {PROVIDER_OPTIONS.map((provider) => (
+                        <option key={provider.value} value={provider.value}>{provider.label}</option>
+                      ))}
                     </select>
                   </div>
                   {researchProvider !== 'default' && (
@@ -1177,9 +1243,17 @@ export default function SettingsPage() {
                         type="text"
                         value={researchModel}
                         onChange={(e) => setResearchModel(e.target.value)}
-                        placeholder="Custom Model Name Override"
+                        list={modelOptionsForProvider(researchProvider).length ? 'research-model-options' : undefined}
+                        placeholder={researchProvider === 'openai_compat' ? 'Custom Model Name Override' : 'Select or enter model'}
                         className="w-full bg-surface neo-border p-1 text-xs"
                       />
+                      {modelOptionsForProvider(researchProvider).length > 0 && (
+                        <datalist id="research-model-options">
+                          {modelOptionsForProvider(researchProvider).map((model) => (
+                            <option key={model.value} value={model.value}>{model.label}</option>
+                          ))}
+                        </datalist>
+                      )}
                       {researchProvider === 'openai_compat' && (
                         <input
                           type="text"
@@ -1217,13 +1291,12 @@ export default function SettingsPage() {
                     <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
                     <select
                       value={subProvider}
-                      onChange={(e) => setSubProvider(e.target.value)}
+                      onChange={(e) => selectRoleProvider(e.target.value, setSubProvider, setSubModel)}
                       className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
                     >
-                      <option value="default">Default (Global Flow)</option>
-                      <option value="gemini">Gemini</option>
-                      <option value="minimax">MiniMax M2.7</option>
-                      <option value="openai_compat">OpenAI-Compatible</option>
+                      {PROVIDER_OPTIONS.map((provider) => (
+                        <option key={provider.value} value={provider.value}>{provider.label}</option>
+                      ))}
                     </select>
                   </div>
                   {subProvider !== 'default' && (
@@ -1239,9 +1312,17 @@ export default function SettingsPage() {
                         type="text"
                         value={subModel}
                         onChange={(e) => setSubModel(e.target.value)}
-                        placeholder="Custom Model Name Override"
+                        list={modelOptionsForProvider(subProvider).length ? 'sub-model-options' : undefined}
+                        placeholder={subProvider === 'openai_compat' ? 'Custom Model Name Override' : 'Select or enter model'}
                         className="w-full bg-surface neo-border p-1 text-xs"
                       />
+                      {modelOptionsForProvider(subProvider).length > 0 && (
+                        <datalist id="sub-model-options">
+                          {modelOptionsForProvider(subProvider).map((model) => (
+                            <option key={model.value} value={model.value}>{model.label}</option>
+                          ))}
+                        </datalist>
+                      )}
                       {subProvider === 'openai_compat' && (
                         <input
                           type="text"

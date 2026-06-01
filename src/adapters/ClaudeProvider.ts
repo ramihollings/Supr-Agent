@@ -20,7 +20,6 @@ Arguments: ${JSON.stringify(taskPayload.args)}`;
 
       const response = await provider.generateContent(prompt, {
         systemInstruction,
-        temperature: 0.1
       });
 
       return {

@@ -577,3 +577,39 @@ test('gap closure wires governed learning, replanning, messaging, streaming, and
   assert.match(supervisorPage, /Provider Routing/);
   assert.match(supervisorPage, /Outbound Messages/);
 });
+
+test('model JSON parsing tolerates provider thinking preambles', () => {
+  const parser = readFileSync('lib/runtime/model-json.ts', 'utf8');
+  const runner = readFileSync('lib/runtime/agent-runtime-runner.ts', 'utf8');
+  const projectFlow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
+  const codeRoute = readFileSync('app/api/code-agent/route.ts', 'utf8');
+
+  assert.match(parser, /stripModelThinking/);
+  assert.match(parser, /<think>\[\\s\\S\]\*\?<\\\/think>/);
+  assert.match(parser, /extractFirstJsonObject/);
+  assert.match(parser, /parseModelJson/);
+  assert.match(runner, /parseModelJson\(raw\)/);
+  assert.match(projectFlow, /parseModelJson\(raw\)/);
+  assert.match(codeRoute, /parseModelJson\(raw\)/);
+});
+
+test('LLM entry routes delegate to thinking-tolerant structured parsers', () => {
+  const agentRoute = readFileSync('app/api/agent/route.ts', 'utf8');
+  const researchRoute = readFileSync('app/api/research/route.ts', 'utf8');
+  const codeRoute = readFileSync('app/api/code-agent/route.ts', 'utf8');
+  const slackRoute = readFileSync('app/api/slack/route.ts', 'utf8');
+  const discordRoute = readFileSync('app/api/discord/route.ts', 'utf8');
+  const telegramRoute = readFileSync('app/api/telegram/route.ts', 'utf8');
+  const actions = readFileSync('app/actions.ts', 'utf8');
+  const skillLearning = readFileSync('src/services/skill-learning.ts', 'utf8');
+
+  assert.match(agentRoute, /routeIntakeToProjectFlow/);
+  assert.match(slackRoute, /routeIntakeToProjectFlow/);
+  assert.match(discordRoute, /routeIntakeToProjectFlow/);
+  assert.match(telegramRoute, /routeIntakeToProjectFlow/);
+  assert.match(actions, /routeIntakeToProjectFlow/);
+  assert.match(researchRoute, /runAgentRuntimeAction/);
+  assert.match(codeRoute, /runAgentRuntimeAction/);
+  assert.match(codeRoute, /parseModelJson\(raw\)/);
+  assert.match(skillLearning, /stripModelThinking\(raw\)/);
+});
