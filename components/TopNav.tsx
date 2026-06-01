@@ -31,12 +31,16 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
   const projectId = searchParams.get('id');
   const [showNotificationToast, setShowNotificationToast] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [systemMode, setSystemMode] = useState('Offline');
+  const [systemMode, setSystemMode] = useState('Live Runtime');
 
   useEffect(() => {
     fetchConnectorHealthAction().then((connectors) => {
       const connected = connectors.filter((connector: any) => connector.configured).length;
-      setSystemMode(connected === 0 ? 'Offline' : connected === connectors.length ? 'Live' : 'Partially Connected');
+      if (connected === 0) {
+        setSystemMode('Live Runtime');
+      } else {
+        setSystemMode(connected === connectors.length ? 'Live + Channels' : 'Live + Partial Channels');
+      }
     });
   }, []);
 

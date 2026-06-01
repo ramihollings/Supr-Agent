@@ -1,5 +1,4 @@
 import { RuntimeProvider, TaskPayload } from "../../lib/adapters/AgentAdapter";
-import { getRuntimeMode, isMockAllowed } from "../../lib/runtime/runtime-mode";
 
 export class HttpAgentProvider implements RuntimeProvider {
   private endpoint: string;
@@ -17,23 +16,7 @@ export class HttpAgentProvider implements RuntimeProvider {
 
     try {
       if (this.endpoint.includes("internal")) {
-        const mode = await getRuntimeMode();
-        if (!isMockAllowed(mode)) {
-          throw new Error("EXTERNAL_AGENT_ENDPOINT must point to a live provider in real runtime mode.");
-        }
-        // Ephemeral mock response when no live external connection is configured
-        console.warn("[HttpAgentProvider] Operating in offline diagnostic mode. Returning mock response.");
-        return {
-          success: true,
-          provider: "HttpAgent",
-          output: `[HTTP AGENT OFFLINE SUCCESS] Received task '${taskPayload.id}'. Handled action '${taskPayload.tool}' successfully.`,
-          evidence: {
-            artifacts: [],
-            memory: [],
-            events: [`http_forward:${taskPayload.tool}`],
-            toolCalls: []
-          }
-        };
+        throw new Error("EXTERNAL_AGENT_ENDPOINT must point to a live provider in real runtime mode.");
       }
 
       const response = await fetch(this.endpoint, {

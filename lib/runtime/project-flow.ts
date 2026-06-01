@@ -472,7 +472,7 @@ function normalizePlanItem(raw: any, objective: string, mode: RuntimeMode): Plan
     phase,
     title,
     inputs: { objective, ...inputs },
-    plannerSource: mode === 'offline' ? 'preset_fallback' : 'model',
+    plannerSource: 'model',
   };
 }
 
@@ -487,8 +487,7 @@ function presetPlan(objective: string): PlannedWork[] {
 
 async function buildModelProjectPlan(objective: string, mode: RuntimeMode): Promise<PlannedWork[]> {
   if (!await hasConfiguredModelProvider()) {
-    if (mode === 'real') throw new Error('Real runtime mode requires a configured model provider before Project Flow planning.');
-    return presetPlan(objective);
+    throw new Error('Live Project Flow planning requires MiniMax or another configured model provider.');
   }
 
   const provider = await getActiveProvider('supr');
@@ -523,9 +522,7 @@ async function buildProjectPlan(objective: string) {
     const plan = await buildModelProjectPlan(objective, mode);
     return { mode, plannerSource: plan.some((item) => item.plannerSource === 'model') ? 'model' : 'preset_fallback', plan };
   } catch (error: any) {
-    if (mode === 'real') throw error;
-    console.warn(`[ProjectFlow] Model planner unavailable, using preset fallback: ${error.message}`);
-    return { mode, plannerSource: 'preset_fallback' as const, plan: presetPlan(objective) };
+    throw error;
   }
 }
 

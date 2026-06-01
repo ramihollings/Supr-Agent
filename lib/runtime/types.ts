@@ -12,7 +12,7 @@ export type AgentActionStatus =
   | 'cancelled';
 
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical';
-export type RuntimeMode = 'real' | 'demo' | 'offline';
+export type RuntimeMode = 'real';
 
 export interface AgentRuntimeBudget {
   maxSteps?: number;

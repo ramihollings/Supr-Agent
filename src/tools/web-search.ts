@@ -44,14 +44,7 @@ export const webSearchTool: ToolDefinition<WebSearchParamsType, string> = {
         throw new Error("web_search requires TAVILY_API_KEY or another live search provider in real runtime mode.");
       }
 
-      // Explicit demo fallback
-      return JSON.stringify([
-        {
-          title: `Results for "${params.query}"`,
-          url: "https://example.com/search",
-          content: `[${mode.toUpperCase()} MODE] Mocked search result for query: "${params.query}". Please configure TAVILY_API_KEY for live results.`
-        }
-      ], null, 2);
+      throw new Error("web_search requires TAVILY_API_KEY or another live search provider.");
     } else {
       if (!params.url) {
         throw new Error("URL parameter is required for fetch action.");

@@ -6,7 +6,7 @@ import { requireApiAuth } from '@/lib/auth';
 import { createAgentAction, evaluateAgentAction } from '@/lib/runtime/agent-actions';
 import { runAgentRuntimeAction } from '@/lib/runtime/agent-runtime-runner';
 import { getActiveProvider } from '@/lib/providers/model';
-import { getRuntimeMode, hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';
+import { hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';
 import { parseModelJson } from '@/lib/runtime/model-json';
 
 export const dynamic = 'force-dynamic';
@@ -25,17 +25,8 @@ async function proposeCodePatch(input: {
   validationFeedback?: string;
   attempt?: number;
 }): Promise<CodePatchPlan> {
-  const mode = await getRuntimeMode();
   if (!await hasConfiguredModelProvider()) {
-    if (mode === 'real') {
-      throw new Error('Code Agent requires a configured model provider in real runtime mode.');
-    }
-    return {
-      diagnosis: 'No model provider is configured, so Code Agent preserved the file and marked the run as demo/offline.',
-      patchSummary: 'No patch proposed without a model provider.',
-      fixedCode: input.fileContent,
-      changed: false,
-    };
+    throw new Error('Code Agent requires MiniMax or another configured model provider in live runtime.');
   }
 
   const provider = await getActiveProvider('code');

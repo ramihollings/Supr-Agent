@@ -1517,7 +1517,7 @@ export default function SettingsPage() {
           <div ref={integrationsRef} className="flex flex-col gap-6">
             <div className="border-b-4 border-primary pb-4 mb-4">
               <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">API & Integrations Credentials</h2>
-              <p className="font-body text-on-surface-variant mt-2">Provide keys to run real commands on GitHub, Slack, and Gmail, or fall back to high-fidelity logs simulation.</p>
+              <p className="font-body text-on-surface-variant mt-2">Provide keys to run real commands on GitHub, Slack, and Gmail. Optional channels can stay disconnected without blocking core MiniMax-backed agent work.</p>
             </div>
 
             <div className="border-4 border-primary p-6 bg-surface">
@@ -1726,7 +1726,7 @@ export default function SettingsPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
                 { id: 'cite_evidence', name: 'Evidence Required', desc: 'Agents must cite sources before execution.' },
-                { id: 'pass_tests', name: 'Tests Must Pass', desc: 'Simulation must succeed prior to live deployment.' },
+                { id: 'pass_tests', name: 'Tests Must Pass', desc: 'Validation must succeed before deployment.' },
                 { id: 'scope_approval', name: 'Scope Approval', desc: 'Require human sign-off if mission parameters shift.' },
               ].map((s) => (
                 <label key={s.id} className="flex items-start gap-4 p-4 border-4 border-primary bg-surface cursor-pointer group hover:bg-surface-container transition-colors">

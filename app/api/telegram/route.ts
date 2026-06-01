@@ -108,7 +108,16 @@ async function handleCommand(text: string, projectHint?: string | null) {
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_telegram');
   if (enabled !== 'true') {
-    return Response.json({ ok: false, error: 'Telegram channel is disabled.' }, { status: 403 });
+    const update = await req.json().catch(() => ({}));
+    const message = update.message || update.edited_message || update.channel_post;
+    const text = String(message?.text || '').trim();
+    const chatId = String(message?.chat?.id || '');
+    await dbClient.execute(
+      `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
+       VALUES (?, 'telegram', ?, ?, 'ignored', ?, ?)`,
+      [`cmd-${crypto.randomUUID()}`, text || '[telegram disabled]', JSON.stringify(update), chatId || null, 'Telegram channel disabled; core Supr runtime remains live.'],
+    );
+    return Response.json({ ok: true, ignored: true, response: 'Telegram channel is disabled; Supr runtime remains live.' });
   }
 
   const configured = await configuredChatId();

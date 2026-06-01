@@ -302,7 +302,7 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
 }
 
 export async function createAgent(agentData: Omit<Agent, 'id'>): Promise<any> {
-  const newAgentId = `a-${Date.now()}`;
+  const newAgentId = id('a');
   
   const sql = `
     INSERT INTO Agents (id, workspace_id, name, role, type, permission_tier, tools, status, retry_limit, retry_count)
@@ -338,10 +338,9 @@ export async function createAgent(agentData: Omit<Agent, 'id'>): Promise<any> {
 - Maintain persistent context. Avoid redundant operations. Stop loops early.`;
   }
 
-  // Simulate an 'agentmemory' context compression block
-  const memoryContext = `[MOCK MEMORY COMPRESSION]
-- Last known state: Deployment scripts configured for GCP.
-- Previous Failure: NPM outdated engine warning on superstatic (Ignored).`;
+  const memoryContext = `[LIVE MEMORY CONTEXT]
+- New agent initialized with current role, tools, and permission tier.
+- Runtime memory will be populated from persisted project events and approved evidence.`;
 
   await dbClient.execute(sql, [
     newAgentId,

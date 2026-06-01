@@ -7,7 +7,7 @@ import { providerRouteDecisionService } from '@/src/services/provider-route-deci
 import { skillLearningService } from '@/src/services/skill-learning';
 import { executeAgentAction, getAgentAction } from './agent-actions';
 import { assembleAgentContext } from './context-assembler';
-import { getRuntimeMode, hasConfiguredModelProvider, isMockAllowed } from './runtime-mode';
+import { getRuntimeMode, hasConfiguredModelProvider } from './runtime-mode';
 import { parseModelJson } from './model-json';
 import type {
   AgentActionRecord,
@@ -61,77 +61,6 @@ function parseModelToolResponse(raw: string): ModelToolResponse {
   } catch (error: any) {
     return { type: 'invalid', reason: `Model response was not valid JSON: ${error.message}`, raw };
   }
-}
-
-function inferFilename(action: AgentActionRecord) {
-  const inputs = action.inputs || {};
-  const filename = typeof inputs.filename === 'string' ? inputs.filename : '';
-  if (filename) return filename;
-  return `${String(action.intent || action.capability).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'agent_output'}.md`;
-}
-
-function deterministicResponse(action: AgentActionRecord, context: AgentContextBundle, toolResults: Array<{ invocationId: string; toolName: string }>, mode: RuntimeMode): ModelToolResponse {
-  if (toolResults.length > 0) {
-    const validationCommand = typeof action.inputs?.validationCommand === 'string' ? action.inputs.validationCommand : '';
-    const validationAlreadyRan = toolResults.some((tool) => tool.toolName === 'execute_command');
-    if (validationCommand && action.requiredPermission === 'Execute' && !validationAlreadyRan) {
-      return {
-        type: 'tool_call',
-        toolName: 'execute_command',
-        arguments: { command: validationCommand },
-        rationale: 'Run validation after the workspace/file write produced durable evidence.',
-      };
-    }
-    return {
-      type: 'final',
-      summary: `${action.capability} completed through ${toolResults.map((tool) => tool.toolName).join(', ')} in ${mode} runtime mode.`,
-      evidence: { toolCalls: toolResults.map((tool) => tool.invocationId) },
-    };
-  }
-
-  const objective = String((action.inputs || {}).objective || action.intent || context.mission.goal || context.mission.title || 'the current mission');
-  if (action.capability === 'web_scrape') {
-    return { type: 'tool_call', toolName: 'web_search', arguments: { action: 'search', query: objective }, rationale: 'Gather source evidence for the research task.' };
-  }
-  if (action.capability === 'workspace_write_file') {
-    return {
-      type: 'tool_call',
-      toolName: 'workspace_write_file',
-      arguments: {
-        missionId: action.missionId,
-        agentId: action.agentId,
-        filename: inferFilename(action),
-        content: typeof action.inputs?.content === 'string'
-          ? action.inputs.content
-          : `# Agent Workspace Output\n\nObjective: ${objective}\n\nRuntime mode: ${mode}\n\nThis file was produced through the governed AgentRuntimeRunner.`,
-        previousContent: typeof action.inputs?.currentContent === 'string' ? action.inputs.currentContent : '',
-        patchSummary: typeof action.inputs?.patchSummary === 'string' ? action.inputs.patchSummary : `Runtime update for ${action.intent}`,
-      },
-      rationale: 'Create a durable workspace file for the task.',
-    };
-  }
-  if (action.capability === 'execute_command') {
-    return {
-      type: 'tool_call',
-      toolName: 'execute_command',
-      arguments: { command: typeof action.inputs?.command === 'string' ? action.inputs.command : 'node -e "console.log(JSON.stringify({ ok: true, runtime: \\"agent\\" }))"' },
-      rationale: 'Run the requested validation command inside the governed command tool.',
-    };
-  }
-  const toolName = ['workspace_write_artifact', 'workspace_validate_outputs', 'governance_review', 'delivery_package'].includes(action.capability)
-    ? action.capability
-    : 'workspace_write_artifact';
-  return {
-    type: 'tool_call',
-    toolName,
-    arguments: {
-      missionId: action.missionId,
-      agentId: action.agentId,
-      title: `${action.capability}.md`,
-      content: `# ${action.capability}\n\nObjective: ${objective}\n\nThe runtime selected ${toolName} based on action capability.`,
-    },
-    rationale: `Use native ${toolName} capability for durable evidence.`,
-  };
 }
 
 function buildRuntimePrompt(action: AgentActionRecord, context: AgentContextBundle, toolResults: Array<Record<string, unknown>>) {
@@ -392,34 +321,19 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           throw new Error(`Runtime timeout exceeded after ${Date.now() - startedAt}ms.`);
         }
         let response: ModelToolResponse;
-        if (mode === 'real' || await hasConfiguredModelProvider()) {
-          if (mode === 'real' && !await hasConfiguredModelProvider()) {
-            throw new Error('Real runtime mode requires a configured model provider.');
-          }
-          const raw = await withRuntimeTimeout(getModelResponse({
-            action,
-            context,
-            toolResults,
-            runId,
-            mode,
-            deadline,
-            transcriptIds,
-          }), deadline, 'model response');
-          response = parseModelToolResponse(raw);
-          if (response.type === 'invalid' && isMockAllowed(mode)) {
-            transcriptIds.push(await recordStep({
-              missionId: action.missionId,
-              agentId: action.agentId,
-              runId,
-              eventType: 'runtime_warning',
-              summary: response.reason,
-              metadata: { raw: response.raw?.slice(0, 1000), mode },
-            }));
-            response = deterministicResponse(action, context, toolResults, mode);
-          }
-        } else {
-          response = deterministicResponse(action, context, toolResults, mode);
+        if (!await hasConfiguredModelProvider()) {
+          throw new Error('Live runtime requires MiniMax or another configured model provider.');
         }
+        const raw = await withRuntimeTimeout(getModelResponse({
+          action,
+          context,
+          toolResults,
+          runId,
+          mode,
+          deadline,
+          transcriptIds,
+        }), deadline, 'model response');
+        response = parseModelToolResponse(raw);
 
         if (response.type === 'invalid') {
           transcriptIds.push(await recordStep({

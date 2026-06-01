@@ -741,7 +741,7 @@ export function initDatabase() {
   insertSetting.run('remote_execution_host', '');
   
   insertSetting.run('operating_mode', 'autonomous');
-  insertSetting.run('runtime_mode', 'demo');
+  insertSetting.run('runtime_mode', 'real');
   insertSetting.run('permission_boundary', 'governed');
   insertSetting.run('governance_standards', JSON.stringify(['SOX', 'SOC2']));
   insertSetting.run('channels_email', 'true');

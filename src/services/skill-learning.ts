@@ -4,7 +4,7 @@ import path from "node:path";
 import dbClient from "../../lib/database/db_client";
 import { getActiveProvider } from "../../lib/providers/model";
 import { stripModelThinking } from "../../lib/runtime/model-json";
-import { getRuntimeMode, hasConfiguredModelProvider } from "../../lib/runtime/runtime-mode";
+import { hasConfiguredModelProvider } from "../../lib/runtime/runtime-mode";
 import { parseSkillMd, validateSkillDirName } from "./skill-parser";
 import type { LearnedSkillDraft } from "../../lib/runtime/types";
 
@@ -90,8 +90,9 @@ export class SkillLearningService {
       toolSequence: input.toolCalls.map((tool) => String(tool.tool_name || tool.toolName || "tool")),
     });
 
-    if (!await hasConfiguredModelProvider()) return fallback;
-    if (await getRuntimeMode() === "offline") return fallback;
+    if (!await hasConfiguredModelProvider()) {
+      throw new Error("Skill learning requires MiniMax or another configured model provider in live runtime.");
+    }
 
     try {
       const provider = await getActiveProvider("reflection");

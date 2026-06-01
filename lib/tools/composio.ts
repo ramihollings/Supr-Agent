@@ -1,16 +1,12 @@
 import { z } from 'zod';
 import { ToolDefinition, toolRegistry } from './registry';
-import { getRuntimeMode, isMockAllowed } from '../runtime/runtime-mode';
 // @ts-ignore - The types might be missing or incomplete depending on version
 import { Composio } from 'composio-core';
 
 let composioClient: Composio | null = null;
 
-// Initialize conditionally so we don't crash without an API key
 if (process.env.COMPOSIO_API_KEY) {
   composioClient = new Composio({ apiKey: process.env.COMPOSIO_API_KEY });
-} else if (process.env.NODE_ENV !== 'production') {
-  console.warn("[Composio] Warning: COMPOSIO_API_KEY not set. Operating in mock diagnostic mode.");
 }
 
 /**
@@ -18,7 +14,6 @@ if (process.env.COMPOSIO_API_KEY) {
  * This guarantees the Governance Engine can intercept Composio executions.
  */
 export async function registerComposioTool(actionName: string, riskLevel: 'Low' | 'Medium' | 'High' | 'Critical' = 'Medium') {
-  // 1. Fetch dynamic schema from Composio or mock it
   let description = `Executes the ${actionName} action via Composio.`;
   let parameters = z.any(); // In production, we'd dynamically compile Zod schemas from the Composio OpenAPI spec.
 
@@ -31,16 +26,9 @@ export async function registerComposioTool(actionName: string, riskLevel: 'Low' 
     riskLevel: riskLevel,
     execute: async (params) => {
       if (!composioClient) {
-        const mode = await getRuntimeMode();
-        if (!isMockAllowed(mode)) {
-          throw new Error(`Composio action '${actionName}' requires COMPOSIO_API_KEY in real runtime mode.`);
-        }
-        // Diagnostic Mock Execution
-        console.log(`[Composio Mock] Executing ${actionName} with params:`, params);
-        return `[${mode.toUpperCase()} COMPOSIO RESULT] Executed diagnostic action: ${actionName}`;
+        throw new Error(`Composio action '${actionName}' requires COMPOSIO_API_KEY in live runtime.`);
       }
 
-      // Real Execution
       try {
         const response = await (composioClient as any).executeAction(actionName, params);
         return JSON.stringify(response);

@@ -142,8 +142,8 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
   assert.match(runtime, /humanGateRequired/);
   assert.match(runner, /ModelToolResponse/);
   assert.match(runner, /toolRegistry\.executeTool/);
-  assert.match(runner, /validationCommand/);
-  assert.match(runner, /patchSummary/);
+  assert.match(runner, /Live runtime requires MiniMax or another configured model provider/);
+  assert.match(runner, /parseModelJson\(raw\)/);
   assert.match(runner, /Tool_Invocations/);
   assert.match(runner, /runtime_context/);
   assert.match(runner, /runtime_failure/);
@@ -247,7 +247,7 @@ test('project flow runtime exposes controls, intake routing, and telegram comman
   assert.match(runtime, /buildProjectPlan/);
   assert.match(runtime, /plannerSource/);
   assert.match(runtime, /preset_fallback/);
-  assert.match(runtime, /Real runtime mode requires a configured model provider before Project Flow planning/);
+  assert.match(runtime, /Live Project Flow planning requires MiniMax or another configured model provider/);
   assert.match(runtime, /Agent_Runs/);
   assert.match(runtime, /Channel_Commands/);
   assert.match(runtime, /routeIntakeToProjectFlow/);
@@ -327,7 +327,7 @@ test('front page defaults to live agent orchestration instead of fake glidepath 
   assert.match(setupWizard, /Unavailable/);
   assert.doesNotMatch(initSql, /mock_tickets/);
   assert.doesNotMatch(setupWizard, /Simulated Telemetry|sandbox emulator|>Simulated</);
-  assert.match(visionLab, /Demo Fixture/);
+  assert.match(visionLab, /Local Fixture/);
   assert.doesNotMatch(visionLab, /Simulated Step Mocks|Load r\/saas mock|Load Hacker News mock/);
   assert.doesNotMatch(visionLab, /MockPost/);
   assert.doesNotMatch(orchestrationPage, /LIVE_EVENTS|live-\$\{Date\.now\(\)\}|Simulated live updates/);
@@ -447,7 +447,7 @@ test('organization import requires server-side overwrite confirmation', () => {
   assert.match(settings, /importOrganizationAction\(JSON\.stringify\(importBundle\), \{ allowOverwrite: confirmOverwrite \}\)/);
 });
 
-test('real runtime mode blocks diagnostic mock successes', () => {
+test('live runtime is the only active mode and blocks diagnostic mock successes', () => {
   const runtimeMode = readFileSync('lib/runtime/runtime-mode.ts', 'utf8');
   const webSearch = readFileSync('src/tools/web-search.ts', 'utf8');
   const browser = readFileSync('lib/tools/browser.ts', 'utf8');
@@ -456,12 +456,14 @@ test('real runtime mode blocks diagnostic mock successes', () => {
   const modelProvider = readFileSync('lib/providers/model.ts', 'utf8');
 
   assert.match(runtimeMode, /RuntimeMode/);
+  assert.match(runtimeMode, /return MODES\.has\(mode as RuntimeMode\) \? \(mode as RuntimeMode\) : 'real'/);
   assert.match(runtimeMode, /isMockAllowed/);
+  assert.match(runtimeMode, /return false/);
   assert.match(webSearch, /real runtime mode/);
-  assert.match(browser, /isMockAllowed\(mode\)/);
-  assert.match(composio, /requires COMPOSIO_API_KEY in real runtime mode/);
+  assert.doesNotMatch(browser, /mock diagnostic|isMockAllowed/);
+  assert.match(composio, /requires COMPOSIO_API_KEY in live runtime/);
   assert.match(httpProvider, /EXTERNAL_AGENT_ENDPOINT must point to a live provider in real runtime mode/);
-  assert.match(modelProvider, /Real runtime mode requires/);
+  assert.match(modelProvider, /Live runtime requires MiniMax or another configured LLM provider/);
 });
 
 test('gap closure wires governed learning, replanning, messaging, streaming, and execution policy', () => {
@@ -558,7 +560,7 @@ test('gap closure wires governed learning, replanning, messaging, streaming, and
   assert.match(shellTool, /selectedEnvironment !== "remote"/);
   assert.match(initSql, /execute_sandboxed_command/);
   assert.match(initSql, /execute_remote/);
-  assert.match(browser, /executionMode/);
+  assert.match(browser, /CLOAKBROWSER_PATH environment variable is required for live browser scraping/);
 
   const supervisorPage = readFileSync('app/supervisor/page.tsx', 'utf8');
   assert.match(actions, /requestLearnedSkillReviewAction/);
@@ -652,6 +654,9 @@ test('supr chat only routes explicit work requests into project flow', () => {
 
   assert.match(actions, /function shouldRouteSuprChatToProjectFlow/);
   assert.match(actions, /function buildDirectSuprChatResponse/);
+  assert.match(actions, /getActiveProvider\('supr'\)/);
+  assert.match(actions, /hasConfiguredModelProvider/);
+  assert.match(actions, /Do not create, route, queue, or claim to execute Project Flow work/);
   assert.match(actions, /what are you currently working on/);
   assert.match(actions, /No agents are actively working right now/);
   assert.match(actions, /Use action language like "build", "fix", "generate", "run"/);
@@ -687,4 +692,22 @@ test('research runtime avoids legacy approval timestamps and duplicate log ids',
   assert.match(researchRoute, /Governed runtime paused/);
   assert.match(researchRoute, /Continuing with direct source collection/);
   assert.match(researchRoute, /catch \(runtimeError/);
+});
+
+test('minimax live runtime defaults do not depend on telegram', () => {
+  const initSql = readFileSync('lib/database/init.ts', 'utf8');
+  const runtimeMode = readFileSync('lib/runtime/runtime-mode.ts', 'utf8');
+  const telegramRoute = readFileSync('app/api/telegram/route.ts', 'utf8');
+  const supervisorPage = readFileSync('app/supervisor/page.tsx', 'utf8');
+  const setupWizard = readFileSync('components/SetupWizard.tsx', 'utf8');
+  const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
+
+  assert.match(initSql, /insertSetting\.run\('runtime_mode', 'real'\)/);
+  assert.match(runtimeMode, /const MODES = new Set<RuntimeMode>\(\['real'\]\)/);
+  assert.match(runtimeMode, /return false/);
+  assert.match(telegramRoute, /Telegram channel disabled; core Supr runtime remains live/);
+  assert.match(telegramRoute, /return Response\.json\(\{ ok: true, ignored: true/);
+  assert.match(supervisorPage, /runtime_mode \|\| "real"/);
+  assert.doesNotMatch(setupWizard, /Demo\/offline|demo mode/i);
+  assert.doesNotMatch(settingsPage, /simulation|demo mode/i);
 });

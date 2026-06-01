@@ -134,6 +134,9 @@ export async function fetchSupervisorConsoleAction(projectId?: string) {
       ),
     ]);
 
+    const executionSettingsMap = Object.fromEntries(executionSettings.map((row: any) => [row.key, row.value]));
+    executionSettingsMap.runtime_mode = 'real';
+
     const runtimeDecisions = {
       replanDecisions: replanDecisions.map((row: any) => ({
         id: row.id,
@@ -166,7 +169,7 @@ export async function fetchSupervisorConsoleAction(projectId?: string) {
         sentAt: row.sent_at,
         createdAt: row.created_at,
       })),
-      executionSettings: Object.fromEntries(executionSettings.map((row: any) => [row.key, row.value])),
+      executionSettings: executionSettingsMap,
     };
 
     return { mission, agents, groups, blueprints, memorySections, metrics, guidelinePacks, learnedSkillDrafts, runtimeDecisions };
@@ -1155,8 +1158,10 @@ import path from 'path';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { GoogleGenAI } from '@google/genai';
+import { getActiveProvider } from '@/lib/providers/model';
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
 import { DEFAULT_GEMINI_MODEL, OPENAI_COMPATIBLE_BASE_URLS } from '@/lib/providers/catalog';
+import { hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';
 import { createAgentAction as createRuntimeAgentAction, fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
 import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
 import {
@@ -2134,7 +2139,7 @@ export async function generateImagenImageAction(prompt: string): Promise<string>
     throw new Error('No image bytes returned.');
   } catch (err: any) {
     console.error('[Imagen Action Error]:', err);
-    // SVG Fallback for offline/unconfigured environments
+    // SVG fallback for image-generation provider failures.
     const fallbackSvg = `
       <svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
         <rect width="100%" height="100%" fill="#1a1a1a"/>
@@ -2182,6 +2187,15 @@ async function buildDirectSuprChatResponse(content: string) {
   ]);
   const workingAgents = agents.filter((agent) => agent.status === 'Working');
 
+  const fallbackStatus = () => [
+    `I'm here.`,
+    mission ? `Active project: ${mission.name}.` : `No active project is selected right now.`,
+    workingAgents.length
+      ? `Currently working: ${workingAgents.map((agent) => `${agent.name}${agent.currentTask ? ` on ${agent.currentTask}` : ''}${agent.currentProject ? ` for ${agent.currentProject}` : ''}`).join('; ')}.`
+      : `No agents are actively working right now.`,
+    `Say what you want built, fixed, generated, or run when you want me to route it into Project Flow.`,
+  ].join('\n');
+
   if (/^help\b|\bwhat can you do\b/.test(normalized)) {
     return [
       `I'm here in Supr Chat for quick status, coordination, and routing decisions.`,
@@ -2196,18 +2210,49 @@ async function buildDirectSuprChatResponse(content: string) {
       mission ? `Active project: ${mission.name}.` : `No active project is selected right now.`,
       workingAgents.length
         ? `Working agents: ${workingAgents.map((agent) => `${agent.name}${agent.currentTask ? ` on ${agent.currentTask}` : ''}`).join('; ')}.`
-        : `No agents are actively working right now.`,
+      : `No agents are actively working right now.`,
     ].join('\n');
   }
 
-  return [
-    `I'm here.`,
-    mission ? `Active project: ${mission.name}.` : `No active project is selected right now.`,
-    workingAgents.length
-      ? `Currently working: ${workingAgents.map((agent) => `${agent.name}${agent.currentTask ? ` on ${agent.currentTask}` : ''}${agent.currentProject ? ` for ${agent.currentProject}` : ''}`).join('; ')}.`
-      : `No agents are actively working right now.`,
-    `Say what you want built, fixed, generated, or run when you want me to route it into Project Flow.`,
-  ].join('\n');
+  if (!await hasConfiguredModelProvider()) {
+    return fallbackStatus();
+  }
+
+  try {
+    const provider = await getActiveProvider('supr');
+    const prompt = [
+      `User message: ${content}`,
+      '',
+      'Current Supr context:',
+      JSON.stringify({
+        activeProject: mission ? {
+          id: mission.id,
+          name: mission.name,
+          status: mission.status,
+          objective: mission.objective || null,
+        } : null,
+        agents: agents.map((agent) => ({
+          name: agent.name,
+          role: agent.role,
+          status: agent.status,
+          currentTask: agent.currentTask,
+          currentProject: agent.currentProject,
+          permissionTier: agent.permissionTier,
+        })),
+      }),
+      '',
+      'Answer directly as Supr. Do not create, route, queue, or claim to execute Project Flow work.',
+      'If the user is asking for work to be built, fixed, generated, run, or assigned, tell them to confirm the action so it can be routed.',
+    ].join('\n');
+    const response = await provider.generateContent(prompt, {
+      systemInstruction: 'You are Supr, an agentic workspace coordinator. Answer concise direct chat questions with current context. Do not output JSON.',
+      maxOutputTokens: 900,
+    });
+    return response.trim() || fallbackStatus();
+  } catch (error) {
+    console.warn('[SuprChat] Direct model response failed:', error);
+    return fallbackStatus();
+  }
 }
 
 export async function sendChatMessageAction(

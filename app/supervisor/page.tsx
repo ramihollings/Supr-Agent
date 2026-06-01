@@ -152,7 +152,7 @@ function SupervisorConsoleContent() {
                 <article className="bg-surface-container border-2 border-primary p-3">
                   <h3 className="font-headline font-black uppercase text-primary text-sm">Sandbox Choice</h3>
                   <dl className="mt-2 space-y-1 font-mono text-[10px]">
-                    <div className="flex justify-between gap-3"><dt>Mode</dt><dd>{runtimeDecisions.executionSettings.runtime_mode || "demo"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Mode</dt><dd>{runtimeDecisions.executionSettings.runtime_mode || "real"}</dd></div>
                     <div className="flex justify-between gap-3"><dt>Docker</dt><dd>{runtimeDecisions.executionSettings.docker_available === "true" ? "available" : "not enabled"}</dd></div>
                     <div className="flex justify-between gap-3"><dt>Remote</dt><dd>{runtimeDecisions.executionSettings.remote_execution_enabled === "true" ? "enabled" : "disabled"}</dd></div>
                   </dl>

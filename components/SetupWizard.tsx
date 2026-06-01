@@ -202,7 +202,7 @@ export function SetupWizard({ onClose }: SetupWizardProps) {
           {step === 3 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
               <div className="bg-surface-container p-4 border-2 border-primary border-dashed text-xs text-on-surface-variant">
-                <strong>Live Integrations:</strong> If these inputs are left blank, Supr will keep external actions unavailable or approval-gated instead of pretending the request succeeded. Demo/offline mode labels diagnostic fallbacks explicitly.
+                <strong>Live Integrations:</strong> Supr runs live by default with the configured LLM. Optional channels left blank stay unavailable or approval-gated without blocking core agent work.
               </div>
 
               <div className="space-y-4">

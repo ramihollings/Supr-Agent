@@ -357,12 +357,12 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                 className={`h-8 px-2 border-2 border-primary flex items-center gap-1 hover:bg-primary-fixed hover:text-primary transition-all font-headline font-black text-[9px] uppercase shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none ${
                   isLiveMode ? 'bg-green-500 text-white' : 'bg-background text-primary'
                 }`}
-                title="Toggle live interactive web proxy and labeled demo fixtures"
+                title="Toggle live interactive web proxy and local visual fixtures"
               >
                 <span className="material-symbols-outlined text-xs">
                   {isLiveMode ? 'bolt' : 'smart_toy'}
                 </span>
-                <span>{isLiveMode ? 'Live Proxy' : 'Demo Fixture'}</span>
+                <span>{isLiveMode ? 'Live Proxy' : 'Local Fixture'}</span>
               </button>
 
               <button 
@@ -403,7 +403,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                 />
               ) : (
                 <>
-                  {/* WEBPAGE MOCK STATE 1: HN (news.ycombinator.com) */}
+                  {/* WEBPAGE FIXTURE STATE 1: HN (news.ycombinator.com) */}
                   {activeUrl.includes('ycombinator.com') && (
                     <div className="bg-[#f6f6ef] text-[#1a1a1a] p-4 font-body min-h-full text-xs">
                       <header className="bg-[#ff6600] p-1 flex items-center justify-between border border-primary/20 mb-3">
@@ -439,7 +439,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                     </div>
                   )}
 
-                  {/* WEBPAGE MOCK STATE 2: REDDIT (reddit.com) */}
+                  {/* WEBPAGE FIXTURE STATE 2: REDDIT (reddit.com) */}
                   {activeUrl.includes('reddit.com') && (
                     <div className="bg-[#0b1416] text-[#e3e8eb] p-4 font-body min-h-full text-xs">
                       <header className="flex items-center gap-2 border-b border-[#233337] pb-3 mb-4">
@@ -480,7 +480,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                     </div>
                   )}
 
-                  {/* WEBPAGE MOCK STATE 3: TWITTER (twitter.com) */}
+                  {/* WEBPAGE FIXTURE STATE 3: TWITTER (twitter.com) */}
                   {activeUrl.includes('twitter.com') && (
                     <div className="bg-black text-white p-4 font-body min-h-full text-xs">
                       <header className="flex items-center border-b border-[#2f3336] pb-3 mb-4">
@@ -514,7 +514,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                     </div>
                   )}
 
-                  {/* WEBPAGE MOCK STATE 4: COMPETITOR PRICING (competitor.io) */}
+                  {/* WEBPAGE FIXTURE STATE 4: COMPETITOR PRICING (competitor.io) */}
                   {activeUrl.includes('competitor.io') && (
                     <div className="bg-[#0f0e17] text-[#a7a9be] p-4 font-body min-h-full text-xs">
                       <header className="flex items-center justify-between border-b border-[#2e2f3e] pb-3 mb-4">
@@ -551,7 +551,7 @@ export function AgentVisionLab({ projectId, onLogActivity, onTraceUpdate, onTerm
                     </div>
                   )}
 
-                  {/* WEBPAGE MOCK STATE 5: SANDBOX LOCALHOST (supr-local-sandbox.net) */}
+                  {/* WEBPAGE FIXTURE STATE 5: SANDBOX LOCALHOST (supr-local-sandbox.net) */}
                   {activeUrl.includes('supr-local-sandbox.net') && (
                     <div className="bg-[#0d0e15] text-[#d1d5db] p-4 font-body min-h-full text-xs flex flex-col justify-center items-center">
                       <div className="max-w-sm text-center space-y-3">
