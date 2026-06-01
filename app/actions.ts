@@ -311,7 +311,7 @@ export async function updateAgentCapabilityPolicyAction(agentId: string, policy:
   try {
     z.string().min(1).max(120).parse(agentId);
     const sanitized = {
-      model: String(policy.model || 'gemini-3-pro-preview').slice(0, 120),
+      model: String(policy.model || DEFAULT_GEMINI_MODEL).slice(0, 120),
       maxTokens: Math.max(256, Math.min(32768, Number(policy.maxTokens ?? 4096))),
       capabilities: Array.isArray(policy.capabilities) ? policy.capabilities.map(String).slice(0, 16) : [],
       autonomy: String(policy.autonomy || 'supervised').slice(0, 60),
@@ -934,6 +934,72 @@ export async function updateSettingAction(key: string, value: string) {
   }
 }
 
+const LIVE_MODEL_PROVIDER_KEYS: Record<string, { setting: string; env?: string }> = {
+  minimax: { setting: 'global_minimax_key', env: process.env.MINIMAX_API_KEY },
+  openai: { setting: 'global_openai_key', env: process.env.OPENAI_API_KEY },
+  anthropic: { setting: 'global_anthropic_key', env: process.env.ANTHROPIC_API_KEY },
+  xai: { setting: 'global_xai_key', env: process.env.XAI_API_KEY },
+  openrouter: { setting: 'global_openrouter_key', env: process.env.OPENROUTER_API_KEY },
+  groq: { setting: 'global_groq_key', env: process.env.GROQ_API_KEY },
+  mistral: { setting: 'global_mistral_key', env: process.env.MISTRAL_API_KEY },
+  deepseek: { setting: 'global_deepseek_key', env: process.env.DEEPSEEK_API_KEY },
+};
+
+function normalizeModelRows(data: any): { label: string; value: string }[] {
+  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
+  return rows
+    .map((row: any) => {
+      const id = String(row?.id || row?.name || '').replace(/^models\//, '').trim();
+      return id ? { label: id, value: id } : null;
+    })
+    .filter(Boolean)
+    .slice(0, 80) as { label: string; value: string }[];
+}
+
+export async function fetchLiveProviderModelsAction(provider: string): Promise<{ success: boolean; models: { label: string; value: string }[]; error?: string }> {
+  try {
+    const providerId = z.string().min(1).max(40).parse(provider);
+    if (providerId === 'default' || providerId === 'openai_compat') return { success: true, models: [] };
+
+    if (providerId === 'gemini') {
+      const apiKey = await getSecretSetting('global_gemini_key', process.env.GEMINI_API_KEY);
+      if (!apiKey) return { success: false, models: [], error: 'Gemini API key is not configured.' };
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`, {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+      if (!response.ok) return { success: false, models: [], error: `Gemini models request failed: ${response.status}` };
+      return { success: true, models: normalizeModelRows(await response.json()) };
+    }
+
+    if (providerId === 'anthropic') {
+      const apiKey = await getSecretSetting('global_anthropic_key', process.env.ANTHROPIC_API_KEY);
+      if (!apiKey) return { success: false, models: [], error: 'Anthropic API key is not configured.' };
+      const response = await fetch('https://api.anthropic.com/v1/models', {
+        headers: { Accept: 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        cache: 'no-store',
+      });
+      if (!response.ok) return { success: false, models: [], error: `Anthropic models request failed: ${response.status}` };
+      return { success: true, models: normalizeModelRows(await response.json()) };
+    }
+
+    const keySpec = LIVE_MODEL_PROVIDER_KEYS[providerId];
+    const baseUrl = providerId === 'groq' ? 'https://api.groq.com/openai/v1' : OPENAI_COMPATIBLE_BASE_URLS[providerId];
+    if (!keySpec || !baseUrl) return { success: false, models: [], error: `Live model refresh is not configured for ${providerId}.` };
+
+    const apiKey = await getSecretSetting(keySpec.setting, keySpec.env);
+    if (!apiKey) return { success: false, models: [], error: `${providerId} API key is not configured.` };
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/models`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
+      cache: 'no-store',
+    });
+    if (!response.ok) return { success: false, models: [], error: `${providerId} models request failed: ${response.status}` };
+    return { success: true, models: normalizeModelRows(await response.json()) };
+  } catch (error: any) {
+    return { success: false, models: [], error: error.message || String(error) };
+  }
+}
+
 export async function checkShadowModeAction(): Promise<{ active: boolean; expiresAt: string | null }> {
   try {
     const rows = await dbClient.query(`SELECT * FROM Settings WHERE key IN ('shadow_mode_active', 'shadow_mode_expires_at')`);
@@ -1090,6 +1156,7 @@ import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { GoogleGenAI } from '@google/genai';
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
+import { DEFAULT_GEMINI_MODEL, OPENAI_COMPATIBLE_BASE_URLS } from '@/lib/providers/catalog';
 import { createAgentAction as createRuntimeAgentAction, fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
 import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
 import {
@@ -2080,9 +2147,72 @@ export async function generateImagenImageAction(prompt: string): Promise<string>
   }
 }
 
+type SuprChatFile = { name: string; type: string; content: string };
+
+function chatMessageId(prefix = 'chat') {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function shouldRouteSuprChatToProjectFlow(content: string, file?: SuprChatFile) {
+  if (file) {
+    return true;
+  }
+
+  const normalized = content.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  const directChatIntent =
+    /^(hi|hello|hey|yo|test|ping|status|help)\b/.test(normalized) ||
+    /\b(what are you working on|what are you currently working on|what are you doing|what is supr doing|are you there|still there|you online|current status|agent status|project status)\b/.test(normalized);
+
+  if (directChatIntent) {
+    return false;
+  }
+
+  return /\b(start|create|build|generate|run|execute|deploy|design|implement|fix|repair|write|make|draft|research|analyze|scan|validate|launch|ship|plan|schedule|route|queue|assign|spawn|update|refactor|debug|test)\b/.test(normalized);
+}
+
+async function buildDirectSuprChatResponse(content: string) {
+  const normalized = content.trim().toLowerCase();
+  const [mission, agents] = await Promise.all([
+    getActiveMission(),
+    fetchAgentStatuses(),
+  ]);
+  const workingAgents = agents.filter((agent) => agent.status === 'Working');
+
+  if (/^help\b|\bwhat can you do\b/.test(normalized)) {
+    return [
+      `I'm here in Supr Chat for quick status, coordination, and routing decisions.`,
+      `Use action language like "build", "fix", "generate", "run", or attach a file when you want me to send work into Project Flow.`,
+      mission ? `Active project: ${mission.name}.` : `No active project is selected right now.`,
+    ].join('\n');
+  }
+
+  if (/^(hi|hello|hey|yo|test|ping)\b/.test(normalized)) {
+    return [
+      `I'm online.`,
+      mission ? `Active project: ${mission.name}.` : `No active project is selected right now.`,
+      workingAgents.length
+        ? `Working agents: ${workingAgents.map((agent) => `${agent.name}${agent.currentTask ? ` on ${agent.currentTask}` : ''}`).join('; ')}.`
+        : `No agents are actively working right now.`,
+    ].join('\n');
+  }
+
+  return [
+    `I'm here.`,
+    mission ? `Active project: ${mission.name}.` : `No active project is selected right now.`,
+    workingAgents.length
+      ? `Currently working: ${workingAgents.map((agent) => `${agent.name}${agent.currentTask ? ` on ${agent.currentTask}` : ''}${agent.currentProject ? ` for ${agent.currentProject}` : ''}`).join('; ')}.`
+      : `No agents are actively working right now.`,
+    `Say what you want built, fixed, generated, or run when you want me to route it into Project Flow.`,
+  ].join('\n');
+}
+
 export async function sendChatMessageAction(
   content: string,
-  file?: { name: string; type: string; content: string }
+  file?: SuprChatFile
 ) {
   try {
     z.string().min(1).max(12000).parse(content);
@@ -2096,7 +2226,7 @@ export async function sendChatMessageAction(
 
     // 1. Insert User Message (only if NOT in shadow mode)
     if (!shadow.active) {
-      const userMsgId = `chat-${Date.now()}`;
+      const userMsgId = chatMessageId();
       const insertMsgSql = `
         INSERT INTO Supr_Chat_Messages (id, sender, content, file_name, file_type, file_content)
         VALUES (?, 'user', ?, ?, ?, ?)
@@ -2104,35 +2234,41 @@ export async function sendChatMessageAction(
       await dbClient.execute(insertMsgSql, [userMsgId, content, file?.name || null, file?.type || null, file?.content || null]);
     }
 
-    const routed = await routeIntakeToProjectFlow({
-      source: 'supr-chat',
-      content,
-      attachments: file ? [{ name: file.name, type: file.type }] : [],
-    });
-    const finalContent = routed.success
-      ? [
-          `Supr routed this into Project Flow.`,
-          `- Spawned/updated the agent work graph.`,
-          `- Queued agent-owned tasks instead of handling the work directly.`,
-          `- Flow: ${routed.flowRunId}`,
-          `- Status: ${routed.response}`,
-        ].join('\n')
-      : `Supr could not route this into Project Flow: ${routed.error}`;
+    const shouldRoute = shouldRouteSuprChatToProjectFlow(content, file);
+    const finalContent = shouldRoute
+      ? await (async () => {
+          const routed = await routeIntakeToProjectFlow({
+            source: 'supr-chat',
+            content,
+            attachments: file ? [{ name: file.name, type: file.type }] : [],
+          });
+          return routed.success
+            ? [
+                `Supr routed this into Project Flow.`,
+                `- Spawned/updated the agent work graph.`,
+                `- Queued agent-owned tasks instead of handling the work directly.`,
+                `- Flow: ${routed.flowRunId}`,
+                `- Status: ${routed.response}`,
+              ].join('\n')
+            : `Supr could not route this into Project Flow: ${routed.error}`;
+        })()
+      : await buildDirectSuprChatResponse(content);
+
+    const responseMessageId = shadow.active ? chatMessageId('shadow') : chatMessageId();
 
     if (!shadow.active) {
-      const suprMsgId = `chat-${Date.now() + 2}`;
       const insertSuprSql = `
         INSERT INTO Supr_Chat_Messages (id, sender, content)
         VALUES (?, 'supr', ?)
       `;
-      await dbClient.execute(insertSuprSql, [suprMsgId, finalContent]);
+      await dbClient.execute(insertSuprSql, [responseMessageId, finalContent]);
     }
 
     return {
       success: true,
       shadow: shadow.active,
       message: {
-        id: shadow.active ? `shadow-${Date.now()}` : `chat-${Date.now() + 2}`,
+        id: responseMessageId,
         sender: 'supr' as const,
         content: finalContent,
         file: null,
@@ -2231,6 +2367,33 @@ export async function executeCodeAction(filename: string, language: string) {
     }
 
     const workspaceDir = path.dirname(filePath).replace(/\\/g, '/');
+    const settings = await fetchSettingsAction();
+    const allowKeys = settings.sandbox_allow_api_keys === 'true' && settings.sandbox_api_key_approval === 'approved';
+    const childEnv = { ...process.env };
+    if (!allowKeys) {
+      for (const key of Object.keys(childEnv)) {
+        if (/_KEY$|_TOKEN$|_SECRET$|PASSWORD$/i.test(key)) {
+          delete childEnv[key];
+        }
+      }
+    }
+
+    const runLocal = async () => {
+      const { stdout, stderr } = await execFileAsync(executable, [path.basename(filePath)], {
+        cwd: workspaceDir,
+        timeout: 30000,
+        maxBuffer: 512 * 1024,
+        windowsHide: true,
+        env: childEnv,
+      });
+      return { success: true, stdout, stderr, executionEnvironment: 'local_governed' };
+    };
+
+    const dockerAvailable = settings.docker_available === 'true' || process.env.SUPR_DOCKER_AVAILABLE === 'true';
+    if (!dockerAvailable) {
+      return await runLocal();
+    }
+
     const dockerArgs = [
       'run',
       '--rm',
@@ -2240,8 +2403,6 @@ export async function executeCodeAction(filename: string, language: string) {
       '/workspace',
     ];
 
-    const settings = await fetchSettingsAction();
-    const allowKeys = settings.sandbox_allow_api_keys === 'true' && settings.sandbox_api_key_approval === 'approved';
     if (allowKeys) {
       if (process.env.GEMINI_API_KEY) dockerArgs.push('-e', 'GEMINI_API_KEY');
       if (process.env.MINIMAX_API_KEY) dockerArgs.push('-e', 'MINIMAX_API_KEY');
@@ -2249,13 +2410,21 @@ export async function executeCodeAction(filename: string, language: string) {
 
     dockerArgs.push(image, executable, path.basename(filePath));
 
-    const { stdout, stderr } = await execFileAsync('docker', dockerArgs, {
-      timeout: 30000,
-      maxBuffer: 512 * 1024,
-      windowsHide: true,
-    });
-
-    return { success: true, stdout, stderr };
+    try {
+      const { stdout, stderr } = await execFileAsync('docker', dockerArgs, {
+        timeout: 30000,
+        maxBuffer: 512 * 1024,
+        windowsHide: true,
+        env: childEnv,
+      });
+      return { success: true, stdout, stderr, executionEnvironment: 'docker' };
+    } catch (dockerError: any) {
+      const unavailable = /dockerDesktopLinuxEngine|Cannot connect to the Docker daemon|docker daemon|system cannot find the file specified|ENOENT/i.test(
+        `${dockerError.message || ''}\n${dockerError.stderr || ''}`,
+      );
+      if (!unavailable) throw dockerError;
+      return await runLocal();
+    }
   } catch (error: any) {
     console.error("Failed to execute code file in sandbox:", error);
     return {

@@ -593,6 +593,31 @@ test('model JSON parsing tolerates provider thinking preambles', () => {
   assert.match(codeRoute, /parseModelJson\(raw\)/);
 });
 
+test('llm provider catalog exposes current model choices and live refresh action', () => {
+  const catalog = readFileSync('lib/providers/catalog.ts', 'utf8');
+  const actions = readFileSync('app/actions.ts', 'utf8');
+  const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
+  const chatPage = readFileSync('app/supr-chat/page.tsx', 'utf8');
+
+  for (const model of [
+    'MiniMax-M3',
+    'gemini-3.5-flash',
+    'gpt-5.5',
+    'claude-opus-4-7',
+    'grok-4.3',
+    'deepseek-v4-pro',
+    'mistral-medium-latest',
+  ]) {
+    assert.match(catalog, new RegExp(model.replace(/[.]/g, '\\.')));
+  }
+  assert.match(actions, /fetchLiveProviderModelsAction/);
+  assert.match(actions, /generativelanguage\.googleapis\.com\/v1beta\/models/);
+  assert.match(actions, /api\.anthropic\.com\/v1\/models/);
+  assert.match(actions, /\/models/);
+  assert.match(settingsPage, /fetchLiveProviderModelsAction/);
+  assert.match(chatPage, /fetchLiveProviderModelsAction/);
+});
+
 test('LLM entry routes delegate to thinking-tolerant structured parsers', () => {
   const agentRoute = readFileSync('app/api/agent/route.ts', 'utf8');
   const researchRoute = readFileSync('app/api/research/route.ts', 'utf8');
@@ -612,4 +637,54 @@ test('LLM entry routes delegate to thinking-tolerant structured parsers', () => 
   assert.match(codeRoute, /runAgentRuntimeAction/);
   assert.match(codeRoute, /parseModelJson\(raw\)/);
   assert.match(skillLearning, /stripModelThinking\(raw\)/);
+});
+
+test('activity log event ids are collision resistant under rapid chat routing', () => {
+  const db = readFileSync('lib/db.ts', 'utf8');
+
+  assert.match(db, /crypto\.randomUUID\(\)/);
+  assert.match(db, /id\('ev'\)/);
+  assert.doesNotMatch(db, /`ev-\$\{Date\.now\(\)\}`/);
+});
+
+test('supr chat only routes explicit work requests into project flow', () => {
+  const actions = readFileSync('app/actions.ts', 'utf8');
+
+  assert.match(actions, /function shouldRouteSuprChatToProjectFlow/);
+  assert.match(actions, /function buildDirectSuprChatResponse/);
+  assert.match(actions, /what are you currently working on/);
+  assert.match(actions, /No agents are actively working right now/);
+  assert.match(actions, /Use action language like "build", "fix", "generate", "run"/);
+  assert.match(actions, /routeIntakeToProjectFlow\(\{/);
+  assert.match(actions, /chatMessageId\(\)/);
+  assert.doesNotMatch(actions, /`chat-\$\{Date\.now\(\)\}`/);
+});
+
+test('code workspace falls back to governed local execution when Docker is unavailable', () => {
+  const actions = readFileSync('app/actions.ts', 'utf8');
+
+  assert.match(actions, /const dockerAvailable = settings\.docker_available === 'true'/);
+  assert.match(actions, /const runLocal = async \(\) =>/);
+  assert.match(actions, /executionEnvironment: 'local_governed'/);
+  assert.match(actions, /executionEnvironment: 'docker'/);
+  assert.match(actions, /_KEY\$|_TOKEN\$|_SECRET\$|PASSWORD\$/);
+  assert.match(actions, /dockerDesktopLinuxEngine|Cannot connect to the Docker daemon|docker daemon/);
+});
+
+test('research runtime avoids legacy approval timestamps and duplicate log ids', () => {
+  const contextAssembler = readFileSync('lib/runtime/context-assembler.ts', 'utf8');
+  const researchPage = readFileSync('app/research/page.tsx', 'utf8');
+
+  assert.match(contextAssembler, /await import\('@\/src\/services\/skill-catalog'\)/);
+  assert.doesNotMatch(contextAssembler, /eval\('require'\)/);
+  assert.match(contextAssembler, /FROM Approvals WHERE mission_id = \? ORDER BY rowid DESC LIMIT 12/);
+  assert.doesNotMatch(contextAssembler, /FROM Approvals WHERE mission_id = \? ORDER BY created_at DESC/);
+  assert.match(researchPage, /const logCounterRef = useRef\(0\)/);
+  assert.match(researchPage, /const nextLogId = \(\) => Date\.now\(\) \+ \(logCounterRef\.current\+\+ % 1000\) \/ 1000/);
+  assert.doesNotMatch(researchPage, /id: Date\.now\(\)/);
+
+  const researchRoute = readFileSync('app/api/research/route.ts', 'utf8');
+  assert.match(researchRoute, /Governed runtime paused/);
+  assert.match(researchRoute, /Continuing with direct source collection/);
+  assert.match(researchRoute, /catch \(runtimeError/);
 });

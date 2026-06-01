@@ -12,6 +12,7 @@ import {
   fetchDesignProfilesAction,
   applyDesignProfileAction,
   fetchConnectorHealthAction,
+  fetchLiveProviderModelsAction,
   testConnectorAction,
   probeDockerAvailabilityAction,
   exportOrganizationAction,
@@ -94,7 +95,7 @@ function sanitizePalette(palette: string) {
   return ALLOWED_PALETTES.has(palette) ? palette : 'classic';
 }
 
-function modelOptionsForProvider(provider: string) {
+function builtInModelOptionsForProvider(provider: string) {
   return PROVIDER_MODEL_OPTIONS[provider] || [];
 }
 
@@ -103,6 +104,7 @@ export default function SettingsPage() {
   const [operatingMode, setOperatingMode] = useState('Supervisor');
   const [permissionBoundary, setPermissionBoundary] = useState('governed');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [liveProviderModels, setLiveProviderModels] = useState<Record<string, { label: string; value: string }[]>>({});
 
   // Global LLM Keys States
   const [globalMinimaxKey, setGlobalMinimaxKey] = useState('');
@@ -253,27 +255,31 @@ export default function SettingsPage() {
       if (settings.global_backup_name) setGlobalBackupName(settings.global_backup_name);
 
       // Supr Role Override
-      if (settings.llm_provider_supr) setSuprProvider(settings.llm_provider_supr);
+      const loadedSuprProvider = settings.llm_provider_supr || 'default';
+      setSuprProvider(loadedSuprProvider);
       if (settings.llm_key_supr) setSuprKey(settings.llm_key_supr);
-      if (settings.llm_model_supr) setSuprModel(settings.llm_model_supr);
+      setSuprModel(settings.llm_model_supr || defaultModelForProvider(loadedSuprProvider));
       if (settings.llm_url_supr) setSuprUrl(settings.llm_url_supr);
 
       // Code Role Override
-      if (settings.llm_provider_code) setCodeProvider(settings.llm_provider_code);
+      const loadedCodeProvider = settings.llm_provider_code || 'default';
+      setCodeProvider(loadedCodeProvider);
       if (settings.llm_key_code) setCodeKey(settings.llm_key_code);
-      if (settings.llm_model_code) setCodeModel(settings.llm_model_code);
+      setCodeModel(settings.llm_model_code || defaultModelForProvider(loadedCodeProvider));
       if (settings.llm_url_code) setCodeUrl(settings.llm_url_code);
 
       // Research Role Override
-      if (settings.llm_provider_research) setResearchProvider(settings.llm_provider_research);
+      const loadedResearchProvider = settings.llm_provider_research || 'default';
+      setResearchProvider(loadedResearchProvider);
       if (settings.llm_key_research) setResearchKey(settings.llm_key_research);
-      if (settings.llm_model_research) setResearchModel(settings.llm_model_research);
+      setResearchModel(settings.llm_model_research || defaultModelForProvider(loadedResearchProvider));
       if (settings.llm_url_research) setResearchUrl(settings.llm_url_research);
 
       // Sub-agents Override
-      if (settings.llm_provider_sub) setSubProvider(settings.llm_provider_sub);
+      const loadedSubProvider = settings.llm_provider_sub || 'default';
+      setSubProvider(loadedSubProvider);
       if (settings.llm_key_sub) setSubKey(settings.llm_key_sub);
-      if (settings.llm_model_sub) setSubModel(settings.llm_model_sub);
+      setSubModel(settings.llm_model_sub || defaultModelForProvider(loadedSubProvider));
       if (settings.llm_url_sub) setSubUrl(settings.llm_url_sub);
 
       setEmailEnabled(settings.channels_email === 'true');
@@ -307,10 +313,35 @@ export default function SettingsPage() {
     }
   };
 
+  const modelOptionsForProvider = (provider: string) => {
+    const live = liveProviderModels[provider] || [];
+    const builtIn = builtInModelOptionsForProvider(provider);
+    const seen = new Set<string>();
+    return [...live, ...builtIn].filter((model) => {
+      if (seen.has(model.value)) return false;
+      seen.add(model.value);
+      return true;
+    });
+  };
+
+  const refreshLiveProviderModels = async (provider: string) => {
+    if (provider === 'default' || provider === 'openai_compat') return;
+    const result = await fetchLiveProviderModelsAction(provider);
+    if (!result.success) {
+      showToast(result.error || `Could not refresh ${provider} models`);
+      return;
+    }
+    if (result.models.length > 0) {
+      setLiveProviderModels((prev) => ({ ...prev, [provider]: result.models }));
+      showToast(`Loaded ${result.models.length} live ${provider} models`);
+    }
+  };
+
   const selectRoleProvider = (provider: string, setProvider: (value: string) => void, setModel: (value: string) => void) => {
     setProvider(provider);
     const defaultModel = defaultModelForProvider(provider);
     setModel(defaultModel);
+    void refreshLiveProviderModels(provider);
   };
 
   const handleModeChange = (mode: string) => {

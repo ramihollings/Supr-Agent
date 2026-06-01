@@ -55,9 +55,9 @@ async function testGemini() {
     console.log('❌ Gemini key test skipped: Key not found.');
     return;
   }
-  console.log('⚡ Testing Gemini 3 Pro Preview...');
+  console.log('⚡ Testing Gemini 3.5 Flash...');
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=${geminiKey}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

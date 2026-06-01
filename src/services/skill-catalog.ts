@@ -3,9 +3,8 @@ import { writeIdentityProfile, type AgentIdentityProfile } from "../../lib/agent
 import path from "node:path";
 
 function defaultSkillSearchPaths() {
-  const root = /* turbopackIgnore: true */ process.cwd();
   return [
-    path.join(root, ".agents", "skills"),
+    path.join(/* turbopackIgnore: true */ process.cwd(), ".agents", "skills"),
   ];
 }
 

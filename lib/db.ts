@@ -1,4 +1,5 @@
 import dbClient from './database/db_client';
+import crypto from 'crypto';
 import { DatabaseSchema, Mission, Agent, TaskStatus, ActivityEvent, FailureEvent, Artifact, MemoryItem, Phase, Task } from '@/types';
 
 // Backward compatibility stub for initialization
@@ -15,6 +16,10 @@ export async function getDb(): Promise<DatabaseSchema> {
 
 export async function saveDb(data: DatabaseSchema): Promise<void> {
   console.warn("saveDb is deprecated. Supr writes directly to the database.");
+}
+
+function id(prefix: string) {
+  return `${prefix}-${crypto.randomUUID()}`;
 }
 
 export async function getMissionById(id: string): Promise<Mission | undefined> {
@@ -158,7 +163,7 @@ export async function addActivityLog(missionId: string, event: Omit<ActivityEven
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `;
   await dbClient.execute(sql, [
-    `ev-${Date.now()}`,
+    id('ev'),
     missionId,
     event.eventType,
     'agent',

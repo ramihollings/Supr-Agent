@@ -37,8 +37,7 @@ async function findSkillMatches(action: AgentActionRecord): Promise<{ matches: S
     return { matches: [], context: '' };
   }
 
-  const runtimeRequire = eval('require') as NodeRequire;
-  const { skillCatalog } = runtimeRequire('../../src/services/skill-catalog') as typeof import('@/src/services/skill-catalog');
+  const { skillCatalog } = await import('@/src/services/skill-catalog');
   const haystack = [
     action.capability,
     action.intent,
@@ -87,7 +86,7 @@ export async function assembleAgentContext(action: AgentActionRecord): Promise<A
     action.taskId ? dbClient.queryOne<any>(`SELECT * FROM Tasks WHERE id = ?`, [action.taskId]) : Promise.resolve(null),
     dbClient.queryOne<any>(`SELECT * FROM Agents WHERE id = ?`, [action.agentId]),
     dbClient.query<any>(`SELECT id, title, type, content, quality_status, evidence_refs FROM Artifacts WHERE mission_id = ? ORDER BY created_at DESC LIMIT 12`, [action.missionId]),
-    dbClient.query<any>(`SELECT id, action, risk_level, status, reason FROM Approvals WHERE mission_id = ? ORDER BY created_at DESC LIMIT 12`, [action.missionId]),
+    dbClient.query<any>(`SELECT id, action, risk_level, status, reason FROM Approvals WHERE mission_id = ? ORDER BY rowid DESC LIMIT 12`, [action.missionId]),
     dbClient.query<any>(`SELECT event_type, actor_id, summary, metadata, timestamp FROM Event_Log WHERE mission_id = ? ORDER BY timestamp DESC LIMIT 16`, [action.missionId]),
   ]);
 

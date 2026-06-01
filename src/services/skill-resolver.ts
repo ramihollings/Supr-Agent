@@ -35,13 +35,13 @@ export class SkillResolver {
         const entries = await fs.readdir(basePath, { withFileTypes: true });
         for (const entry of entries) {
           if (entry.isDirectory()) {
-            const skillDir = path.join(basePath, entry.name);
+            const skillDir = path.join(/* turbopackIgnore: true */ basePath, entry.name);
             const skillFiles = ["SKILL.md", "skill.md"];
             let foundSkillFile = false;
             let rawContent = "";
 
             for (const filename of skillFiles) {
-              const p = path.join(skillDir, filename);
+              const p = path.join(/* turbopackIgnore: true */ skillDir, filename);
               if (existsSync(p)) {
                 rawContent = await fs.readFile(p, "utf8");
                 foundSkillFile = true;
@@ -116,7 +116,7 @@ export class SkillResolver {
     let found = false;
 
     for (const filename of skillFiles) {
-      const p = path.join(skill.path, filename);
+      const p = path.join(/* turbopackIgnore: true */ skill.path, filename);
       if (existsSync(p)) {
         rawContent = await fs.readFile(p, "utf8");
         found = true;
@@ -130,7 +130,7 @@ export class SkillResolver {
 
     try {
       const spec = parseSkillMd(rawContent);
-      const normalizedPath = path.resolve(skill.path).replace(/\\/g, "/");
+      const normalizedPath = path.resolve(/* turbopackIgnore: true */ skill.path).replace(/\\/g, "/");
       return `Base directory for this skill: ${normalizedPath}\n\n${spec.body}`;
     } catch (err: any) {
       throw new Error(`Failed to parse SKILL.md in ${skill.path}: ${err.message}`);

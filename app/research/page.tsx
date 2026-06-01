@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { EvidenceSourcePanel } from '@/components/EvidenceSourcePanel';
 import { fetchMissionState } from '@/app/actions';
 import { Mission, Artifact, RunEvent } from '@/types';
@@ -36,6 +36,8 @@ export default function ResearchPage() {
   const [codeArtifacts, setCodeArtifacts] = useState<Artifact[]>([]);
   const [selectedCodeFile, setSelectedCodeFile] = useState<Artifact | null>(null);
   const [codeTriageStatus, setCodeTriageStatus] = useState<string>('Pending Research Context');
+  const logCounterRef = useRef(0);
+  const nextLogId = () => Date.now() + (logCounterRef.current++ % 1000) / 1000;
   const researchEvents: RunEvent[] = searchLog.map((line) => ({
     id: String(line.id),
     kind: line.type === 'extract' ? 'artifact' : line.type === 'supr' ? 'system' : 'tool',
@@ -107,7 +109,7 @@ export default function ResearchPage() {
     setSourceCards([]);
     setCompletionStatus('idle');
 
-    setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[SUPR] Delegating research task to Research Agent: "${searchQuery}"` }]);
+    setSearchLog(prev => [...prev, { id: nextLogId(), type: 'supr', content: `[SUPR] Delegating research task to Research Agent: "${searchQuery}"` }]);
 
     try {
       const response = await fetch('/api/research', {
@@ -145,7 +147,7 @@ export default function ResearchPage() {
               } else if (msg.phase === 'extracting' || msg.phase === 'generating') {
                 setBrowseState('extracting');
               }
-              setSearchLog(prev => [...prev, { id: Date.now(), type: 'navigate', content: msg.content }]);
+              setSearchLog(prev => [...prev, { id: nextLogId(), type: 'navigate', content: msg.content }]);
             }
 
             if (msg.type === 'result') {
@@ -156,15 +158,15 @@ export default function ResearchPage() {
               setBrowseState('done');
               setSearchLog(prev => [
                 ...prev,
-                { id: Date.now(), type: 'extract', content: `[RESEARCH AGENT] Extracted ${msg.findings?.length || 0} intelligence signals from ${msg.sources?.length || 0} source(s).` },
-                { id: Date.now(), type: 'supr', content: msg.completionStatus === 'complete' ? `[SUPR] Source-backed brief saved to SQLite: ${msg.filename}.` : `[SUPR] Partial brief saved to SQLite: ${msg.filename}. Source evidence required before verified handoff.` },
+                { id: nextLogId(), type: 'extract', content: `[RESEARCH AGENT] Extracted ${msg.findings?.length || 0} intelligence signals from ${msg.sources?.length || 0} source(s).` },
+                { id: nextLogId(), type: 'supr', content: msg.completionStatus === 'complete' ? `[SUPR] Source-backed brief saved to SQLite: ${msg.filename}.` : `[SUPR] Partial brief saved to SQLite: ${msg.filename}. Source evidence required before verified handoff.` },
               ]);
               // Refresh mission state to pick up new artifacts
               await fetchState();
             }
 
             if (msg.type === 'error') {
-              setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[ERROR] ${msg.content}` }]);
+              setSearchLog(prev => [...prev, { id: nextLogId(), type: 'supr', content: `[ERROR] ${msg.content}` }]);
               setBrowseState('done');
             }
           } catch (parseErr) {
@@ -173,7 +175,7 @@ export default function ResearchPage() {
         }
       }
     } catch (err: any) {
-      setSearchLog(prev => [...prev, { id: Date.now(), type: 'supr', content: `[ERROR] Research pipeline failed: ${err.message}` }]);
+      setSearchLog(prev => [...prev, { id: nextLogId(), type: 'supr', content: `[ERROR] Research pipeline failed: ${err.message}` }]);
       setBrowseState('done');
     }
 

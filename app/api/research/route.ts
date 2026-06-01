@@ -98,10 +98,24 @@ export async function POST(req: NextRequest) {
         let sources: ResearchSourceEvidence[] = [];
 
         send({ type: 'status', phase: 'extracting', content: '[RESEARCH AGENT] Running governed source-evidence runtime...' });
-        const runtime = await runAgentRuntimeAction({
-          actionId: action.id,
-          budget: { maxSteps: 4, timeoutMs: 60_000 },
-        });
+        let runtime: Awaited<ReturnType<typeof runAgentRuntimeAction>> | { status: string; evidenceIds: string[]; failureReason?: string };
+        try {
+          runtime = await runAgentRuntimeAction({
+            actionId: action.id,
+            budget: { maxSteps: 4, timeoutMs: 60_000 },
+          });
+        } catch (runtimeError: any) {
+          runtime = {
+            status: 'pending_approval',
+            evidenceIds: [],
+            failureReason: runtimeError.message || String(runtimeError),
+          };
+          send({
+            type: 'status',
+            phase: 'extracting',
+            content: `[RESEARCH AGENT] Governed runtime paused: ${runtime.failureReason}. Continuing with direct source collection.`,
+          });
+        }
         const liveSource = await fetchResearchSource(query);
         if (liveSource) {
           mode = 'Live';

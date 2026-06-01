@@ -14,6 +14,7 @@ import {
 import type { DashboardArtifact } from '@/types';
 
 interface FileNode {
+  id: string;
   name: string;
   path: string;
   size?: number;
@@ -64,6 +65,7 @@ export default function LibraryPage() {
       // 1. Load workspace files
       const wsData = await fetchWorkspaceFilesAction();
       const wsNodes: FileNode[] = wsData.map(f => ({
+        id: `workspace:${f.filename}`,
         name: f.filename,
         path: `/workspace/${f.filename}`,
         size: f.size,
@@ -76,8 +78,9 @@ export default function LibraryPage() {
       // 2. Load deliverables/artifacts from DB
       const delData = await fetchAllArtifactsAction();
       const delNodes: FileNode[] = delData.map(a => ({
+        id: `deliverable:${a.id}`,
         name: a.filename,
-        path: `/deliverables/${a.filename}`,
+        path: `/deliverables/${a.id}/${a.filename}`,
         size: a.content.length, // bytes approximate
         type: a.type,
         content: a.content,
@@ -142,7 +145,7 @@ export default function LibraryPage() {
   };
 
   const selectedArtifact: DashboardArtifact | null = selectedFile ? {
-    id: selectedFile.path,
+    id: selectedFile.id,
     filename: selectedFile.name,
     type: selectedFile.type,
     source: selectedFile.origin === 'workspace' ? editContent : selectedFile.content || '',
@@ -280,7 +283,7 @@ export default function LibraryPage() {
                     {wsExpanded && (
                       <ul className="ml-4 pl-2 border-l border-primary/20 space-y-1 mt-1">
                         {workspaceFiles.map(file => (
-                          <li key={file.path}>
+                          <li key={file.id}>
                             <div 
                               onClick={() => selectFile(file)}
                               className={`flex items-center gap-1.5 py-1 px-2 cursor-pointer border ${selectedFile?.path === file.path ? 'bg-primary-container border-primary font-bold shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' : 'border-transparent hover:bg-surface-container'}`}
@@ -315,7 +318,7 @@ export default function LibraryPage() {
                     {delExpanded && (
                       <ul className="ml-4 pl-2 border-l border-primary/20 space-y-1 mt-1">
                         {deliverableFiles.map(file => (
-                          <li key={file.path}>
+                          <li key={file.id}>
                             <div 
                               onClick={() => selectFile(file)}
                               className={`flex items-center gap-1.5 py-1 px-2 cursor-pointer border ${selectedFile?.path === file.path ? 'bg-secondary-container border-secondary font-bold shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]' : 'border-transparent hover:bg-surface-container'}`}

@@ -14,6 +14,7 @@ import {
   deleteWorkspaceFileAction,
   executeCodeAction,
   fetchSettingsAction,
+  fetchLiveProviderModelsAction,
   updateSettingAction,
   fetchAgentStatuses,
   fetchMissionsAction
@@ -60,6 +61,7 @@ export default function SuprChatPage() {
   // Settings states (Toggles saved to Settings DB)
   const [activeModel, setActiveModel] = useState('gemini');
   const [activeModelName, setActiveModelName] = useState(defaultModelForProvider('gemini'));
+  const [liveProviderModels, setLiveProviderModels] = useState<Record<string, { label: string; value: string }[]>>({});
   const [autonomyMode, setAutonomyMode] = useState('guided');
   const [sandboxAllowKeys, setSandboxAllowKeys] = useState(false);
 
@@ -107,8 +109,9 @@ export default function SuprChatPage() {
     ]);
 
     setAgentStatuses(statuses);
-    if (settings.llm_provider_supr) setActiveModel(settings.llm_provider_supr);
-    if (settings.llm_model_supr) setActiveModelName(settings.llm_model_supr);
+    const configuredProvider = settings.llm_provider_supr || 'default';
+    setActiveModel(configuredProvider);
+    setActiveModelName(settings.llm_model_supr || defaultModelForProvider(configuredProvider));
     if (settings.operating_mode) setAutonomyMode(settings.operating_mode);
     if (settings.sandbox_allow_api_keys) setSandboxAllowKeys(settings.sandbox_allow_api_keys === 'true');
 
@@ -269,10 +272,30 @@ How can I assist you today? You can query data, ask me to draft/run code files i
     alert("Controls applied successfully.");
   };
 
+  const modelOptionsForProvider = (provider: string) => {
+    const live = liveProviderModels[provider] || [];
+    const builtIn = PROVIDER_MODEL_OPTIONS[provider] || [];
+    const seen = new Set<string>();
+    return [...live, ...builtIn].filter((model) => {
+      if (seen.has(model.value)) return false;
+      seen.add(model.value);
+      return true;
+    });
+  };
+
+  const refreshLiveProviderModels = async (provider: string) => {
+    if (provider === 'default' || provider === 'openai_compat') return;
+    const result = await fetchLiveProviderModelsAction(provider);
+    if (result.success && result.models.length > 0) {
+      setLiveProviderModels((prev) => ({ ...prev, [provider]: result.models }));
+    }
+  };
+
   const handleProviderChange = (provider: string) => {
     setActiveModel(provider);
     const defaultModel = defaultModelForProvider(provider);
     setActiveModelName(defaultModel);
+    void refreshLiveProviderModels(provider);
   };
 
   // Open Canvas File
@@ -374,13 +397,13 @@ How can I assist you today? You can query data, ask me to draft/run code files i
                   type="text"
                   value={activeModelName}
                   onChange={(e) => setActiveModelName(e.target.value)}
-                  list={PROVIDER_MODEL_OPTIONS[activeModel]?.length ? 'chat-model-options' : undefined}
+                  list={modelOptionsForProvider(activeModel).length ? 'chat-model-options' : undefined}
                   className="w-full bg-surface neo-border p-1.5 font-bold focus:outline-none"
                   placeholder={activeModel === 'openai_compat' ? 'Custom model name' : 'Select or enter model'}
                 />
-                {PROVIDER_MODEL_OPTIONS[activeModel]?.length ? (
+                {modelOptionsForProvider(activeModel).length ? (
                   <datalist id="chat-model-options">
-                    {PROVIDER_MODEL_OPTIONS[activeModel].map((model) => (
+                    {modelOptionsForProvider(activeModel).map((model) => (
                       <option key={model.value} value={model.value}>{model.label}</option>
                     ))}
                   </datalist>

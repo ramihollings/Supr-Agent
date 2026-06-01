@@ -1,6 +1,7 @@
 export function stripModelThinking(raw: string) {
   return raw
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think>/gi, '')
     .replace(/```(?:json)?\s*/gi, '')
     .replace(/```\s*/g, '')
     .trim();
@@ -45,5 +46,10 @@ export function extractFirstJsonObject(raw: string) {
 }
 
 export function parseModelJson<T = any>(raw: string): T {
-  return JSON.parse(extractFirstJsonObject(raw)) as T;
+  const extracted = extractFirstJsonObject(raw);
+  if (!extracted || !extracted.startsWith('{')) {
+    throw new Error(`Model response did not contain a valid JSON object. Extracted text: "${extracted.slice(0, 100)}..."`);
+  }
+  return JSON.parse(extracted) as T;
 }
+

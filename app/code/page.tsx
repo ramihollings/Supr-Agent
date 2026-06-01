@@ -207,7 +207,7 @@ export default function CodePage() {
       }
     } else {
       setTestHistory(prev => [`${new Date().toLocaleTimeString()} ${activeFile}: failed`, ...prev].slice(0, 6));
-      const errorContent = res.stderr || res.error || 'Execution failed with non-zero exit code.';
+      const errorContent = res.stderr || ('error' in res ? res.error : '') || 'Execution failed with non-zero exit code.';
       const outputLines: string[] = errorContent.split('\n');
       const newLines = outputLines.map((l: string, i: number) => ({
         id: timeNow + i,
