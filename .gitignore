@@ -15,3 +15,13 @@ components/external/
 test-results/
 playwright-report/
 playwright/.cache/
+
+# Local-only debug + tunneling artifacts
+test_keys_*.js
+cloudflared
+cloudflared.exe
+# Folders whose names contain a trailing space (mistaken `mkdir`)
+# This is intentionally broad so any future naming accident is
+# caught before being added to the repo.
+Complex */
+Complex* /

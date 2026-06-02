@@ -757,3 +757,16 @@ test('SQLite schema migrations only swallow duplicate-column errors, and FK erro
   const create = agentActions.match(/export async function createAgentAction[\s\S]*?\n\}/)?.[0] || '';
   assert.match(create, /try\s*\{[\s\S]*INSERT INTO Agent_Actions[\s\S]*?\}\s*catch/);
 });
+
+test('repo hygiene: leftover debug + tunnel artifacts are not tracked and the .gitignore blocks re-introduction', () => {
+  // The .gitignore must include patterns for every known offender.
+  const gitignore = readFileSync('.gitignore', 'utf8');
+  assert.match(gitignore, /test_keys_\*\.js/);
+  assert.match(gitignore, /cloudflared(?:\.exe)?/);
+  // Defensive pattern for folders whose names contain a trailing space.
+  assert.match(gitignore, /Complex/);
+
+  // Verify the offenders have actually been removed from the working tree.
+  assert.equal(existsSync('test_keys_direct.js'), false, 'test_keys_direct.js must be removed');
+  assert.equal(existsSync('cloudflared.exe'), false, 'cloudflared.exe must be removed');
+});
