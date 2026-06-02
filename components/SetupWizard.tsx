@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   fetchProductionHealthAction,
   fetchSettingsAction,
@@ -8,6 +8,7 @@ import {
   updateSettingAction,
 } from "@/app/actions";
 import { DEFAULT_MINIMAX_MODEL } from "@/lib/providers/catalog";
+import { useFocusTrap } from "@/lib/hooks/useFocusTrap";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, KeyRound, Rocket, ShieldCheck, X } from "lucide-react";
 
 interface SetupWizardProps {
@@ -33,6 +34,9 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
   const [dockerAvailable, setDockerAvailable] = useState(false);
   const [dockerDetail, setDockerDetail] = useState("");
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, true, required ? undefined : onClose);
 
   useEffect(() => {
     async function load() {
@@ -150,24 +154,30 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
 
   return (
     <div className="fixed inset-0 z-[100] bg-primary/20 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl max-h-[92vh] overflow-hidden bg-background neo-border neo-shadow-lg flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="setup-wizard-title"
+        className="w-full max-w-3xl max-h-[92vh] overflow-hidden bg-background neo-border neo-shadow-lg flex flex-col"
+      >
         <header className="bg-primary text-on-primary border-b-4 border-primary p-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Rocket className="w-7 h-7 text-secondary" />
+            <Rocket className="w-7 h-7 text-secondary" aria-hidden="true" />
             <div>
-              <h2 className="font-headline text-2xl font-black uppercase tracking-tight">Supr Bootstrap</h2>
+              <h2 id="setup-wizard-title" className="font-headline text-2xl font-black uppercase tracking-tight">Supr Bootstrap</h2>
               <p className="font-body text-xs font-bold uppercase tracking-wider">Live runtime setup for first boot</p>
             </div>
           </div>
           {!required ? (
-            <button onClick={onClose} className="p-1 hover:rotate-90 transition-transform">
-              <X className="w-5 h-5" />
+            <button onClick={onClose} aria-label="Close setup wizard" className="p-1 hover:rotate-90 transition-transform">
+              <X className="w-5 h-5" aria-hidden="true" />
             </button>
           ) : null}
         </header>
 
         <div className="grid grid-cols-4 border-b-4 border-primary bg-surface-container">
-          {["Readiness", "MiniMax", "Runtime", "Health"].map((label, index) => {
+          {["Welcome", "Provider", "Runtime", "Health"].map((label, index) => {
             const current = index + 1;
             return (
               <div
@@ -196,15 +206,36 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
                 <div className="w-20 h-20 rounded-full mx-auto bg-primary-container text-primary flex items-center justify-center neo-border">
                   <ShieldCheck className="w-10 h-10" />
                 </div>
-                <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">Supr is live by default.</h3>
+                <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">Welcome to Supr</h3>
                 <p className="font-body text-sm font-bold text-on-surface-variant max-w-2xl mx-auto">
-                  This bootstrap checks the pieces that actually matter for production-style testing: master access, MiniMax, runtime policy, and a real health probe.
+                  Supr is a workspace for orchestrating AI agents on real work — projects, code, research, and approvals — with a single supervisor keeping everything accountable.
                 </p>
               </div>
 
               <div className="bg-surface-container neo-border p-5 space-y-3">
-                <h4 className="font-headline font-black uppercase text-sm text-primary">Required checks</h4>
-                <div className="space-y-2">
+                <h4 className="font-headline font-black uppercase text-sm text-primary">What you'll do next</h4>
+                <ol className="space-y-2 font-body text-sm text-on-surface">
+                  <li className="flex gap-3">
+                    <span className="font-headline font-black text-primary">1.</span>
+                    <span><strong>Add an AI provider key</strong> so Supr can talk to a model. We use MiniMax by default; Gemini and others work too.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-headline font-black text-primary">2.</span>
+                    <span><strong>Pick a runtime policy</strong> — how much autonomy agents get before they check in with you.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-headline font-black text-primary">3.</span>
+                    <span><strong>Run a live health probe</strong> to confirm everything is wired up before you hand off real work.</span>
+                  </li>
+                </ol>
+              </div>
+
+              <div className="bg-surface-container neo-border p-5 space-y-2">
+                <h4 className="font-headline font-black uppercase text-sm text-primary">Before you start</h4>
+                <p className="font-body text-xs text-on-surface-variant">
+                  The required checks below confirm the pieces Supr actually needs. If something is missing, the next step will help you set it up.
+                </p>
+                <div className="space-y-2 mt-3">
                   {requiredChecks.map((check) => (
                     <div key={check.label} className="flex items-center justify-between gap-3 bg-background border-2 border-primary p-3">
                       <span className="font-body text-sm font-bold">{check.label}</span>
@@ -215,32 +246,32 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
                   ))}
                 </div>
               </div>
-
-              <div className="bg-surface-container neo-border p-5 space-y-2">
-                <h4 className="font-headline font-black uppercase text-sm text-primary">Deploy note</h4>
-                <p className="font-body text-xs text-on-surface-variant">
-                  For VPS testing, set `AUTH_SECRET` in the environment before public exposure. Until then, session signing falls back to the current secure login secret and the health check will warn if it looks too default.
-                </p>
-              </div>
             </div>
           ) : null}
 
           {step === 2 ? (
             <div className="space-y-5">
               <div>
-                <label className="font-headline font-black uppercase text-sm text-primary flex items-center gap-2">
+                <h3 className="font-headline font-black uppercase text-lg text-primary">Add an AI provider key</h3>
+                <p className="font-body text-sm text-on-surface-variant mt-1">
+                  Supr uses a single provider key to run the supervisor, sub-agents, and chat. MiniMax is the default, but you can switch providers later in Settings.
+                </p>
+              </div>
+              <div>
+                <label htmlFor="provider-key" className="font-headline font-black uppercase text-sm text-primary flex items-center gap-2">
                   <KeyRound className="w-4 h-4" />
                   MiniMax API Key
                 </label>
                 <p className="font-body text-xs text-on-surface-variant mt-1">
-                  Required for the live Supr runtime. The default production model stays on `{DEFAULT_MINIMAX_MODEL}`.
+                  Required to run Supr. Your key stays in your local database and is never sent anywhere else. The default production model is <code className="font-mono text-xs">{DEFAULT_MINIMAX_MODEL}</code>.
                 </p>
               </div>
               <input
+                id="provider-key"
                 type="password"
                 value={minimaxKey}
                 onChange={(event) => setMinimaxKey(event.target.value)}
-                placeholder="Enter your MiniMax key"
+                placeholder="Paste your key here"
                 className="w-full bg-background neo-border p-4 font-mono text-sm focus:outline-none focus:border-tertiary"
               />
               <div className="bg-surface-container neo-border p-4">
@@ -259,29 +290,42 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
           {step === 3 ? (
             <div className="space-y-5">
               <div>
-                <h3 className="font-headline font-black uppercase text-lg text-primary">Runtime policy</h3>
-                <p className="font-body text-xs text-on-surface-variant mt-1">
-                  Optional channels can stay disconnected. This step stores the live runtime defaults and lets us probe Docker availability before you deploy to the VPS.
+                <h3 className="font-headline font-black uppercase text-lg text-primary">Pick how much autonomy Supr has</h3>
+                <p className="font-body text-sm text-on-surface-variant mt-1">
+                  You can change this anytime in Settings. Channels (Slack, Discord, Telegram) stay off until you turn them on.
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <label className="font-headline font-black uppercase text-xs text-primary">Operating mode</label>
-                <select
-                  value={operatingMode}
-                  onChange={(event) => setOperatingMode(event.target.value)}
-                  className="w-full bg-surface neo-border p-4 font-headline text-sm uppercase font-bold focus:outline-none"
-                >
-                  <option value="Supervisor">Supervisor</option>
-                  <option value="guided">Guided</option>
-                  <option value="autonomous">Autonomous</option>
-                </select>
-              </div>
+              <fieldset className="space-y-2">
+                <legend className="font-headline font-black uppercase text-xs text-primary">Operating mode</legend>
+                <div className="space-y-2">
+                  {[
+                    { value: 'Supervisor', title: 'Recommended · Supervisor', desc: 'Supr works on its own for routine tasks, but checks in on anything risky.' },
+                    { value: 'guided', title: 'Guided', desc: 'Supr proposes every step and waits for your approval.' },
+                    { value: 'autonomous', title: 'Autonomous', desc: 'Supr handles most work end-to-end with minimal check-ins.' },
+                  ].map((option) => (
+                    <label key={option.value} className={`flex items-start gap-3 bg-surface-container neo-border p-4 cursor-pointer ${operatingMode === option.value ? 'border-tertiary' : ''}`}>
+                      <input
+                        type="radio"
+                        name="operating-mode"
+                        value={option.value}
+                        checked={operatingMode === option.value}
+                        onChange={() => setOperatingMode(option.value)}
+                        className="mt-1 accent-primary"
+                      />
+                      <div>
+                        <p className="font-headline font-black uppercase text-xs text-primary">{option.title}</p>
+                        <p className="font-body text-xs text-on-surface-variant mt-1">{option.desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
 
               <label className="flex items-center justify-between gap-4 bg-surface-container neo-border p-4">
                 <div>
                   <p className="font-headline font-black uppercase text-xs text-primary">Remote execution</p>
-                  <p className="font-body text-[11px] text-on-surface-variant">Leave this off for local or early VPS validation unless you already have a remote runner.</p>
+                  <p className="font-body text-[11px] text-on-surface-variant">Leave this off unless you have a remote runner configured in Settings.</p>
                 </div>
                 <input
                   type="checkbox"
@@ -291,22 +335,25 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
                 />
               </label>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {[
-                  { label: "Slack", checked: slackEnabled, setter: setSlackEnabled },
-                  { label: "Discord", checked: discordEnabled, setter: setDiscordEnabled },
-                  { label: "Telegram", checked: telegramEnabled, setter: setTelegramEnabled },
-                ].map((channel) => (
-                  <label key={channel.label} className="bg-surface-container neo-border p-4 flex items-center justify-between gap-3">
-                    <span className="font-headline font-black uppercase text-xs text-primary">{channel.label}</span>
-                    <input
-                      type="checkbox"
-                      checked={channel.checked}
-                      onChange={(event) => channel.setter(event.target.checked)}
-                      className="w-5 h-5 accent-primary"
-                    />
-                  </label>
-                ))}
+              <div>
+                <p className="font-headline font-black uppercase text-xs text-primary mb-2">Channels (optional)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {[
+                    { label: "Slack", checked: slackEnabled, setter: setSlackEnabled },
+                    { label: "Discord", checked: discordEnabled, setter: setDiscordEnabled },
+                    { label: "Telegram", checked: telegramEnabled, setter: setTelegramEnabled },
+                  ].map((channel) => (
+                    <label key={channel.label} className="bg-surface-container neo-border p-4 flex items-center justify-between gap-3">
+                      <span className="font-headline font-black uppercase text-xs text-primary">{channel.label}</span>
+                      <input
+                        type="checkbox"
+                        checked={channel.checked}
+                        onChange={(event) => channel.setter(event.target.checked)}
+                        className="w-5 h-5 accent-primary"
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="bg-background border-2 border-primary p-4">
