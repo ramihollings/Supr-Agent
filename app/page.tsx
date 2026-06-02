@@ -33,6 +33,7 @@ import {
   fetchMissionsAction,
   fetchProjectOperatingGraphAction,
   fetchSettingsAction,
+  fetchBootstrapStateAction,
   fetchRunbooksAction,
   fetchSupervisorConsoleAction,
   fetchWorkspaceFilesAction,
@@ -147,7 +148,7 @@ function DashboardContent() {
   const loadBaseData = async () => {
     setLoading(true);
     try {
-      const [projectRows, agentRows, fileRows, connectorRows, runbookRows, memoryRows, approvalRows, settings] = await Promise.all([
+      const [projectRows, agentRows, fileRows, connectorRows, runbookRows, memoryRows, approvalRows, bootstrap] = await Promise.all([
         fetchMissionsAction(),
         fetchAgentStatuses(),
         fetchWorkspaceFilesAction(),
@@ -155,7 +156,7 @@ function DashboardContent() {
         fetchRunbooksAction(),
         fetchMemoryItemsAction(),
         fetchApprovalCenterAction(),
-        fetchSettingsAction(),
+        fetchBootstrapStateAction(),
       ]);
       setProjects(projectRows);
       setAgents(agentRows);
@@ -164,9 +165,11 @@ function DashboardContent() {
       setRunbooks(runbookRows);
       setMemoryPreview(memoryRows.slice(0, 5));
       setApprovals(approvalRows);
-      const bootstrapPending = settings.has_completed_wizard !== 'true' || settings.global_minimax_key_configured !== 'true';
-      setBootstrapRequired(bootstrapPending);
-      setShowSetupWizard(bootstrapPending);
+      setBootstrapRequired(bootstrap.wizardRequired);
+      setShowSetupWizard(bootstrap.wizardRequired);
+      if (bootstrap.wizardRequired) {
+        console.info(`[Supr] Setup wizard required: ${bootstrap.reason}`);
+      }
     } finally {
       setLoading(false);
     }

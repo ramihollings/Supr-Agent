@@ -362,7 +362,10 @@ test('front page defaults to live agent orchestration instead of fake glidepath 
   assert.match(actions, /createRuntimeAgentAction/);
   assert.match(actions, /export async function fetchProjectOperatingGraphAction/);
   assert.match(page, /SetupWizard/);
-  assert.match(page, /bootstrapPending/);
+  assert.match(page, /fetchBootstrapStateAction/);
+  assert.match(page, /bootstrap\.wizardRequired/);
+  assert.doesNotMatch(page, /global_minimax_key_configured\s*!==\s*'true'/);
+  assert.doesNotMatch(actions, /has_completed_wizard\s*!==\s*'true'\s*\|\|\s*settings\.global_minimax_key_configured/);
   assert.match(workflowCanvas, /Spawn Agent/);
   assert.match(workflowCanvas, /Start Project Flow/);
   assert.match(workflowCanvas, /Supr directs agents through phases, tasks, approvals, run records, and deliverables/);

@@ -929,6 +929,46 @@ export async function fetchSettingsAction() {
   }
 }
 
+/**
+ * Resolve whether the SetupWizard still needs to be shown.
+ *
+ * The wizard should only force itself when there is real work to do:
+ *   - the user has never completed the wizard before, AND
+ *   - there is no live LLM provider available from env or stored keys.
+ *
+ * Previously the gate only looked at `global_minimax_key_configured`, which
+ * missed valid VPS deployments where `MINIMAX_API_KEY` (or any other
+ * provider key) is set via env. That kept the wizard popping up even
+ * though the runtime was healthy.
+ */
+export async function fetchBootstrapStateAction(): Promise<{
+  wizardRequired: boolean;
+  hasProvider: boolean;
+  wizardCompleted: boolean;
+  reason: string;
+}> {
+  const [rows, hasProvider] = await Promise.all([
+    dbClient.query<{ key: string; value: string }>(`SELECT * FROM Settings`).catch(() => [] as { key: string; value: string }[]),
+    hasConfiguredModelProvider().catch(() => false),
+  ]);
+
+  const settings: Record<string, string> = {};
+  for (const row of rows) settings[row.key] = row.value;
+  const wizardCompleted = settings.has_completed_wizard === 'true';
+  const wizardRequired = !wizardCompleted && !hasProvider;
+
+  let reason: string;
+  if (wizardRequired) {
+    reason = 'No live LLM provider is configured and the bootstrap wizard has not been completed yet.';
+  } else if (!wizardCompleted) {
+    reason = 'A live LLM provider is already configured; the bootstrap wizard can be skipped.';
+  } else {
+    reason = 'Bootstrap wizard has been completed.';
+  }
+
+  return { wizardRequired, hasProvider, wizardCompleted, reason };
+}
+
 export async function updateSettingAction(key: string, value: string) {
   try {
     z.string().min(1).max(128).regex(/^[a-z0-9_]+$/i).parse(key);
