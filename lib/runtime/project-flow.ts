@@ -555,21 +555,26 @@ export async function startProjectFlow(projectId: string, source = 'project_flow
   const objective = mission.objective || mission.name || 'the project';
   const projectPlan = await buildProjectPlan(objective);
 
-  const phases = PHASES.map((name, index) => ({
-    id: `phase-${name.toLowerCase()}`,
-    name,
-    status: index === 0 ? 'Done' : index === 1 ? 'Active' : 'Pending',
-  }));
-  await dbClient.execute(`UPDATE Glidepaths SET phases = ? WHERE mission_id = ?`, [JSON.stringify(phases), projectId]);
-
-  for (const [index, phase] of phases.entries()) {
+  // Phases are now derived from the relational Tasks table on read, so
+  // there is no need to persist them to the Glidepaths JSON column here.
+  // The first phase is the only one we can confidently label "Done" at
+  // the start of a flow (planning is complete); the rest are pending
+  // until the runtime produces tasks in them.
+  const initialPhaseStatus: Record<string, 'Done' | 'Active' | 'Pending'> = {
+    Intake: 'Done',
+    Research: 'Pending',
+    Build: 'Pending',
+    Verify: 'Pending',
+    Deliver: 'Pending',
+  };
+  for (const [index, phase] of (['Intake', 'Research', 'Build', 'Verify', 'Deliver'] as const).entries()) {
     await upsertFlowNode({
       flowRunId,
       missionId: projectId,
       kind: 'phase',
-      refId: phase.id,
-      label: phase.name,
-      status: phase.status,
+      refId: `phase-${phase.toLowerCase()}`,
+      label: phase,
+      status: initialPhaseStatus[phase],
       ownerAgentId: 'a1',
       x: 40 + index * 190,
       y: 40,

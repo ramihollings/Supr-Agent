@@ -817,3 +817,21 @@ test('mission state changes are published through a process-local event bus, not
   const agentActions = readFileSync('lib/runtime/agent-actions.ts', 'utf8');
   assert.match(agentActions, /notifyMissionChanged/);
 });
+
+test('mission phases are derived from the relational Tasks table, not the Glidepaths JSON column', () => {
+  const db = readFileSync('lib/db.ts', 'utf8');
+  const flow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
+
+  // New derivePhasesFromTasks must exist and use Tasks table.
+  assert.match(db, /export async function derivePhasesFromTasks/);
+  assert.match(db, /SELECT phase_id, status FROM Tasks WHERE mission_id = \?/);
+  // Read path must use the derived phases when Tasks rows exist.
+  assert.match(db, /phases\s*=\s*dbTasks\.length\s*>\s*0\s*\?\s*await derivePhasesFromTasks\(id\)/);
+
+  // Runtime no longer writes the Glidepaths.phases JSON column.
+  assert.doesNotMatch(flow, /UPDATE Glidepaths SET phases = \?/);
+  // createMission INSERT no longer includes the phases column.
+  assert.doesNotMatch(db, /INSERT INTO Glidepaths \(id, mission_id, phases, tasks, readiness_score\)/);
+  // But the Tasks column is still used (createAgentAction etc.).
+  assert.match(db, /INSERT INTO Glidepaths \(id, mission_id, tasks, readiness_score\)/);
+});

@@ -22,18 +22,66 @@ function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+const PHASE_NAMES = ['Intake', 'Research', 'Build', 'Verify', 'Deliver'] as const;
+
+/**
+ * Derive the mission's phase list from the relational Tasks table.
+ *
+ * The Glidepaths.phases JSON column was previously the source of
+ * truth for the 5 hardcoded mission phases. The runtime wrote a
+ * constant shape into it on every flow event, which made the JSON a
+ * no-op round-trip and the Tasks table the actual source of truth.
+ *
+ * The derivation is a small GROUP BY over Tasks.phase_id: any phase
+ * with at least one pending task is "Active", all-completed is
+ * "Done", no-tasks-yet is "Pending". Phases are emitted in the
+ * canonical Intake -> Deliver order.
+ *
+ * If a mission has no Tasks rows yet (e.g. freshly created and the
+ * runtime has not run), this returns an all-Pending skeleton so the
+ * UI still renders the phase rail.
+ */
+export function phaseStatusFromTaskStatuses(tasks: Array<{ phase_id: string | null; status: string | null }>): Map<string, 'Done' | 'Active' | 'Pending'> {
+  const result = new Map<string, 'Done' | 'Active' | 'Pending'>();
+  for (const name of PHASE_NAMES) result.set(name, 'Pending');
+  for (const task of tasks) {
+    const phase = (task.phase_id || '').trim();
+    if (!result.has(phase)) continue;
+    const status = (task.status || '').toLowerCase();
+    const current = result.get(phase)!;
+    if (current === 'Active') continue;
+    if (status === 'completed') {
+      result.set(phase, current === 'Active' ? 'Active' : 'Done');
+    } else if (status === 'failed' || status === 'pending' || status === 'running' || status === 'in_progress') {
+      result.set(phase, 'Active');
+    }
+  }
+  return result;
+}
+
+export async function derivePhasesFromTasks(missionId: string): Promise<Phase[]> {
+  const rows = await dbClient.query<{ phase_id: string | null; status: string | null }>(
+    `SELECT phase_id, status FROM Tasks WHERE mission_id = ?`,
+    [missionId],
+  );
+  const statuses = phaseStatusFromTaskStatuses(rows);
+  return PHASE_NAMES.map((name, index) => ({
+    id: `phase-${name.toLowerCase()}`,
+    name,
+    status: statuses.get(name) || 'Pending',
+  }));
+}
+
 export async function getMissionById(id: string): Promise<Mission | undefined> {
   const row = await dbClient.queryOne<any>(`SELECT * FROM Missions WHERE id = ?`, [id]);
   if (!row) return undefined;
-  
+
   const gp = await dbClient.queryOne<any>(`SELECT * FROM Glidepaths WHERE mission_id = ?`, [id]);
-  let phases: Phase[] = [];
   let tasks: Task[] = [];
   if (gp) {
-     try { phases = JSON.parse(gp.phases || '[]'); } catch(e){}
      try { tasks = JSON.parse(gp.tasks || '[]'); } catch(e){}
   }
-  
+
   const dbTasks = await dbClient.query<any>(`SELECT * FROM Tasks WHERE mission_id = ?`, [id]);
   const mappedTasks = dbTasks.map(t => ({
     id: t.id,
@@ -43,6 +91,19 @@ export async function getMissionById(id: string): Promise<Mission | undefined> {
     agentIcon: 'smart_toy',
     status: t.status
   }));
+
+  // Phases are derived from the relational Tasks table. Falls back to
+  // the Glidepaths JSON column for legacy data where the table was
+  // empty but the JSON was still authoritative.
+  let phases: Phase[] = dbTasks.length > 0
+    ? await derivePhasesFromTasks(id)
+    : [];
+  if (phases.length === 0 && gp) {
+    try { phases = JSON.parse(gp.phases || '[]'); } catch(e){}
+  }
+  if (phases.length === 0) {
+    phases = (await derivePhasesFromTasks(id)).map(p => ({ ...p, status: 'Pending' as const }));
+  }
 
   const events = await dbClient.query<any>(`SELECT * FROM Event_Log WHERE mission_id = ?`, [id]);
   const failures = await dbClient.query<any>(`SELECT * FROM Failure_Events WHERE mission_id = ?`, [id]);
@@ -262,8 +323,8 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
       params: [newMissionId, missionData.name, missionData.objective, missionData.status]
     },
     {
-      sql: `INSERT INTO Glidepaths (id, mission_id, phases, tasks, readiness_score) VALUES (?, ?, ?, ?, ?)`,
-      params: [`gp-${newMissionId}`, newMissionId, JSON.stringify(missionData.phases || []), JSON.stringify(missionData.tasks || []), missionData.readinessScore || 0]
+      sql: `INSERT INTO Glidepaths (id, mission_id, tasks, readiness_score) VALUES (?, ?, ?, ?)`,
+      params: [`gp-${newMissionId}`, newMissionId, JSON.stringify(missionData.tasks || []), missionData.readinessScore || 0]
     },
     {
       sql: `INSERT INTO Artifacts (id, mission_id, type, title, content) VALUES (?, ?, ?, ?, ?)`,
