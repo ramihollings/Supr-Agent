@@ -98,11 +98,17 @@ async function getOrCreateFlowRun(missionId: string, source = 'project_flow') {
   );
   if (existing) return existing;
 
+  // Honor the user's chosen operating mode. The mode column is stored
+  // on Flow_Runs so it can be inspected per-run from the supervisor
+  // console. The runtime code doesn't gate on it today, but recording
+  // it correctly here is what the scheduler expects to read.
+  const mode = await getRuntimeMode();
+
   const flowRunId = id('flow');
   await dbClient.execute(
     `INSERT INTO Flow_Runs (id, mission_id, status, mode, source, started_at)
-     VALUES (?, ?, 'idle', 'autonomous', ?, CURRENT_TIMESTAMP)`,
-    [flowRunId, missionId, source],
+     VALUES (?, ?, 'idle', ?, ?, CURRENT_TIMESTAMP)`,
+    [flowRunId, missionId, mode, source],
   );
   return dbClient.queryOne<any>(`SELECT * FROM Flow_Runs WHERE id = ?`, [flowRunId]);
 }

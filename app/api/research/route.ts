@@ -73,8 +73,13 @@ export async function POST(req: NextRequest) {
         }
 
         const mission = missionId ? await getMissionById(missionId) : await getActiveMission();
+        if (!mission) {
+          send({ type: 'error', content: 'No active project is available for research. Open or select a project first.' });
+          controller.close();
+          return;
+        }
         const action = await createAgentAction({
-          missionId: mission?.id || 'm1',
+          missionId: mission.id,
           agentId: 'a2',
           capability: 'web_scrape',
           intent: query,

@@ -669,3 +669,29 @@ test('intake falls back to preset plan and scrubs attachment payloads', () => {
   // The old raw attachments payload literal must be gone from the intake path.
   assert.doesNotMatch(afterIntake, /JSON\.stringify\(\{\s*attachments:\s*input\.attachments/);
 });
+
+test('agent routes reject requests without an active mission, instead of falling back to a phantom id', () => {
+  // No more `mission?.id || 'm1'` anywhere in the API routes or runtime.
+  for (const file of ['app/api/code-agent/route.ts', 'app/api/research/route.ts']) {
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /mission\?\.id \|\| 'm1'/);
+  }
+  // Both routes must explicitly bail out when no mission is found.
+  const research = readFileSync('app/api/research/route.ts', 'utf8');
+  assert.match(research, /No active project is available for research/);
+  const codeAgent = readFileSync('app/api/code-agent/route.ts', 'utf8');
+  assert.match(codeAgent, /No active project is available for the code agent/);
+});
+
+test('flow run records the configured operating mode, not a hardcoded autonomous literal', () => {
+  const flow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
+  // The getOrCreateFlowRun helper must call getRuntimeMode() and pass
+  // the result as the mode column on Flow_Runs. The hardcoded
+  // 'idle', 'autonomous' literal in the INSERT must be gone.
+  const helper = flow.match(/async function getOrCreateFlowRun[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(helper, /await getRuntimeMode\(\)/);
+  assert.doesNotMatch(helper, /'idle',\s*'autonomous'/);
+  // And the function's returned row should still have the autonomous
+  // mode, not the getRuntimeMode string. The INSERT must bind the
+  // helper variable (mode) as a parameter, not a hardcoded literal.
+  assert.match(helper, /\[flowRunId, missionId, mode, source\]/);
+});

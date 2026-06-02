@@ -128,8 +128,13 @@ export async function POST(req: NextRequest) {
         send({ type: 'status', phase: 'patching', content: `[CODE AGENT] Patch proposed: ${patchPlan.patchSummary}` });
 
         const mission = missionId ? await getMissionById(missionId) : await getActiveMission();
+        if (!mission) {
+          send({ type: 'error', content: 'No active project is available for the code agent. Open or select a project first.' });
+          controller.close();
+          return;
+        }
         const action = await createAgentAction({
-          missionId: mission?.id || 'm1',
+          missionId: mission.id,
           agentId: 'a3',
           capability: 'workspace_write_file',
           intent: `Analyze and fix ${filename}`,
@@ -193,7 +198,7 @@ export async function POST(req: NextRequest) {
         if (passed && patchPlan.changed) {
           const validationCommand = buildValidationCommand(filename, fixedCode);
           const validationAction = await createAgentAction({
-            missionId: mission?.id || 'm1',
+            missionId: mission.id,
             agentId: 'a3',
             capability: 'execute_command',
             intent: `Validate Code Agent patch for ${filename}`,
@@ -239,7 +244,7 @@ export async function POST(req: NextRequest) {
           });
 
           const retryAction = await createAgentAction({
-            missionId: mission?.id || 'm1',
+            missionId: mission.id,
             agentId: 'a3',
             capability: 'workspace_write_file',
             intent: `Retry Code Agent patch for ${filename}`,
@@ -279,7 +284,7 @@ export async function POST(req: NextRequest) {
               fix = `${fix}. Retry patch applied: ${retryPlan.patchSummary}`;
 
               const retryValidationAction = await createAgentAction({
-                missionId: mission?.id || 'm1',
+                missionId: mission.id,
                 agentId: 'a3',
                 capability: 'execute_command',
                 intent: `Validate retry Code Agent patch for ${filename}`,
