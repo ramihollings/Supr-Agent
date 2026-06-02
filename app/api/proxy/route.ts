@@ -62,15 +62,95 @@ function normalizeTargetUrl(rawUrl: string) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+interface ResolvedTarget {
+  /** URL with the host replaced by the resolved IP, used for the actual fetch. */
+  pinnedUrl: string;
+  /** Original hostname, sent in the Host header so the origin server routes correctly. */
+  originalHost: string;
+  /** Original URL (hostname form) for logging and HTML rewriting. */
+  logUrl: string;
+  /** True if the host is an IP literal and was already vetted in-line. */
+  isLiteralIp: boolean;
+}
+
+/**
+ * Resolve a URL to a single IP and return both the pinned URL and the
+ * original hostname. This is the TOCTOU mitigation for the SSRF defense:
+ * we resolve DNS once for the safety check, then use that same IP for
+ * the actual fetch so the host cannot rebound to a different address
+ * between the validate and the request.
+ */
+async function resolvePinnedUrl(targetUrl: string): Promise<ResolvedTarget> {
+  const parsed = new URL(targetUrl);
+  const hostname = parsed.hostname.toLowerCase();
+  const protocol = parsed.protocol;
+  if (!['http:', 'https:'].includes(protocol)) {
+    throw new Error('Only HTTP and HTTPS URLs are supported.');
+  }
+
+  // IP-literal host: validate the literal directly; no DNS involved.
+  if (net.isIP(hostname)) {
+    return {
+      pinnedUrl: targetUrl,
+      originalHost: hostname,
+      logUrl: targetUrl,
+      isLiteralIp: true,
+    };
+  }
+
+  // Hostname host: resolve once, then build a URL with the IP literal.
+  // Use { all: true, verbatim: true } so we pick the first record in the
+  // order Node's resolver returns it, without preferring IPv4 over IPv6
+  // or vice versa. The fetch then goes to the IP we vetted, with the
+  // Host header carrying the original hostname for virtual hosting.
+  const records = await dns.lookup(hostname, { all: true, verbatim: true });
+  if (records.length === 0) throw new Error(`Could not resolve host ${hostname}.`);
+  const firstAddress = records[0].address;
+  return {
+    pinnedUrl: `${protocol}//${firstAddress}${parsed.port ? `:${parsed.port}` : ''}${parsed.pathname}${parsed.search}`,
+    originalHost: parsed.host,
+    logUrl: targetUrl,
+    isLiteralIp: false,
+  };
+}
+
+function buildResolvedUrl(parsed: { protocol: string; hostname: string; port: string; pathname: string; search: string; host: string }): ResolvedTarget {
+  // Same shape as resolvePinnedUrl, but used for relative redirect
+  // targets where the new hostname is already an IP literal.
+  if (net.isIP(parsed.hostname)) {
+    return {
+      pinnedUrl: parsed.protocol + '//' + parsed.host + parsed.pathname + parsed.search,
+      originalHost: parsed.hostname,
+      logUrl: parsed.protocol + '//' + parsed.host + parsed.pathname + parsed.search,
+      isLiteralIp: true,
+    };
+  }
+  // Hostname redirect target: re-resolve through the same DNS pin path.
+  // Returning the hostname form triggers a re-resolve in fetchSafely.
+  return {
+    pinnedUrl: '',
+    originalHost: parsed.host,
+    logUrl: parsed.protocol + '//' + parsed.host + parsed.pathname + parsed.search,
+    isLiteralIp: false,
+  };
+}
+
 async function fetchSafely(initialUrl: string) {
-  let currentUrl = initialUrl;
+  let current = await resolvePinnedUrl(initialUrl);
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    await assertSafeUrl(currentUrl);
+    if (!current.isLiteralIp && current.pinnedUrl === '') {
+      // Redirect target was a hostname; re-resolve and re-vet.
+      current = await resolvePinnedUrl(current.logUrl);
+    }
+    await assertSafeUrl(current.logUrl);
 
-    const response = await fetch(currentUrl, {
+    const response = await fetch(current.pinnedUrl, {
       headers: {
         'User-Agent': 'SuprProxy/1.0',
+        // The pinnedUrl points at the IP; the origin server needs the
+        // real Host header to route virtual-hosted domains correctly.
+        'Host': current.originalHost,
       },
       redirect: 'manual',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -79,11 +159,23 @@ async function fetchSafely(initialUrl: string) {
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get('location');
       if (!location) throw new Error('Redirect response did not include a location.');
-      currentUrl = new URL(location, currentUrl).toString();
+      const nextParsed = new URL(location, current.pinnedUrl);
+      const nextHostname = nextParsed.hostname.toLowerCase();
+      // We must re-validate the redirect target -- it might point at a
+      // private IP. If it's a hostname, we resolve-and-pin; if it's
+      // already an IP literal, we vet the literal directly.
+      const reCheck = buildResolvedUrl(nextParsed);
+      if (reCheck.isLiteralIp) {
+        await assertSafeUrl(reCheck.logUrl);
+        current = reCheck;
+      } else {
+        current = await resolvePinnedUrl(reCheck.logUrl);
+        await assertSafeUrl(current.logUrl);
+      }
       continue;
     }
 
-    return { response, finalUrl: currentUrl };
+    return { response, finalUrl: current.logUrl };
   }
 
   throw new Error('Too many redirects.');

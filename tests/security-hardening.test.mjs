@@ -119,6 +119,19 @@ test('proxy keeps SSRF defenses enabled', () => {
   assert.match(proxyRoute, /isPrivateIp/);
 });
 
+test('proxy pins the resolved IP for the actual fetch to prevent DNS rebinding (TOCTOU)', () => {
+  const proxyRoute = readFileSync('app/api/proxy/route.ts', 'utf8');
+  // The fetch must go to a pinned IP, not the hostname. Asserted by
+  // checking that the fetch target is built from a resolved IP and
+  // that the original Host header is forwarded.
+  assert.match(proxyRoute, /resolvePinnedUrl/);
+  assert.match(proxyRoute, /'Host':\s*current\.originalHost/);
+  // Redirects must also be re-resolved through the same pin path.
+  assert.match(proxyRoute, /resolvePinnedUrl\(reCheck\.logUrl\)/);
+  // The old pattern (fetching the hostname URL directly) must be gone.
+  assert.doesNotMatch(proxyRoute, /await fetch\(currentUrl/);
+});
+
 test('runbooks and artifact versions are backed by persistence tables and actions', () => {
   const initSql = readFileSync('lib/database/init.ts', 'utf8');
   const actions = readFileSync('app/actions.ts', 'utf8');
