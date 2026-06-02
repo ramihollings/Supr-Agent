@@ -3,6 +3,28 @@
 import { useEffect, useState } from "react";
 import { fetchSettingsAction } from "@/app/actions";
 
+/**
+ * Client-side sentinel write that other tabs (and the chat) listen
+ * for via the 'storage' event. Settings-saving code can call this
+ * after a successful write to make the change visible in the chat
+ * without a full page reload.
+ *
+ * Falls back to a no-op in non-browser contexts (SSR).
+ */
+export function notifySettingsChanged(): void {
+  if (typeof window === "undefined") return;
+  try {
+    // Writing the same value back fires a 'storage' event in OTHER
+    // tabs but not this one. The chat's useSettingsSnapshot listens
+    // and re-fetches.
+    window.localStorage.setItem("supr:settings-updated", String(Date.now()));
+  } catch {
+    // localStorage may be unavailable (private mode, quota). Fall
+    // back to a custom event the same tab can listen to.
+    window.dispatchEvent(new CustomEvent("supr:settings-updated"));
+  }
+}
+
 export interface SettingsSnapshot {
   activeModel: string;
   activeModelName: string;
@@ -60,9 +82,27 @@ export function useSettingsSnapshot(): SettingsSnapshot & { refresh: () => void 
 
   useEffect(() => {
     refresh();
-    // Intentionally mount-only for now; the snapshot is a "what's the
-    // current state" read, not a live feed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Re-fetch when the user comes back to this tab. Settings changes
+    // made in the Settings page only persist in the DB; the chat has
+    // no live channel to hear about them. Re-reading on focus is the
+    // simplest "good enough" cross-tab propagation: changes made in
+    // another tab show up when the user comes back to this one.
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+
+    // Also re-fetch on the legacy 'storage' event, which is emitted
+    // by other tabs (not this one) when they write to localStorage.
+    // The Settings page can broadcast a sentinel write after a save
+    // to make the change visible immediately in the chat.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'supr:settings-updated') refresh();
+    };
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   return { ...snapshot, refresh };

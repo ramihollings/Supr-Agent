@@ -918,4 +918,13 @@ test('useSettingsSnapshot hook is the shared source of truth for active model + 
   // the same four settings itself.
   const chat = readFileSync('app/supr-chat/page.tsx', 'utf8');
   assert.match(chat, /useSettingsSnapshot/);
+
+  // Cross-tab refresh: the hook must re-fetch on focus so settings
+  // changed in another tab become visible when the user returns.
+  assert.match(hook, /addEventListener\(['"]focus['"]/);
+
+  // A helper for other client code to broadcast that settings
+  // changed is exported.
+  assert.match(hook, /export function notifySettingsChanged/);
+  assert.match(hook, /supr:settings-updated/);
 });
