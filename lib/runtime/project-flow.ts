@@ -6,6 +6,8 @@ import { getActiveProvider } from '@/lib/providers/model';
 import { getRuntimeMode, hasConfiguredModelProvider } from './runtime-mode';
 import { parseModelJson } from './model-json';
 import { messagingGateway } from '@/src/services/messaging-gateway';
+import { serializeChannelPayload } from '@/lib/channel-logging';
+import { telemetry } from '@/lib/telemetry';
 import type { PermissionTier } from '@/lib/services/governance';
 import type { RiskLevel, RuntimeMode } from './types';
 
@@ -520,9 +522,16 @@ async function buildProjectPlan(objective: string) {
   const mode = await getRuntimeMode();
   try {
     const plan = await buildModelProjectPlan(objective, mode);
-    return { mode, plannerSource: plan.some((item) => item.plannerSource === 'model') ? 'model' : 'preset_fallback', plan };
+    const plannerSource: 'model' | 'preset_fallback' = plan.some((item) => item.plannerSource === 'model') ? 'model' : 'preset_fallback';
+    return { mode, plannerSource, plan };
   } catch (error: any) {
-    throw error;
+    // Any planner failure (no provider, model timeout, bad JSON, zero
+    // normalized tasks) must not drop the whole intake request. Degrade
+    // to the deterministic preset plan so the project can still get
+    // a minimal Research -> Build -> Verify -> Deliver pipeline running.
+    console.warn(`[Supr] buildModelProjectPlan failed; falling back to preset plan. reason=${error?.message || String(error)}`);
+    telemetry.warn('planner.fallback', { reason: error?.message || String(error), source: 'buildProjectPlan' });
+    return { mode, plannerSource: 'preset_fallback' as const, plan: presetPlan(objective) };
   }
 }
 
@@ -857,7 +866,14 @@ export async function routeIntakeToProjectFlow(input: {
   await dbClient.execute(
     `INSERT INTO Channel_Commands (id, source, mission_id, command, payload, status, actor_id)
      VALUES (?, ?, ?, ?, ?, 'received', ?)`,
-    [commandId, input.source, mission.id, input.content, JSON.stringify({ attachments: input.attachments || [] }), input.actorId || null],
+    [
+      commandId,
+      input.source,
+      mission.id,
+      input.content,
+      serializeChannelPayload({ attachments: input.attachments || [] }),
+      input.actorId || null,
+    ],
   );
   try {
     await logFlowEvent(mission.id, 'supr_decision', 'Supr', `Received ${input.source} request`, input.content);

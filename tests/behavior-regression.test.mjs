@@ -648,3 +648,24 @@ test('production model probe does strict JSON shape checking, not substring matc
   assert.doesNotMatch(health, /"ok"\\s*:\\s*true\|ok\/i/);
   assert.doesNotMatch(health, /\btest\(.*"ok"\s*:\s*true\|ok/i);
 });
+
+test('intake falls back to preset plan and scrubs attachment payloads', () => {
+  const flow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
+
+  // Planner fallback: buildProjectPlan must catch model errors and return presetPlan.
+  assert.match(flow, /async function buildProjectPlan/);
+  const planBody = flow.match(/async function buildProjectPlan[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(planBody, /presetPlan\(objective\)/);
+  assert.match(planBody, /planner\.fallback/);
+  assert.doesNotMatch(planBody, /throw error;/);
+
+  // Scrubbed intake logging: routeIntakeToProjectFlow must use
+  // serializeChannelPayload for the Channel_Commands.payload column.
+  assert.match(flow, /import\s*\{[^}]*serializeChannelPayload[^}]*\}\s*from\s*'@\/lib\/channel-logging'/);
+  // The call to serializeChannelPayload must appear in the file (after
+  // the routeIntakeToProjectFlow function declaration).
+  const afterIntake = flow.slice(flow.indexOf('export async function routeIntakeToProjectFlow'));
+  assert.match(afterIntake, /serializeChannelPayload\(/);
+  // The old raw attachments payload literal must be gone from the intake path.
+  assert.doesNotMatch(afterIntake, /JSON\.stringify\(\{\s*attachments:\s*input\.attachments/);
+});
