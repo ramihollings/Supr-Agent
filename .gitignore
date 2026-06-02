@@ -12,3 +12,6 @@ coverage/
 supr_workspaces/
 lib/external/
 components/external/
+test-results/
+playwright-report/
+playwright/.cache/

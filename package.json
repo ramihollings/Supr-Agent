@@ -8,8 +8,10 @@
     "start": "next start",
     "lint": "eslint .",
     "clean": "next clean",
-    "test:security": "node --test tests/security-hardening.test.mjs tests/behavior-regression.test.mjs",
-    "test:prod": "npm run lint && npm run test:security && npm run build"
+    "smoke": "node scripts/smoke.mjs",
+    "test:security": "node --test tests/security-hardening.test.mjs tests/behavior-regression.test.mjs tests/telemetry.test.mjs",
+    "test:e2e": "playwright test",
+    "test:prod": "npm run lint && npm run test:security && npm run build && npm run smoke && npm run test:e2e"
   },
   "dependencies": {
     "@google/genai": "^1.17.0",
@@ -37,6 +39,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "4.1.11",
     "@tailwindcss/typography": "^0.5.19",
     "@types/better-sqlite3": "^7.6.13",
