@@ -115,7 +115,7 @@ export class PermissionEngine {
       const { getSqliteDb } = await import('../database/init');
       const db = getSqliteDb();
 
-      const ruleDecision = this.evaluateToolRules(capabilityName, capabilityArgs);
+      const ruleDecision = await this.evaluateToolRules(capabilityName, capabilityArgs);
       if (ruleDecision.status !== 'Approved') {
         const capability = db.prepare("SELECT * FROM Capabilities WHERE name = ?").get(capabilityName) as any;
         db.prepare(`
