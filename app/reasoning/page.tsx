@@ -1,6 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
+import { useToast } from '@/components/ToastProvider';
 import { useState, useEffect, startTransition, Suspense } from 'react';
 import { Mission, MemoryItem } from '@/types';
 import { getActiveMissionAction, fetchMissionsAction } from '@/app/actions';
@@ -109,12 +110,7 @@ function ReasoningPageContent() {
   const [treeNodes, setTreeNodes] = useState<ReasoningNode[]>(DEFAULT_REASONING_TREE);
   const [selectedNodeId, setSelectedNodeId] = useState<string>('n4');
   const [overrideDirective, setOverrideDirective] = useState('');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
-  };
+  const { showToast } = useToast();
 
   useEffect(() => {
     async function loadProjects() {
@@ -180,12 +176,7 @@ function ReasoningPageContent() {
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Reasoning Core Decision Center" />
 
-      {toastMessage && (
-        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
-          {toastMessage}
-        </div>
-      )}
-      
+
       <main className="flex-1 overflow-y-auto p-4 md:p-8 max-w-7xl mx-auto w-full flex flex-col gap-6">
         
         {/* Header */}

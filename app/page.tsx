@@ -8,8 +8,10 @@ import { MissionWizard } from '@/components/MissionWizard';
 import { SetupWizard } from '@/components/SetupWizard';
 import { ProjectWorkflowCanvas } from '@/components/ProjectWorkflowCanvas';
 import { DashboardObjectDrawer } from '@/components/DashboardObjectDrawer';
-import { RunTranscriptView } from '@/components/RunTranscriptView';
-import { RuntimeConsoleStrip } from '@/components/RuntimeConsoleStrip';
+import { OperationsPanel } from '@/components/OperationsPanel';
+import { ObjectsRail } from '@/components/ObjectsRail';
+import { WorkPanel } from '@/components/WorkPanel';
+import { useToast } from '@/components/ToastProvider';
 import {
   agentToDashboardObject,
   fileToDashboardObject,
@@ -105,9 +107,9 @@ function DashboardContent() {
   const [isSpawningAgent, setIsSpawningAgent] = useState(false);
   const [editingProject, setEditingProject] = useState(false);
   const [projectDraft, setProjectDraft] = useState({ name: '', objective: '', status: 'Active' as Mission['status'] });
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('work');
   const [selectedObject, setSelectedObject] = useState<DashboardObject | null>(null);
+  const { showToast } = useToast();
 
   const selectedOrFirstProjectId = selectedProjectId || projects[0]?.id || null;
   const pendingApprovals = approvals.filter((approval) => approval.status === 'pending');
@@ -141,11 +143,6 @@ function DashboardContent() {
       files: workspaceFiles.length,
     };
   }, [operatingGraph, selectedProject, workspaceFiles.length]);
-
-  const showToast = (message: string) => {
-    setToastMessage(message);
-    setTimeout(() => setToastMessage(null), 2600);
-  };
 
   const loadBaseData = async () => {
     setLoading(true);
@@ -387,11 +384,6 @@ function DashboardContent() {
     <div className="flex-1 md:ml-64 min-h-screen bg-surface-container text-on-surface overflow-hidden">
       {showSetupWizard && <SetupWizard onClose={handleSetupWizardClose} required={bootstrapRequired} />}
       {showWizard && <MissionWizard onClose={handleWizardClose} />}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 bg-background border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-xs">
-          {toastMessage}
-        </div>
-      )}
       <DashboardObjectDrawer
         object={selectedObject}
         timeline={runEvents}
@@ -420,404 +412,60 @@ function DashboardContent() {
       </div>
 
       <div className="h-[calc(100vh-64px)] xl:h-[calc(100vh-4rem)] flex flex-col xl:flex-row overflow-hidden">
-        <aside className={`${mobilePanel === 'objects' ? 'flex' : 'hidden'} xl:flex w-full xl:w-[320px] shrink-0 border-r-4 border-primary bg-background flex-col overflow-y-auto custom-scrollbar`}>
-          <div className="p-5 border-b-4 border-primary bg-surface-container-high">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h1 className="font-headline font-black uppercase text-2xl text-primary tracking-tight">Objects</h1>
-                <p className="font-body text-xs text-on-surface-variant font-semibold mt-1">Projects, files, messages, sub-agents, and supervisor context in one rail.</p>
-              </div>
-              <button
-                onClick={() => setShowWizard(true)}
-                className="bg-primary text-on-primary neo-border p-2 hover:bg-tertiary hover:text-on-tertiary"
-                title="Create project"
-              >
-                <span className="material-symbols-outlined text-lg">add</span>
-              </button>
-            </div>
-          </div>
+        <ObjectsRail
+          mobilePanel={mobilePanel}
+          loading={loading}
+          projects={projects}
+          activeAgents={activeAgents}
+          workspaceFiles={workspaceFiles}
+          dashboardObjects={dashboardObjects}
+          selectedProjectId={selectedOrFirstProjectId}
+          onSelectProject={handleProjectSelect}
+          onCreateProject={() => setShowWizard(true)}
+          onRefresh={refreshAll}
+          onInspectObject={setSelectedObject}
+        />
 
-          <section className="p-4 border-b-4 border-primary">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-headline font-black uppercase text-xs text-primary flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-sm">folder_managed</span>
-                Projects
-              </h2>
-              <button onClick={refreshAll} className="text-primary hover:text-tertiary" title="Refresh">
-                <span className="material-symbols-outlined text-sm">refresh</span>
-              </button>
-            </div>
+        <WorkPanel
+          mobilePanel={mobilePanel}
+          selectedProject={selectedProject}
+          editingProject={editingProject}
+          projectDraft={projectDraft}
+          projectStats={projectStats}
+          pendingApprovalsCount={pendingApprovals.length}
+          operatingGraph={operatingGraph}
+          runEvents={runEvents}
+          timeline={timeline}
+          artifactVersions={artifactVersions}
+          projectArtifacts={projectArtifacts}
+          memoryPreview={memoryPreview}
+          isFlowBusy={isFlowBusy}
+          isSpawningAgent={isSpawningAgent}
+          onStartEdit={() => setEditingProject(true)}
+          onCancelEdit={() => setEditingProject(false)}
+          onSaveEdit={handleSaveProject}
+          onChangeDraft={setProjectDraft}
+          onExport={handleExportProject}
+          onDelete={handleDeleteProject}
+          onCreateProject={() => setShowWizard(true)}
+          onSpawnAgent={handleSpawnProjectAgent}
+          onFlowControl={handleFlowControl}
+        />
 
-            <div className="space-y-2">
-              {loading ? (
-                <div className="font-mono text-[10px] uppercase text-on-surface-variant p-4 border border-dashed border-primary">Loading project objects...</div>
-              ) : projects.length === 0 ? (
-                <button onClick={() => setShowWizard(true)} className="w-full p-4 border-2 border-dashed border-primary text-left hover:bg-surface-container">
-                  <span className="font-headline font-bold uppercase text-xs text-primary">Create the first project</span>
-                </button>
-              ) : projects.map((project) => (
-                <button
-                  key={project.id}
-                  onClick={() => handleProjectSelect(project.id)}
-                  className={`w-full text-left p-3 border-2 transition-colors ${
-                    selectedOrFirstProjectId === project.id
-                      ? 'border-primary bg-primary-container shadow-[3px_3px_0px_0px_var(--color-primary)]'
-                      : 'border-outline-variant bg-surface hover:border-primary'
-                  }`}
-                >
-                  <div className="flex justify-between gap-3">
-                    <span className="font-headline font-black uppercase text-sm truncate">{project.name}</span>
-                    <span className="font-mono text-[9px] uppercase text-secondary">{project.status}</span>
-                  </div>
-                  <p className="font-body text-[10px] text-on-surface-variant line-clamp-2 mt-1">{project.objective || 'No objective yet.'}</p>
-                  <div className="mt-2 h-2 bg-background border border-primary overflow-hidden">
-                    <div className="h-full bg-secondary" style={{ width: `${project.readinessScore || 0}%` }} />
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="p-4 border-b-4 border-primary">
-            <h2 className="font-headline font-black uppercase text-xs text-primary mb-3 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm">smart_toy</span>
-              Sub-agents
-            </h2>
-            <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar">
-              {activeAgents.slice(0, 7).map((agent) => (
-                <div key={agent.id} className="bg-surface border-2 border-primary p-2">
-                  <div className="flex justify-between gap-2">
-                    <span className="font-headline font-bold uppercase text-[10px] truncate">{agent.name}</span>
-                    <span className="font-mono text-[8px] uppercase text-tertiary">{agent.status}</span>
-                  </div>
-                  <p className="font-body text-[10px] text-on-surface-variant truncate">{agent.role} · {agent.permissionTier}</p>
-                </div>
-              ))}
-            </div>
-            <Link href="/agents" className="mt-3 flex items-center justify-center gap-1.5 bg-background border-2 border-primary px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-primary hover:text-on-primary">
-              <span className="material-symbols-outlined text-sm">edit_square</span>
-              Edit agent roster
-            </Link>
-          </section>
-
-          <section className="p-4">
-            <h2 className="font-headline font-black uppercase text-xs text-primary mb-3 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm">draft</span>
-              Workspace Files
-            </h2>
-            <div className="grid grid-cols-2 gap-2">
-              <Link href="/library" className="bg-surface border-2 border-primary p-3 hover:bg-primary hover:text-on-primary">
-                <span className="material-symbols-outlined text-lg">folder_open</span>
-                <span className="block font-headline font-bold uppercase text-[10px] mt-1">Upload/Edit</span>
-              </Link>
-              <Link href="/code" className="bg-surface border-2 border-primary p-3 hover:bg-primary hover:text-on-primary">
-                <span className="material-symbols-outlined text-lg">terminal</span>
-                <span className="block font-headline font-bold uppercase text-[10px] mt-1">Run Files</span>
-              </Link>
-            </div>
-            <p className="font-mono text-[9px] uppercase text-on-surface-variant mt-3">{workspaceFiles.length} files in sandbox workspace</p>
-          </section>
-
-          <section className="p-4 border-t-4 border-primary">
-            <h2 className="font-headline font-black uppercase text-xs text-primary mb-3 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm">manage_search</span>
-              Object Inspector
-            </h2>
-            <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
-              {dashboardObjects.slice(0, 12).map((object) => (
-                <button
-                  key={`${object.type}-${object.id}`}
-                  onClick={() => setSelectedObject(object)}
-                  className="w-full text-left bg-surface border-2 border-primary p-2 hover:bg-primary hover:text-on-primary"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-headline font-bold uppercase text-[10px] truncate">{object.title}</span>
-                    <span className="font-mono text-[8px] uppercase">{object.type}</span>
-                  </div>
-                  <p className="font-body text-[10px] opacity-80 truncate">{object.owner} / {object.status}</p>
-                </button>
-              ))}
-            </div>
-          </section>
-        </aside>
-
-        <main className={`${mobilePanel === 'work' ? 'flex' : 'hidden'} xl:flex flex-1 flex-col overflow-y-auto custom-scrollbar bg-surface-container-lowest border-r-4 border-primary`}>
-          <header className="p-5 lg:p-6 border-b-4 border-primary bg-background">
-            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="material-symbols-outlined text-primary">dashboard_customize</span>
-                  <span className="font-mono text-[10px] uppercase text-on-surface-variant">Supervisor governed command deck</span>
-                </div>
-                {selectedProject ? (
-                  editingProject ? (
-                    <div className="space-y-3">
-                      <input
-                        value={projectDraft.name}
-                        onChange={(event) => setProjectDraft((prev) => ({ ...prev, name: event.target.value }))}
-                        className="w-full bg-surface neo-border px-3 py-2 font-headline font-black uppercase text-xl focus:outline-none focus:border-tertiary"
-                      />
-                      <textarea
-                        value={projectDraft.objective}
-                        onChange={(event) => setProjectDraft((prev) => ({ ...prev, objective: event.target.value }))}
-                        className="w-full min-h-[88px] bg-surface neo-border px-3 py-2 font-body text-sm focus:outline-none focus:border-tertiary resize-vertical"
-                      />
-                      <select
-                        value={projectDraft.status}
-                        onChange={(event) => setProjectDraft((prev) => ({ ...prev, status: event.target.value as Mission['status'] }))}
-                        className="bg-surface neo-border px-3 py-2 font-headline font-bold uppercase text-xs focus:outline-none focus:border-tertiary"
-                      >
-                        <option value="Active">Active</option>
-                        <option value="Done">Done</option>
-                        <option value="Failed">Failed</option>
-                      </select>
-                    </div>
-                  ) : (
-                    <>
-                      <h2 className="font-headline font-black uppercase text-3xl lg:text-4xl text-primary tracking-tight truncate">{selectedProject.name}</h2>
-                      <p className="font-body text-sm lg:text-base font-semibold text-on-surface-variant max-w-3xl mt-2">{selectedProject.objective || 'No objective defined.'}</p>
-                    </>
-                  )
-                ) : (
-                  <>
-                    <h2 className="font-headline font-black uppercase text-3xl lg:text-4xl text-primary tracking-tight">No project selected</h2>
-                    <p className="font-body text-sm lg:text-base font-semibold text-on-surface-variant max-w-3xl mt-2">Create or select a project to start assigning work, collecting evidence, and supervising agent execution.</p>
-                  </>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 sm:flex gap-2 shrink-0">
-                {editingProject ? (
-                  <>
-                    <button onClick={handleSaveProject} className="bg-primary text-on-primary neo-border px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-tertiary hover:text-on-tertiary">Save</button>
-                    <button onClick={() => setEditingProject(false)} className="bg-background text-primary neo-border px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-surface-container">Cancel</button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={() => setEditingProject(true)} disabled={!selectedProject} className="bg-background text-primary neo-border px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-surface-container disabled:opacity-50">
-                      <span className="material-symbols-outlined text-sm align-middle mr-1">edit</span>
-                      Edit
-                    </button>
-                    <button onClick={handleExportProject} disabled={!selectedProject} className="bg-background text-primary neo-border px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-surface-container disabled:opacity-50">
-                      <span className="material-symbols-outlined text-sm align-middle mr-1">download</span>
-                      Download
-                    </button>
-                    <Link href="/supr-chat" className="bg-primary text-on-primary neo-border px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-tertiary hover:text-on-tertiary text-center">
-                      <span className="material-symbols-outlined text-sm align-middle mr-1">chat</span>
-                      Message
-                    </Link>
-                    <button onClick={handleDeleteProject} disabled={!selectedProject} className="bg-error text-on-error neo-border px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-primary disabled:opacity-50">
-                      <span className="material-symbols-outlined text-sm align-middle mr-1">delete</span>
-                      Delete
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </header>
-
-          <section className="grid grid-cols-2 lg:grid-cols-4 border-b-4 border-primary bg-surface-container-high">
-            {[
-              { label: 'Tasks done', value: `${projectStats.doneTasks}/${projectStats.totalTasks}`, icon: 'task_alt' },
-              { label: 'Open actions', value: projectStats.openActions, icon: 'play_circle' },
-              { label: 'Approvals', value: pendingApprovals.length, icon: 'approval_delegation' },
-              { label: 'Workspace files', value: projectStats.files, icon: 'draft' },
-            ].map((stat) => (
-              <div key={stat.label} className="p-4 border-r-2 last:border-r-0 border-primary">
-                <span className="material-symbols-outlined text-primary text-lg">{stat.icon}</span>
-                <p className="font-headline font-black text-2xl text-secondary">{stat.value}</p>
-                <p className="font-headline font-bold uppercase text-[9px] text-on-surface-variant">{stat.label}</p>
-              </div>
-            ))}
-          </section>
-
-          <div className="p-4 lg:p-6 space-y-6">
-            {selectedProject ? (
-              <ProjectWorkflowCanvas
-                graph={operatingGraph}
-                onSpawnAgent={handleSpawnProjectAgent}
-                onStartFlow={() => handleFlowControl('start')}
-                onRunFlow={() => handleFlowControl('run')}
-                onPauseFlow={() => handleFlowControl('pause')}
-                onResumeFlow={() => handleFlowControl('resume')}
-                onRetryFailed={() => handleFlowControl('retry')}
-                onApproveLowRisk={() => handleFlowControl('approveLowRisk')}
-                isSpawning={isSpawningAgent}
-                isBusy={isFlowBusy}
-              />
-            ) : (
-              <div className="bg-background neo-border p-8 text-center">
-                <span className="material-symbols-outlined text-5xl text-primary/40">hub</span>
-                <h3 className="font-headline font-black uppercase text-xl text-primary mt-3">Select a project to open the work graph</h3>
-                <button onClick={() => setShowWizard(true)} className="mt-4 bg-primary text-on-primary neo-border px-4 py-2 font-headline font-bold uppercase text-xs hover:bg-tertiary hover:text-on-tertiary">
-                  Create project
-                </button>
-              </div>
-            )}
-
-            <RunTranscriptView events={runEvents} title="Evidence-backed run transcript" />
-
-            <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="bg-background neo-border p-4">
-                <h3 className="font-headline font-black uppercase text-sm text-primary border-b-2 border-primary pb-2 mb-3">Recent evidence</h3>
-                <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar">
-                  {timeline.slice(0, 6).map((item) => (
-                    <div key={`${item.source}-${item.id}`} className="border-l-4 border-tertiary pl-3 py-1">
-                      <div className="flex justify-between gap-2">
-                        <span className="font-headline font-bold uppercase text-[10px] truncate">{item.title}</span>
-                        <span className="font-mono text-[8px] uppercase text-on-surface-variant">{item.mode}</span>
-                      </div>
-                      <p className="font-body text-[10px] text-on-surface-variant line-clamp-2">{item.detail}</p>
-                    </div>
-                  ))}
-                  {timeline.length === 0 && <p className="font-body text-xs text-on-surface-variant">No timeline events yet.</p>}
-                </div>
-              </div>
-
-              <div className="bg-background neo-border p-4">
-                <h3 className="font-headline font-black uppercase text-sm text-primary border-b-2 border-primary pb-2 mb-3">Deliverables</h3>
-                <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar">
-                  {artifactVersions.slice(0, 6).map((artifact) => (
-                    <Link key={artifact.id} href="/library" className="block bg-surface border border-outline-variant p-2 hover:border-primary">
-                      <span className="font-headline font-bold uppercase text-[10px] truncate block">{artifact.filename}</span>
-                      <span className="font-mono text-[9px] uppercase text-on-surface-variant">v{artifact.version} · {artifact.status}</span>
-                    </Link>
-                  ))}
-                  {artifactVersions.length === 0 && projectArtifacts.map((artifact) => (
-                    <Link key={artifact.id} href="/library" className="block bg-surface border border-outline-variant p-2 hover:border-primary">
-                      <span className="font-headline font-bold uppercase text-[10px] truncate block">{artifact.filename}</span>
-                      <span className="font-mono text-[9px] uppercase text-on-surface-variant">{artifact.type}</span>
-                    </Link>
-                  ))}
-                  {artifactVersions.length === 0 && projectArtifacts.length === 0 && <p className="font-body text-xs text-on-surface-variant">No deliverables yet.</p>}
-                </div>
-              </div>
-
-              <div className="bg-background neo-border p-4">
-                <h3 className="font-headline font-black uppercase text-sm text-primary border-b-2 border-primary pb-2 mb-3">Supervisor memory</h3>
-                <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar">
-                  {memoryPreview.map((item) => (
-                    <div key={item.id} className="bg-surface border border-outline-variant p-2">
-                      <span className="font-headline font-bold uppercase text-[10px] truncate block">{item.key}</span>
-                      <p className="font-body text-[10px] text-on-surface-variant line-clamp-2">{item.value}</p>
-                    </div>
-                  ))}
-                  {memoryPreview.length === 0 && <p className="font-body text-xs text-on-surface-variant">No memory items are waiting for review.</p>}
-                </div>
-              </div>
-            </section>
-          </div>
-        </main>
-
-        <aside className={`${mobilePanel === 'ops' ? 'flex' : 'hidden'} xl:flex w-full xl:w-[340px] shrink-0 bg-background flex-col overflow-y-auto custom-scrollbar`}>
-          <section className="p-5 border-b-4 border-primary bg-surface-container-high">
-            <h2 className="font-headline font-black uppercase text-xl text-primary tracking-tight flex items-center gap-2">
-              <span className="material-symbols-outlined">tune</span>
-              Operations
-            </h2>
-            <p className="font-body text-xs text-on-surface-variant font-semibold mt-1">The governing agent’s control surface: approvals, groups, providers, and object actions.</p>
-          </section>
-
-          <section className="p-4 border-b-4 border-primary">
-            <RuntimeConsoleStrip
-              agents={agents}
-              approvals={approvals}
-              metrics={supervisorConsole?.metrics || []}
-              onForceRecycle={(agent) => showToast(`Runtime recycle requested for ${agent.name}`)}
-            />
-          </section>
-
-          <section className="p-4 border-b-4 border-primary">
-            <h3 className="font-headline font-black uppercase text-xs text-primary mb-3 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm">approval_delegation</span>
-              Approval queue
-            </h3>
-            <div className="space-y-2">
-              {pendingApprovals.slice(0, 4).map((approval) => (
-                <div key={approval.id} className="bg-surface neo-border p-3">
-                  <div className="flex justify-between gap-2">
-                    <span className="font-headline font-black uppercase text-[10px] truncate">{approval.action}</span>
-                    <span className="font-mono text-[9px] uppercase text-secondary">{approval.riskLevel}</span>
-                  </div>
-                  <p className="font-body text-[10px] text-on-surface-variant line-clamp-2 mt-1">{approval.reason}</p>
-                  <div className="grid grid-cols-3 gap-1 mt-3">
-                    {(['approved', 'rejected', 'revised'] as const).map((decision) => (
-                      <button
-                        key={decision}
-                        onClick={() => handleApprovalDecision(approval.id, decision)}
-                        className="border border-primary px-1 py-1 font-headline font-bold uppercase text-[8px] hover:bg-primary hover:text-on-primary"
-                      >
-                        {decision}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {pendingApprovals.length === 0 && <p className="font-body text-xs text-on-surface-variant">No pending approvals.</p>}
-            </div>
-          </section>
-
-          <section className="p-4 border-b-4 border-primary">
-            <h3 className="font-headline font-black uppercase text-xs text-primary mb-3 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm">groups</span>
-              Supervisor teams
-            </h3>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <div className="bg-surface border-2 border-primary p-3">
-                <span className="font-headline font-black text-2xl text-secondary">{supervisorGroups.length}</span>
-                <p className="font-headline font-bold uppercase text-[9px] text-on-surface-variant">Agent groups</p>
-              </div>
-              <div className="bg-surface border-2 border-primary p-3">
-                <span className="font-headline font-black text-2xl text-tertiary">{blueprintCount}</span>
-                <p className="font-headline font-bold uppercase text-[9px] text-on-surface-variant">Blueprints</p>
-              </div>
-            </div>
-            <Link href={`/supervisor${selectedOrFirstProjectId ? `?id=${selectedOrFirstProjectId}` : ''}`} className="flex items-center justify-center gap-1.5 bg-primary text-on-primary neo-border px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-tertiary hover:text-on-tertiary">
-              <span className="material-symbols-outlined text-sm">admin_panel_settings</span>
-              Open supervisor console
-            </Link>
-          </section>
-
-          <section className="p-4 border-b-4 border-primary">
-            <h3 className="font-headline font-black uppercase text-xs text-primary mb-3 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm">conversion_path</span>
-              Runbooks
-            </h3>
-            <div className="space-y-2">
-              {runbooks.slice(0, 4).map((runbook) => (
-                <div key={runbook.id} className="bg-surface border-2 border-primary p-3">
-                  <span className="font-headline font-bold uppercase text-[10px] block">{runbook.name}</span>
-                  <p className="font-body text-[10px] text-on-surface-variant line-clamp-2 mt-1">{runbook.description}</p>
-                  <button
-                    onClick={() => handleStartRunbook(runbook.id)}
-                    className="mt-2 w-full bg-background border border-primary px-2 py-1 font-headline font-bold uppercase text-[9px] hover:bg-primary hover:text-on-primary"
-                  >
-                    Start
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="p-4">
-            <h3 className="font-headline font-black uppercase text-xs text-primary mb-3 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm">settings_input_component</span>
-              Providers
-            </h3>
-            <div className="space-y-2">
-              {connectors.map((connector) => (
-                <div key={connector.id} className="flex items-center justify-between bg-surface border border-outline-variant p-2">
-                  <span className="font-headline font-bold uppercase text-[10px] truncate">{connector.name}</span>
-                  <span className={`font-mono text-[9px] uppercase ${connector.configured ? 'text-tertiary' : 'text-on-surface-variant'}`}>{connector.status}</span>
-                </div>
-              ))}
-            </div>
-            <Link href="/settings" className="mt-3 flex items-center justify-center gap-1.5 bg-background border-2 border-primary px-3 py-2 font-headline font-bold uppercase text-[10px] hover:bg-primary hover:text-on-primary">
-              <span className="material-symbols-outlined text-sm">settings</span>
-              Configure
-            </Link>
-          </section>
-        </aside>
+        <OperationsPanel
+          mobilePanel={mobilePanel}
+          agents={agents}
+          approvals={approvals}
+          connectors={connectors}
+          runbooks={runbooks}
+          metrics={supervisorConsole?.metrics || []}
+          supervisorGroups={supervisorGroups}
+          blueprintCount={blueprintCount}
+          selectedProjectId={selectedOrFirstProjectId}
+          onApprovalDecision={handleApprovalDecision}
+          onStartRunbook={handleStartRunbook}
+          onForceRecycle={(agent) => showToast(`Runtime recycle requested for ${agent.name}`)}
+        />
       </div>
     </div>
   );

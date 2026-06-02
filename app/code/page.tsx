@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { TopNav } from '@/components/TopNav';
+import { useToast } from '@/components/ToastProvider';
 import { RunTranscriptView } from '@/components/RunTranscriptView';
 import { 
   fetchMissionState, 
@@ -44,17 +45,13 @@ export default function CodePage() {
   const [activeResearch, setActiveResearch] = useState<Artifact | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [mission, setMission] = useState<Mission | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'editing'>('saved');
 
   // New file modal state
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [newFilename, setNewFilename] = useState('');
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
-  };
+  const { showToast } = useToast();
 
   const loadWorkspace = async () => {
     setIsLoading(true);
@@ -399,11 +396,6 @@ export default function CodePage() {
 
   return (
     <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden bg-surface-container relative">
-      {toastMessage && (
-        <div className="fixed bottom-12 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
-          {toastMessage}
-        </div>
-      )}
       
       {/* Workspace Header */}
       <header className="flex-none h-16 border-b-4 border-primary bg-background flex justify-between items-center px-4 lg:px-6">

@@ -1,6 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
+import { useToast } from '@/components/ToastProvider';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
 import { AgentWizard } from '@/components/AgentWizard';
@@ -17,7 +18,6 @@ import { DEFAULT_GEMINI_MODEL, PROVIDER_MODEL_OPTIONS } from '@/lib/providers/ca
 
 export default function AgentsPage() {
   const router = useRouter();
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [viewMode, setViewMode] = useState<'active' | 'archived'>('active');
@@ -73,10 +73,7 @@ export default function AgentsPage() {
     void loadAgents();
   }, [loadAgents]);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
-  };
+  const { showToast } = useToast();
 
   const persistAgentPolicy = async (agentId: string, next: any) => {
     await updateAgentCapabilityPolicyAction(agentId, next);
@@ -145,12 +142,6 @@ export default function AgentsPage() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="AI Team Manager" />
-      
-      {toastMessage && (
-        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
-          {toastMessage}
-        </div>
-      )}
 
       <main className="flex-1 p-6 md:p-12 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-6 border-b-4 border-primary pb-6">

@@ -1,6 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
+import { useToast } from '@/components/ToastProvider';
 import { useState, useEffect, Suspense } from 'react';
 import { fetchSkillsState, createSkillAction, deleteSkillAction } from '@/app/actions';
 
@@ -48,7 +49,6 @@ function getSkillMeta(name: string, description: string) {
 function SkillsPageContent() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Modal form states
@@ -70,10 +70,7 @@ function SkillsPageContent() {
     loadSkills();
   }, []);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
-  };
+  const { showToast } = useToast();
 
   const handleCreate = async () => {
     if (!newSkill.name || !newSkill.description) {
@@ -116,12 +113,6 @@ function SkillsPageContent() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Agent Skills Registry" />
-
-      {toastMessage && (
-        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
-          {toastMessage}
-        </div>
-      )}
 
       <main className="flex-1 p-6 md:p-10 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-6 border-b-4 border-primary pb-6">

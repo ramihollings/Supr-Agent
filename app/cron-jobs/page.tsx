@@ -1,6 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
+import { useToast } from '@/components/ToastProvider';
 import { useState, useEffect } from 'react';
 import { 
   fetchCronJobsState, 
@@ -46,7 +47,6 @@ export default function CronJobsPage() {
   const [crons, setCrons] = useState<CronJob[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<{ id: string; title: string; missionName: string }[]>([]);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Create modal state
@@ -112,10 +112,7 @@ export default function CronJobsPage() {
     return () => { active = false; };
   }, []);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
-  };
+  const { showToast } = useToast();
 
   const handleToggle = async (id: string, currentStatus: string, name: string) => {
     const res = await toggleCronJobAction(id, currentStatus);
@@ -211,12 +208,6 @@ export default function CronJobsPage() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Scheduled Automations" />
-
-      {toastMessage && (
-        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
-          {toastMessage}
-        </div>
-      )}
 
       <main className="flex-1 p-6 md:p-12 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6 border-b-4 border-primary pb-6">

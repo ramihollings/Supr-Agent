@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { TopNav } from '@/components/TopNav';
+import { useToast } from '@/components/ToastProvider';
 import { ArtifactSourcePreview } from '@/components/ArtifactSourcePreview';
 import { 
   fetchWorkspaceFilesAction, 
@@ -38,7 +39,6 @@ export default function LibraryPage() {
   const [editContent, setEditContent] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   // Tree collapse state
   const [wsExpanded, setWsExpanded] = useState(true);
@@ -54,10 +54,7 @@ export default function LibraryPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
-  };
+  const { showToast } = useToast();
 
   const loadLibrary = async () => {
     setLoading(true);
@@ -240,11 +237,6 @@ export default function LibraryPage() {
     <div className="flex-1 md:ml-64 flex flex-col h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Universal Library Explorer" />
 
-      {toastMessage && (
-        <div className="fixed bottom-8 right-8 bg-surface-container-high border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-sm animate-bounce">
-          {toastMessage}
-        </div>
-      )}
 
       {/* 3-Pane Layout */}
       <div className="flex-1 flex overflow-hidden w-full relative">
