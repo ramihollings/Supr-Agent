@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { TopNav } from '@/components/TopNav';
 import { MissionWizard } from '@/components/MissionWizard';
+import { SetupWizard } from '@/components/SetupWizard';
 import { ProjectWorkflowCanvas } from '@/components/ProjectWorkflowCanvas';
 import { DashboardObjectDrawer } from '@/components/DashboardObjectDrawer';
 import { RunTranscriptView } from '@/components/RunTranscriptView';
@@ -29,6 +30,7 @@ import {
   fetchMissionTimelineAction,
   fetchMissionsAction,
   fetchProjectOperatingGraphAction,
+  fetchSettingsAction,
   fetchRunbooksAction,
   fetchSupervisorConsoleAction,
   fetchWorkspaceFilesAction,
@@ -84,6 +86,8 @@ function DashboardContent() {
   const selectedProjectId = searchParams.get('id');
 
   const [showWizard, setShowWizard] = useState(false);
+  const [showSetupWizard, setShowSetupWizard] = useState(false);
+  const [bootstrapRequired, setBootstrapRequired] = useState(false);
   const [projects, setProjects] = useState<Mission[]>([]);
   const [selectedProject, setSelectedProject] = useState<Mission | null>(null);
   const [agents, setAgents] = useState<AgentStatus[]>([]);
@@ -146,7 +150,7 @@ function DashboardContent() {
   const loadBaseData = async () => {
     setLoading(true);
     try {
-      const [projectRows, agentRows, fileRows, connectorRows, runbookRows, memoryRows, approvalRows] = await Promise.all([
+      const [projectRows, agentRows, fileRows, connectorRows, runbookRows, memoryRows, approvalRows, settings] = await Promise.all([
         fetchMissionsAction(),
         fetchAgentStatuses(),
         fetchWorkspaceFilesAction(),
@@ -154,6 +158,7 @@ function DashboardContent() {
         fetchRunbooksAction(),
         fetchMemoryItemsAction(),
         fetchApprovalCenterAction(),
+        fetchSettingsAction(),
       ]);
       setProjects(projectRows);
       setAgents(agentRows);
@@ -162,6 +167,9 @@ function DashboardContent() {
       setRunbooks(runbookRows);
       setMemoryPreview(memoryRows.slice(0, 5));
       setApprovals(approvalRows);
+      const bootstrapPending = settings.has_completed_wizard !== 'true' || settings.global_minimax_key_configured !== 'true';
+      setBootstrapRequired(bootstrapPending);
+      setShowSetupWizard(bootstrapPending);
     } finally {
       setLoading(false);
     }
@@ -218,6 +226,11 @@ function DashboardContent() {
   const handleWizardClose = async () => {
     setShowWizard(false);
     await loadBaseData();
+  };
+
+  const handleSetupWizardClose = async () => {
+    setShowSetupWizard(false);
+    await refreshAll();
   };
 
   const handleStartRunbook = async (runbookId: string) => {
@@ -372,6 +385,7 @@ function DashboardContent() {
 
   return (
     <div className="flex-1 md:ml-64 min-h-screen bg-surface-container text-on-surface overflow-hidden">
+      {showSetupWizard && <SetupWizard onClose={handleSetupWizardClose} required={bootstrapRequired} />}
       {showWizard && <MissionWizard onClose={handleWizardClose} />}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-background border-4 border-primary p-4 z-50 neo-shadow font-headline font-bold uppercase text-xs">

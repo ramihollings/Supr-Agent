@@ -361,14 +361,17 @@ test('front page defaults to live agent orchestration instead of fake glidepath 
   assert.match(actions, /export async function spawnProjectAgentAction/);
   assert.match(actions, /createRuntimeAgentAction/);
   assert.match(actions, /export async function fetchProjectOperatingGraphAction/);
+  assert.match(page, /SetupWizard/);
+  assert.match(page, /bootstrapPending/);
   assert.match(workflowCanvas, /Spawn Agent/);
   assert.match(workflowCanvas, /Start Project Flow/);
   assert.match(workflowCanvas, /Supr directs agents through phases, tasks, approvals, run records, and deliverables/);
   assert.doesNotMatch(page, /COMPETITOR SIGNAL TELEMETRY BRIEF/);
   assert.doesNotMatch(page, /Simulated Logs/);
   assert.doesNotMatch(page, /Simulated Traces/);
-  assert.match(setupWizard, /Live Integrations/);
-  assert.match(setupWizard, /Unavailable/);
+  assert.match(setupWizard, /Supr Bootstrap/);
+  assert.match(setupWizard, /MiniMax API Key/);
+  assert.match(setupWizard, /Run Live Probe/);
   assert.doesNotMatch(initSql, /mock_tickets/);
   assert.doesNotMatch(setupWizard, /Simulated Telemetry|sandbox emulator|>Simulated</);
   assert.match(visionLab, /Local Fixture/);
@@ -742,7 +745,8 @@ test('research runtime avoids legacy approval timestamps and duplicate log ids',
   const contextAssembler = readFileSync('lib/runtime/context-assembler.ts', 'utf8');
   const researchPage = readFileSync('app/research/page.tsx', 'utf8');
 
-  assert.match(contextAssembler, /await import\('@\/src\/services\/skill-catalog'\)/);
+  assert.match(contextAssembler, /const skillCatalogModule = '@\/src\/services\/' \+ 'skill-catalog'/);
+  assert.match(contextAssembler, /await import\(skillCatalogModule\)/);
   assert.doesNotMatch(contextAssembler, /eval\('require'\)/);
   assert.match(contextAssembler, /FROM Approvals WHERE mission_id = \? ORDER BY rowid DESC LIMIT 12/);
   assert.doesNotMatch(contextAssembler, /FROM Approvals WHERE mission_id = \? ORDER BY created_at DESC/);

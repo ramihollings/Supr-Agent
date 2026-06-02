@@ -1,347 +1,425 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { updateSettingAction, fetchSettingsAction } from '@/app/actions';
-import { 
-  X, 
-  Rocket, 
-  Key, 
-  Settings, 
-  HelpCircle, 
-  CheckCircle2, 
-  ChevronRight, 
-  ChevronLeft,
-  Sparkles,
-  Link2,
-  FileCode2,
-  Activity,
-  Layers,
-  Users2
-} from 'lucide-react';
+import { useEffect, useState } from "react";
+import {
+  fetchProductionHealthAction,
+  fetchSettingsAction,
+  probeDockerAvailabilityAction,
+  updateSettingAction,
+} from "@/app/actions";
+import { DEFAULT_MINIMAX_MODEL } from "@/lib/providers/catalog";
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, KeyRound, Rocket, ShieldCheck, X } from "lucide-react";
 
 interface SetupWizardProps {
   onClose: () => void;
+  required?: boolean;
 }
 
-export function SetupWizard({ onClose }: SetupWizardProps) {
+type HealthSnapshot = Awaited<ReturnType<typeof fetchProductionHealthAction>>;
+
+export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
   const [step, setStep] = useState(1);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isProbing, setIsProbing] = useState(false);
+  const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
 
-  // Credentials and configuration form states
-  const [geminiKey, setGeminiKey] = useState('');
-  const [operatingMode, setOperatingMode] = useState('guided');
-  const [githubPat, setGithubPat] = useState('');
-  const [slackWebhook, setSlackWebhook] = useState('');
-  const [gmailPassword, setGmailPassword] = useState('');
+  const [minimaxKey, setMinimaxKey] = useState("");
+  const [operatingMode, setOperatingMode] = useState("Supervisor");
+  const [remoteExecutionEnabled, setRemoteExecutionEnabled] = useState(false);
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [discordEnabled, setDiscordEnabled] = useState(false);
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [dockerAvailable, setDockerAvailable] = useState(false);
+  const [dockerDetail, setDockerDetail] = useState("");
+  const [health, setHealth] = useState<HealthSnapshot | null>(null);
 
-  // Load existing settings if available
   useEffect(() => {
-    async function loadExistingSettings() {
+    async function load() {
       try {
-        const settings = await fetchSettingsAction();
-        if (settings.global_gemini_key) setGeminiKey(settings.global_gemini_key);
+        const [settings, bootstrapHealth] = await Promise.all([
+          fetchSettingsAction(),
+          fetchProductionHealthAction(),
+        ]);
+        if (settings.global_minimax_key) setMinimaxKey(settings.global_minimax_key);
         if (settings.operating_mode) setOperatingMode(settings.operating_mode);
-        if (settings.integrations_github) setGithubPat(settings.integrations_github);
-        if (settings.integrations_slack) setSlackWebhook(settings.integrations_slack);
-        if (settings.integrations_gmail) setGmailPassword(settings.integrations_gmail);
-      } catch (err) {
-        console.error('Failed to pre-load setup settings:', err);
+        setRemoteExecutionEnabled(settings.remote_execution_enabled === "true");
+        setSlackEnabled(settings.channels_slack === "true");
+        setDiscordEnabled(settings.channels_discord === "true");
+        setTelegramEnabled(settings.channels_telegram === "true");
+        setDockerAvailable(settings.docker_available === "true");
+        setDockerDetail(settings.docker_last_probe || "");
+        setHealth(bootstrapHealth);
+      } catch (loadError: any) {
+        setError(loadError?.message || String(loadError));
+      } finally {
+        setLoaded(true);
       }
     }
-    loadExistingSettings();
+    void load();
   }, []);
 
-  const handleFinish = async () => {
-    setIsSubmitting(true);
-    setError('');
-    
-    // Simple validation: Gemini Key is highly recommended
-    if (!geminiKey.trim()) {
-      setError('A Gemini API key is highly recommended to run models and orchestrate agent tasks.');
-      setStep(2); // Jump back to step 2
-      setIsSubmitting(false);
-      return;
-    }
+  const requiredChecks = [
+    { label: "Master access key", ok: health?.auth?.secured === true },
+    { label: "MiniMax API key", ok: minimaxKey.trim().length > 0 || health?.llm?.minimaxConfigured === true },
+    { label: "Live runtime mode", ok: health?.runtime?.mode === "real" },
+  ];
 
+  const canAdvance = () => {
+    if (step === 2) return minimaxKey.trim().length > 0;
+    if (step === 4) return health?.llm?.modelProbe?.ok === true;
+    return true;
+  };
+
+  const handleSaveConfiguration = async () => {
+    setIsSaving(true);
+    setError("");
     try {
-      // Save all settings to the SQLite database
-      await Promise.all([
-        updateSettingAction('global_gemini_key', geminiKey),
-        updateSettingAction('operating_mode', operatingMode),
-        updateSettingAction('integrations_github', githubPat),
-        updateSettingAction('integrations_slack', slackWebhook),
-        updateSettingAction('integrations_gmail', gmailPassword),
-        updateSettingAction('has_completed_wizard', 'true') // Set flag to completed
+      const updates = await Promise.all([
+        updateSettingAction("global_minimax_key", minimaxKey),
+        updateSettingAction("operating_mode", operatingMode),
+        updateSettingAction("llm_provider_supr", "minimax"),
+        updateSettingAction("llm_model_supr", DEFAULT_MINIMAX_MODEL),
+        updateSettingAction("runtime_mode", "real"),
+        updateSettingAction("remote_execution_enabled", remoteExecutionEnabled ? "true" : "false"),
+        updateSettingAction("channels_slack", slackEnabled ? "true" : "false"),
+        updateSettingAction("channels_discord", discordEnabled ? "true" : "false"),
+        updateSettingAction("channels_telegram", telegramEnabled ? "true" : "false"),
       ]);
-
-      // Success, close the modal
-      onClose();
-    } catch (err: any) {
-      setError(`Failed to save setup configuration: ${err.message || err}`);
+      const failed = updates.find((result) => !result?.success && !result?.unchanged);
+      if (failed) {
+        throw new Error(failed.error || "Failed to save bootstrap settings.");
+      }
+      const docker = await probeDockerAvailabilityAction();
+      await updateSettingAction("docker_available", docker.available ? "true" : "false");
+      await updateSettingAction("docker_last_probe", docker.detail || "");
+      setDockerAvailable(docker.available);
+      setDockerDetail(docker.detail || "");
+      setStep(4);
+    } catch (saveError: any) {
+      setError(saveError?.message || String(saveError));
     } finally {
-      setIsSubmitting(false);
+      setIsSaving(false);
     }
   };
 
-  const nextStep = () => setStep(s => s + 1);
-  const prevStep = () => setStep(s => s - 1);
+  const handleProbe = async () => {
+    setIsProbing(true);
+    setError("");
+    try {
+      const snapshot = await fetchProductionHealthAction({ probeModel: true });
+      setHealth(snapshot);
+      if (snapshot.status === "fail") {
+        setError(snapshot.failures?.[0] || "Production probe failed.");
+      }
+    } catch (probeError: any) {
+      setError(probeError?.message || String(probeError));
+    } finally {
+      setIsProbing(false);
+    }
+  };
+
+  const handleFinish = async () => {
+    setIsSaving(true);
+    setError("");
+    try {
+      if (health?.llm?.modelProbe?.ok !== true) {
+        throw new Error("Run the live MiniMax probe before launching Supr.");
+      }
+      const result = await updateSettingAction("has_completed_wizard", "true");
+      if (!result.success) {
+        throw new Error(result.error || "Unable to mark bootstrap as complete.");
+      }
+      onClose();
+    } catch (finishError: any) {
+      setError(finishError?.message || String(finishError));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (!loaded) {
+    return (
+      <div className="fixed inset-0 z-[100] bg-primary/20 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl bg-background neo-border neo-shadow-lg p-8 text-center">
+          <p className="font-headline font-bold uppercase text-primary animate-pulse">Loading production bootstrap...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="fixed inset-0 bg-primary/30 backdrop-blur-sm z-[100] flex items-center justify-center p-4 selection:bg-primary-container selection:text-on-primary-container">
-      <div className="bg-background neo-border neo-shadow-lg w-full max-w-2xl flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <header className="p-6 border-b-4 border-primary flex justify-between items-center bg-primary text-on-primary">
+    <div className="fixed inset-0 z-[100] bg-primary/20 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-3xl max-h-[92vh] overflow-hidden bg-background neo-border neo-shadow-lg flex flex-col">
+        <header className="bg-primary text-on-primary border-b-4 border-primary p-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Sparkles className="w-8 h-8 text-secondary animate-pulse" />
-            <h2 className="font-headline text-2xl font-black uppercase tracking-tight">Supr Setup Wizard</h2>
+            <Rocket className="w-7 h-7 text-secondary" />
+            <div>
+              <h2 className="font-headline text-2xl font-black uppercase tracking-tight">Supr Bootstrap</h2>
+              <p className="font-body text-xs font-bold uppercase tracking-wider">Live runtime setup for first boot</p>
+            </div>
           </div>
-          <button onClick={onClose} className="hover:rotate-90 transition-transform cursor-pointer p-1">
-            <X className="w-6 h-6" />
-          </button>
+          {!required ? (
+            <button onClick={onClose} className="p-1 hover:rotate-90 transition-transform">
+              <X className="w-5 h-5" />
+            </button>
+          ) : null}
         </header>
 
-        {/* Steps Indicator */}
-        <div className="flex border-b-4 border-primary bg-surface-container overflow-x-auto">
-          {[
-            { n: 1, label: 'Welcome', icon: Rocket },
-            { n: 2, label: 'LLM Key', icon: Key },
-            { n: 3, label: 'Integrations', icon: Link2 },
-            { n: 4, label: 'Features Tour', icon: HelpCircle },
-            { n: 5, label: 'Complete', icon: CheckCircle2 }
-          ].map((s) => (
-            <button 
-              type="button"
-              key={s.n}
-              onClick={() => {
-                if (s.n < step || (geminiKey.trim() || s.n === 1)) {
-                  setStep(s.n);
-                }
-              }}
-              className={`flex-1 flex items-center justify-center py-3 px-2 gap-2 border-r-2 border-primary last:border-r-0 transition-colors cursor-pointer text-left focus:outline-none ${
-                step === s.n ? 'bg-primary-container text-on-primary-container font-bold' : 'text-on-surface-variant/50 hover:bg-surface-container-high'
-              }`}
-            >
-              <s.icon className="w-4 h-4 shrink-0" />
-              <span className="font-headline text-[10px] uppercase hidden md:inline">{s.label}</span>
-            </button>
-          ))}
+        <div className="grid grid-cols-4 border-b-4 border-primary bg-surface-container">
+          {["Readiness", "MiniMax", "Runtime", "Health"].map((label, index) => {
+            const current = index + 1;
+            return (
+              <div
+                key={label}
+                className={`px-3 py-3 text-center font-headline text-[11px] font-black uppercase border-r-2 border-primary last:border-r-0 ${
+                  step === current ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant"
+                }`}
+              >
+                {label}
+              </div>
+            );
+          })}
         </div>
 
-        {/* Wizard Form Content */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 space-y-6">
-          {error && (
-            <div className="bg-error-container border-2 border-error p-3 text-xs font-body font-bold text-error uppercase flex items-center gap-2">
-              <span className="material-symbols-outlined text-sm">warning</span>
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
+          {error ? (
+            <div className="bg-error-container border-2 border-error p-3 text-error text-xs font-bold uppercase flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
               <span>{error}</span>
             </div>
-          )}
+          ) : null}
 
-          {/* Step 1: Welcome */}
-          {step === 1 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          {step === 1 ? (
+            <div className="space-y-6">
               <div className="text-center space-y-3">
-                <div className="w-20 h-20 bg-primary-container text-primary rounded-full mx-auto flex items-center justify-center neo-border">
-                  <Rocket className="w-10 h-10" />
+                <div className="w-20 h-20 rounded-full mx-auto bg-primary-container text-primary flex items-center justify-center neo-border">
+                  <ShieldCheck className="w-10 h-10" />
                 </div>
-                <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">Welcome to Supr.</h3>
-                <p className="font-body text-base text-on-surface-variant max-w-md mx-auto font-bold border-l-4 border-tertiary pl-3 text-left">
-                  Configure your workspace, set up your keys, and explore how Supr coordinates your autonomous agent workforce.
+                <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">Supr is live by default.</h3>
+                <p className="font-body text-sm font-bold text-on-surface-variant max-w-2xl mx-auto">
+                  This bootstrap checks the pieces that actually matter for production-style testing: master access, MiniMax, runtime policy, and a real health probe.
                 </p>
               </div>
 
-              <div className="bg-surface-container p-5 neo-border space-y-3">
-                <h4 className="font-headline font-bold text-xs uppercase text-primary border-b border-primary pb-1">Operational Protocol</h4>
-                <p className="font-body text-xs text-on-surface-variant leading-relaxed">
-                  Unlike terminal-only scripts, Supr sits as a centralized orchestration layer that tracks, guides, and audits both <strong>Permanent</strong> and <strong>Temporary</strong> agents as they execute complex roadmaps.
-                </p>
-                <p className="font-body text-xs text-on-surface-variant leading-relaxed">
-                  Let's configure your models first to get the system online!
+              <div className="bg-surface-container neo-border p-5 space-y-3">
+                <h4 className="font-headline font-black uppercase text-sm text-primary">Required checks</h4>
+                <div className="space-y-2">
+                  {requiredChecks.map((check) => (
+                    <div key={check.label} className="flex items-center justify-between gap-3 bg-background border-2 border-primary p-3">
+                      <span className="font-body text-sm font-bold">{check.label}</span>
+                      <span className={`font-headline text-xs font-black uppercase ${check.ok ? "text-tertiary" : "text-error"}`}>
+                        {check.ok ? "ready" : "needs action"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-surface-container neo-border p-5 space-y-2">
+                <h4 className="font-headline font-black uppercase text-sm text-primary">Deploy note</h4>
+                <p className="font-body text-xs text-on-surface-variant">
+                  For VPS testing, set `AUTH_SECRET` in the environment before public exposure. Until then, session signing falls back to the current secure login secret and the health check will warn if it looks too default.
                 </p>
               </div>
             </div>
-          )}
+          ) : null}
 
-          {/* Step 2: LLM Configuration */}
-          {step === 2 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="space-y-2">
-                <label className="font-headline font-bold uppercase text-sm tracking-widest text-primary flex items-center gap-1.5">
-                  <Key className="w-4 h-4" /> Google Gemini API Key
+          {step === 2 ? (
+            <div className="space-y-5">
+              <div>
+                <label className="font-headline font-black uppercase text-sm text-primary flex items-center gap-2">
+                  <KeyRound className="w-4 h-4" />
+                  MiniMax API Key
                 </label>
-                <p className="font-body text-[11px] text-on-surface-variant">Required for model chat, code generation, and central agent orchestration.</p>
-                <input 
-                  type="password"
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKey(e.target.value)}
-                  placeholder="Enter your AIzaSy... API Key"
-                  className="w-full bg-background neo-border p-4 font-mono text-sm focus:outline-none focus:border-tertiary"
-                  required
-                />
+                <p className="font-body text-xs text-on-surface-variant mt-1">
+                  Required for the live Supr runtime. The default production model stays on `{DEFAULT_MINIMAX_MODEL}`.
+                </p>
+              </div>
+              <input
+                type="password"
+                value={minimaxKey}
+                onChange={(event) => setMinimaxKey(event.target.value)}
+                placeholder="Enter your MiniMax key"
+                className="w-full bg-background neo-border p-4 font-mono text-sm focus:outline-none focus:border-tertiary"
+              />
+              <div className="bg-surface-container neo-border p-4">
+                <div className="flex items-center justify-between gap-3 font-mono text-xs">
+                  <span>Default provider</span>
+                  <span className="font-bold">MiniMax</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 font-mono text-xs mt-2">
+                  <span>Default model</span>
+                  <span className="font-bold">{DEFAULT_MINIMAX_MODEL}</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {step === 3 ? (
+            <div className="space-y-5">
+              <div>
+                <h3 className="font-headline font-black uppercase text-lg text-primary">Runtime policy</h3>
+                <p className="font-body text-xs text-on-surface-variant mt-1">
+                  Optional channels can stay disconnected. This step stores the live runtime defaults and lets us probe Docker availability before you deploy to the VPS.
+                </p>
               </div>
 
               <div className="space-y-2">
-                <label className="font-headline font-bold uppercase text-sm tracking-widest text-primary flex items-center gap-1.5">
-                  <Settings className="w-4 h-4" /> Default Operating Autonomy
-                </label>
-                <p className="font-body text-[11px] text-on-surface-variant">Configure how much clearance the agents hold before requesting permissions.</p>
+                <label className="font-headline font-black uppercase text-xs text-primary">Operating mode</label>
                 <select
                   value={operatingMode}
-                  onChange={(e) => setOperatingMode(e.target.value)}
-                  className="w-full bg-surface neo-border p-4 font-headline text-sm uppercase font-bold focus:outline-none focus:border-tertiary"
+                  onChange={(event) => setOperatingMode(event.target.value)}
+                  className="w-full bg-surface neo-border p-4 font-headline text-sm uppercase font-bold focus:outline-none"
                 >
-                  <option value="guided">Guided (Requires User Confirmation)</option>
-                  <option value="supervisor">Supervisor (Escalates Exceptions)</option>
-                  <option value="autonomous">Autonomous (Fully Independent)</option>
+                  <option value="Supervisor">Supervisor</option>
+                  <option value="guided">Guided</option>
+                  <option value="autonomous">Autonomous</option>
                 </select>
               </div>
-            </div>
-          )}
 
-          {/* Step 3: Integrations (Optional) */}
-          {step === 3 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-surface-container p-4 border-2 border-primary border-dashed text-xs text-on-surface-variant">
-                <strong>Live Integrations:</strong> Supr runs live by default with the configured LLM. Optional channels left blank stay unavailable or approval-gated without blocking core agent work.
+              <label className="flex items-center justify-between gap-4 bg-surface-container neo-border p-4">
+                <div>
+                  <p className="font-headline font-black uppercase text-xs text-primary">Remote execution</p>
+                  <p className="font-body text-[11px] text-on-surface-variant">Leave this off for local or early VPS validation unless you already have a remote runner.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={remoteExecutionEnabled}
+                  onChange={(event) => setRemoteExecutionEnabled(event.target.checked)}
+                  className="w-5 h-5 accent-primary"
+                />
+              </label>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[
+                  { label: "Slack", checked: slackEnabled, setter: setSlackEnabled },
+                  { label: "Discord", checked: discordEnabled, setter: setDiscordEnabled },
+                  { label: "Telegram", checked: telegramEnabled, setter: setTelegramEnabled },
+                ].map((channel) => (
+                  <label key={channel.label} className="bg-surface-container neo-border p-4 flex items-center justify-between gap-3">
+                    <span className="font-headline font-black uppercase text-xs text-primary">{channel.label}</span>
+                    <input
+                      type="checkbox"
+                      checked={channel.checked}
+                      onChange={(event) => channel.setter(event.target.checked)}
+                      className="w-5 h-5 accent-primary"
+                    />
+                  </label>
+                ))}
               </div>
 
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <label className="font-headline font-bold uppercase text-xs text-primary">GitHub Personal Access Token (PAT)</label>
-                  <input 
-                    type="password"
-                    value={githubPat}
-                    onChange={(e) => setGithubPat(e.target.value)}
-                    placeholder="ghp_..."
-                    className="w-full bg-background neo-border p-3 font-mono text-xs focus:outline-none focus:border-tertiary"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-headline font-bold uppercase text-xs text-primary">Slack Webhook URL</label>
-                  <input 
-                    type="text"
-                    value={slackWebhook}
-                    onChange={(e) => setSlackWebhook(e.target.value)}
-                    placeholder="https://hooks.slack.com/services/..."
-                    className="w-full bg-background neo-border p-3 font-mono text-xs focus:outline-none focus:border-tertiary"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-headline font-bold uppercase text-xs text-primary">Gmail App Password</label>
-                  <input 
-                    type="password"
-                    value={gmailPassword}
-                    onChange={(e) => setGmailPassword(e.target.value)}
-                    placeholder="abcd efgh ijkl mnop"
-                    className="w-full bg-background neo-border p-3 font-mono text-xs focus:outline-none focus:border-tertiary"
-                  />
-                </div>
+              <div className="bg-background border-2 border-primary p-4">
+                <p className="font-mono text-xs">Docker probe: {dockerAvailable ? "available" : "not available yet"}</p>
+                <p className="font-body text-[11px] text-on-surface-variant mt-1">{dockerDetail || "The wizard will probe Docker when you save this step."}</p>
               </div>
             </div>
-          )}
+          ) : null}
 
-          {/* Step 4: Features Tour */}
-          {step === 4 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <h4 className="font-headline font-black uppercase text-center text-primary text-lg">Explore Core Workspaces</h4>
-              
+          {step === 4 ? (
+            <div className="space-y-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-headline font-black uppercase text-lg text-primary">Production health</h3>
+                  <p className="font-body text-xs text-on-surface-variant mt-1">
+                    Run a real MiniMax probe before launch. Warnings are allowed for local/VPS shakeout; failures should stop the handoff.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleProbe}
+                  disabled={isProbing}
+                  className="bg-primary text-on-primary neo-border px-4 py-2 font-headline font-black uppercase text-xs hover:bg-tertiary hover:text-on-tertiary disabled:opacity-50"
+                >
+                  {isProbing ? "Probing..." : "Run Live Probe"}
+                </button>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="border-2 border-primary p-4 bg-background flex gap-3 shadow-[2px_2px_0px_0px_var(--color-primary)]">
-                  <Rocket className="w-8 h-8 text-secondary shrink-0" />
-                  <div>
-                    <h5 className="font-headline font-bold uppercase text-xs">Dashboard</h5>
-                    <p className="font-body text-[10px] text-on-surface-variant mt-1">Rollup summary of active projects, checklist tasks, and delivery readiness scores.</p>
-                  </div>
+                <div className="bg-surface-container neo-border p-4">
+                  <p className="font-headline font-black uppercase text-xs text-primary">Status</p>
+                  <p className={`mt-2 font-headline font-black uppercase text-2xl ${
+                    health?.status === "fail" ? "text-error" : health?.status === "warn" ? "text-secondary" : "text-tertiary"
+                  }`}>
+                    {health?.status || "unknown"}
+                  </p>
+                  <p className="font-mono text-[10px] uppercase text-on-surface-variant mt-1">{health?.generatedAt || "not checked"}</p>
                 </div>
-
-                <div className="border-2 border-primary p-4 bg-background flex gap-3 shadow-[2px_2px_0px_0px_var(--color-primary)]">
-                  <FileCode2 className="w-8 h-8 text-primary shrink-0" />
-                  <div>
-                    <h5 className="font-headline font-bold uppercase text-xs">Supr-Chat & Sandbox</h5>
-                    <p className="font-body text-[10px] text-on-surface-variant mt-1">Chat directly with the supervisor, upload files, and edit/run code live inside sandboxes.</p>
-                  </div>
+                <div className="bg-surface-container neo-border p-4">
+                  <p className="font-headline font-black uppercase text-xs text-primary">Model probe</p>
+                  <p className="mt-2 font-mono text-xs">
+                    {health?.llm?.modelProbe?.ok
+                      ? `${health.llm.modelProbe.provider} / ${health.llm.modelProbe.model} / ${health.llm.modelProbe.latencyMs}ms`
+                      : "Not run yet"}
+                  </p>
                 </div>
+              </div>
 
-                <div className="border-2 border-primary p-4 bg-background flex gap-3 shadow-[2px_2px_0px_0px_var(--color-primary)]">
-                  <Activity className="w-8 h-8 text-tertiary shrink-0" />
-                  <div>
-                    <h5 className="font-headline font-bold uppercase text-xs">Observance Hub</h5>
-                    <p className="font-body text-[10px] text-on-surface-variant mt-1">Audit log traces of agent delegations, handoffs, reviews, and security gate approvals.</p>
-                  </div>
+              <div className="bg-surface-container neo-border p-4">
+                <p className="font-headline font-black uppercase text-xs text-primary">Warnings</p>
+                <div className="mt-2 space-y-1 font-body text-[11px] text-on-surface-variant">
+                  {(health?.warnings || []).length === 0 ? <p>No warnings.</p> : health?.warnings?.map((warning: string, index: number) => <p key={index}>{warning}</p>)}
                 </div>
+              </div>
 
-                <div className="border-2 border-primary p-4 bg-background flex gap-3 shadow-[2px_2px_0px_0px_var(--color-primary)]">
-                  <Users2 className="w-8 h-8 text-secondary shrink-0" />
-                  <div>
-                    <h5 className="font-headline font-bold uppercase text-xs">Roster (Task Force)</h5>
-                    <p className="font-body text-[10px] text-on-surface-variant mt-1">Register permanent or temporary agents, adjust permission hierarchies, and assign jobs.</p>
-                  </div>
+              <div className="bg-surface-container neo-border p-4">
+                <p className="font-headline font-black uppercase text-xs text-primary">Failures</p>
+                <div className="mt-2 space-y-1 font-body text-[11px]">
+                  {(health?.failures || []).length === 0 ? <p className="text-tertiary">No failures.</p> : health?.failures?.map((failure: string, index: number) => <p key={index} className="text-error">{failure}</p>)}
                 </div>
               </div>
             </div>
-          )}
-
-          {/* Step 5: Complete */}
-          {step === 5 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 text-center">
-              <div className="w-24 h-24 bg-tertiary-container text-tertiary rounded-full mx-auto flex items-center justify-center neo-border">
-                <CheckCircle2 className="w-12 h-12" />
-              </div>
-              
-              <div className="space-y-2">
-                <h3 className="font-headline text-3xl font-black uppercase tracking-tighter text-primary">System Initialized</h3>
-                <p className="font-body text-sm text-on-surface-variant max-w-sm mx-auto font-bold">
-                  All systems configured. Your secure supervisor session is ready to authorize.
-                </p>
-              </div>
-
-              <div className="bg-surface-container p-5 neo-border text-left">
-                <h4 className="font-headline font-bold uppercase text-xs mb-3 border-b border-primary pb-1">Session Configuration</h4>
-                <ul className="space-y-1.5 font-mono text-[10px] text-on-surface-variant">
-                  <li className="flex justify-between"><span>Core LLM:</span> <span className="font-bold">{geminiKey ? 'Gemini 2.0 (Configured)' : 'Missing (Required)'}</span></li>
-                  <li className="flex justify-between"><span>Autonomy Mode:</span> <span className="font-bold uppercase">{operatingMode}</span></li>
-                  <li className="flex justify-between"><span>GitHub PAT:</span> <span className="font-bold uppercase">{githubPat ? 'Active' : 'Unavailable'}</span></li>
-                  <li className="flex justify-between"><span>Slack Webhook:</span> <span className="font-bold uppercase">{slackWebhook ? 'Active' : 'Unavailable'}</span></li>
-                </ul>
-              </div>
-            </div>
-          )}
+          ) : null}
         </div>
 
-        {/* Footer */}
-        <footer className="p-6 border-t-4 border-primary flex justify-between bg-surface bg-surface-container-high">
-          {step > 1 ? (
-            <button 
-              type="button"
-              onClick={prevStep}
-              className="flex items-center gap-2 font-headline font-bold uppercase hover:text-tertiary transition-colors cursor-pointer text-xs focus:outline-none"
-            >
-              <ChevronLeft className="w-4 h-4" /> Back
-            </button>
-          ) : <div />}
+        <footer className="border-t-4 border-primary bg-surface-container p-5 flex items-center justify-between gap-3">
+          <div>
+            {step > 1 ? (
+              <button
+                type="button"
+                onClick={() => setStep((current) => current - 1)}
+                className="flex items-center gap-2 font-headline font-bold uppercase text-xs hover:text-tertiary"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Back
+              </button>
+            ) : null}
+          </div>
 
-          {step < 5 ? (
-            <button 
-              type="button"
-              onClick={nextStep}
-              disabled={step === 2 && !geminiKey.trim()}
-              className="bg-primary text-on-primary neo-border px-6 py-2.5 font-headline font-bold uppercase hover:bg-tertiary hover:text-on-tertiary transition-colors neo-shadow disabled:opacity-50 flex items-center gap-2 cursor-pointer text-xs focus:outline-none"
-            >
-              Next <ChevronRight className="w-4 h-4" />
-            </button>
-          ) : (
-            <button 
-              type="button"
-              onClick={handleFinish}
-              disabled={isSubmitting}
-              className="bg-tertiary text-on-tertiary neo-border px-8 py-3 font-headline font-black uppercase hover:bg-primary hover:text-on-primary transition-all neo-shadow active:translate-x-1 active:translate-y-1 disabled:opacity-50 flex items-center gap-2 cursor-pointer text-xs focus:outline-none"
-            >
-              {isSubmitting ? 'Saving settings...' : 'Launch Workspace'}
-              <Rocket className="w-4 h-4 shrink-0" />
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {step === 3 ? (
+              <button
+                type="button"
+                onClick={handleSaveConfiguration}
+                disabled={isSaving || !minimaxKey.trim()}
+                className="bg-primary text-on-primary neo-border px-5 py-3 font-headline font-black uppercase text-xs hover:bg-tertiary hover:text-on-tertiary disabled:opacity-50"
+              >
+                {isSaving ? "Saving..." : "Save Runtime"}
+              </button>
+            ) : null}
+
+            {step < 4 ? (
+              <button
+                type="button"
+                onClick={() => setStep((current) => current + 1)}
+                disabled={!canAdvance() || isSaving}
+                className="bg-primary text-on-primary neo-border px-5 py-3 font-headline font-black uppercase text-xs hover:bg-tertiary hover:text-on-tertiary disabled:opacity-50 flex items-center gap-2"
+              >
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleFinish}
+                disabled={isSaving || health?.llm?.modelProbe?.ok !== true}
+                className="bg-tertiary text-on-tertiary neo-border px-6 py-3 font-headline font-black uppercase text-xs hover:bg-primary hover:text-on-primary disabled:opacity-50 flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {isSaving ? "Finishing..." : "Launch Supr"}
+              </button>
+            )}
+          </div>
         </footer>
       </div>
     </div>

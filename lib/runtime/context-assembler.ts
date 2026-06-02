@@ -37,7 +37,8 @@ async function findSkillMatches(action: AgentActionRecord): Promise<{ matches: S
     return { matches: [], context: '' };
   }
 
-  const { skillCatalog } = await import('@/src/services/skill-catalog');
+  const skillCatalogModule = '@/src/services/' + 'skill-catalog';
+  const { skillCatalog } = await import(skillCatalogModule);
   const haystack = [
     action.capability,
     action.intent,
