@@ -192,6 +192,49 @@
   --font-body: var(--font-inter), system-ui, sans-serif;
 }
 
+/* Supr Clean (Friendly default)
+   A calmer take on the existing themes: softer borders, rounded corners,
+   subdued shadows, and slightly larger type. Designed to coexist with every
+   existing color palette by lightening the outline token locally. */
+.theme-supr-clean {
+  --border-radius-base: 10px;
+  --border-style-base: 1px solid var(--color-outline-variant);
+  --shadow-base: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-lg-base: 0 12px 32px -12px rgba(15, 23, 42, 0.18);
+  --font-headline: var(--font-inter), system-ui, -apple-system, sans-serif;
+  --font-body: var(--font-inter), system-ui, -apple-system, sans-serif;
+  --crt-glow: 0px 0px 0px transparent;
+  --color-outline-variant-val: #e2e8f0;
+  --color-surface-variant-val: #f1f5f9;
+  --color-surface-container-val: #f8fafc;
+  --color-surface-container-high-val: #eef2f7;
+  --color-surface-container-low-val: #ffffff;
+  --color-surface-container-lowest-val: #ffffff;
+  --color-surface-container-highest-val: #e2e8f0;
+  font-size: 15px;
+}
+.theme-supr-clean * {
+  text-shadow: none;
+}
+.theme-supr-clean body,
+.theme-supr-clean .font-body,
+.theme-supr-clean .font-headline {
+  letter-spacing: -0.005em;
+}
+.theme-supr-clean .neo-shadow {
+  box-shadow: var(--shadow-base);
+}
+.theme-supr-clean .neo-shadow-lg {
+  box-shadow: var(--shadow-lg-base);
+}
+
+/* Global keyboard focus ring (applies to all themes, suppressed in custom-scrollbar). */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-tertiary);
+  outline-offset: 2px;
+  border-radius: var(--border-radius-base);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    15 THREE-TONE COLOR PALETTES
    ───────────────────────────────────────────────────────────────────────────── */

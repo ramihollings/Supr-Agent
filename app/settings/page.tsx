@@ -156,6 +156,8 @@ export default function SettingsPage() {
   const [telegramToken, setTelegramToken] = useState('718290382:AAFlk1829aB...');
   const [telegramChatId, setTelegramChatId] = useState('-100192830182');
   const [twitterHandle, setTwitterHandle] = useState('@supr_orchestrator');
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
+  const [isBackingUp, setIsBackingUp] = useState(false);
 
   // Memory Banks States
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
@@ -464,21 +466,27 @@ export default function SettingsPage() {
   };
 
   const handleExportDatabase = async () => {
-    showToast("Exporting database...");
-    const res = await exportOrganizationAction();
-    if (res.success && res.data) {
-      const blob = new Blob([res.data], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `supr_scrubbed_backup_${Date.now()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast("Scrubbed organization backup downloaded successfully ✓");
-    } else {
-      showToast(res.error || "Failed to export organization backup.");
+    setIsBackingUp(true);
+    showToast("Generating backup\u2026");
+    try {
+      const res = await exportOrganizationAction();
+      if (res.success && res.data) {
+        const blob = new Blob([res.data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `supr_scrubbed_backup_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setLastBackupAt(new Date().toISOString());
+        showToast("Scrubbed organization backup downloaded successfully \u2713");
+      } else {
+        showToast(res.error || "Failed to export organization backup.");
+      }
+    } finally {
+      setIsBackingUp(false);
     }
   };
 
@@ -978,7 +986,7 @@ export default function SettingsPage() {
                   <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">MiniMax API Key</label>
                   <div className="flex gap-2">
                     <input
-                      type="password"
+                      type="password" aria-label="MiniMax API Key"
                       value={globalMinimaxKey}
                       onChange={(e) => setGlobalMinimaxKey(e.target.value)}
                       className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
@@ -996,7 +1004,7 @@ export default function SettingsPage() {
                   <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Gemini API Key</label>
                   <div className="flex gap-2">
                     <input
-                      type="password"
+                      type="password" aria-label="Gemini API Key"
                       value={globalGeminiKey}
                       onChange={(e) => setGlobalGeminiKey(e.target.value)}
                       className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
@@ -1014,7 +1022,7 @@ export default function SettingsPage() {
                     <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">{control.label}</label>
                     <div className="flex gap-2">
                       <input
-                        type="password"
+                        type="password" aria-label={control.label}
                         value={control.value}
                         onChange={(e) => control.setter(e.target.value)}
                         className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
@@ -1067,7 +1075,7 @@ export default function SettingsPage() {
                   <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup API Key</label>
                   <div className="flex gap-2">
                     <input
-                      type="password"
+                      type="password" aria-label="Backup API Key"
                       value={globalBackupKey}
                       onChange={(e) => setGlobalBackupKey(e.target.value)}
                       className="flex-1 bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
@@ -1126,7 +1134,7 @@ export default function SettingsPage() {
                   {suprProvider !== 'default' && (
                     <div className="space-y-2 animate-fadeIn text-[10px]">
                       <input
-                        type="password"
+                        type="password" aria-label="Supr API key"
                         value={suprKey}
                         onChange={(e) => setSuprKey(e.target.value)}
                         placeholder="Custom API Key (leave blank to inherit global)"
@@ -1195,7 +1203,7 @@ export default function SettingsPage() {
                   {codeProvider !== 'default' && (
                     <div className="space-y-2 animate-fadeIn text-[10px]">
                       <input
-                        type="password"
+                        type="password" aria-label="Code agent API key"
                         value={codeKey}
                         onChange={(e) => setCodeKey(e.target.value)}
                         placeholder="Custom API Key (leave blank to inherit global)"
@@ -1264,7 +1272,7 @@ export default function SettingsPage() {
                   {researchProvider !== 'default' && (
                     <div className="space-y-2 animate-fadeIn text-[10px]">
                       <input
-                        type="password"
+                        type="password" aria-label="Research agent API key"
                         value={researchKey}
                         onChange={(e) => setResearchKey(e.target.value)}
                         placeholder="Custom API Key (leave blank to inherit global)"
@@ -1333,7 +1341,7 @@ export default function SettingsPage() {
                   {subProvider !== 'default' && (
                     <div className="space-y-2 animate-fadeIn text-[10px]">
                       <input
-                        type="password"
+                        type="password" aria-label="Sub-agent API key"
                         value={subKey}
                         onChange={(e) => setSubKey(e.target.value)}
                         placeholder="Custom API Key (leave blank to inherit global)"
@@ -1550,7 +1558,7 @@ export default function SettingsPage() {
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Composio API Connection Key</label>
                 <div className="flex gap-2">
                   <input
-                    type="password"
+                    type="password" aria-label="Composio API Connection Key"
                     value={integrationComposio}
                     onChange={(e) => {
                       setIntegrationComposio(e.target.value);
@@ -1572,7 +1580,7 @@ export default function SettingsPage() {
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">GitHub Personal Access Token (PAT)</label>
                 <div className="flex gap-2">
                   <input
-                    type="password"
+                    type="password" aria-label="GitHub Personal Access Token (PAT)"
                     value={integrationGithub}
                     onChange={(e) => {
                       setIntegrationGithub(e.target.value);
@@ -1594,7 +1602,7 @@ export default function SettingsPage() {
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Slack Webhook URL</label>
                 <div className="flex gap-2">
                   <input
-                    type="password"
+                    type="password" aria-label="Slack Webhook URL"
                     value={integrationSlack}
                     onChange={(e) => {
                       setIntegrationSlack(e.target.value);
@@ -1616,7 +1624,7 @@ export default function SettingsPage() {
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Discord Webhook URL</label>
                 <div className="flex gap-2">
                   <input
-                    type="password"
+                    type="password" aria-label="Discord Webhook URL"
                     value={integrationDiscord}
                     onChange={(e) => {
                       setIntegrationDiscord(e.target.value);
@@ -1638,7 +1646,7 @@ export default function SettingsPage() {
                 <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Gmail App Password / Access Code</label>
                 <div className="flex gap-2">
                   <input
-                    type="password"
+                    type="password" aria-label="Gmail App Password / Access Code"
                     value={integrationGmail}
                     onChange={(e) => {
                       setIntegrationGmail(e.target.value);
@@ -1777,7 +1785,7 @@ export default function SettingsPage() {
                   <div>
                     <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Bot Token</label>
                     <input
-                      type="password"
+                      type="password" aria-label="Bot Token"
                       value={telegramToken}
                       onChange={(e) => {
                         setTelegramToken(e.target.value);
@@ -1912,17 +1920,26 @@ export default function SettingsPage() {
               {/* Export Panel */}
               <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
                 <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2 mb-2">
-                  <span className="material-symbols-outlined text-primary">download</span> Export Organization Data
+                  <span className="material-symbols-outlined text-primary">download</span> Back up workspace
                 </h3>
                 <p className="font-body text-xs text-on-surface-variant leading-relaxed">
-                  Generate a complete serialized JSON bundle of your workspace database. Sensitive settings like API keys, passwords, and tokens will be automatically scrubbed with [SCRUBBED] to protect credentials.
+                  Download a complete JSON snapshot of your workspace database. API keys, passwords, and tokens are scrubbed to <code className="font-mono text-[10px]">[SCRUBBED]</code> before the file is generated.
                 </p>
+                {lastBackupAt && (
+                  <p className="font-mono text-[10px] text-on-surface-variant mt-2">
+                    Last backup: {new Date(lastBackupAt).toLocaleString()}
+                  </p>
+                )}
                 <button
                   onClick={handleExportDatabase}
-                  className="mt-auto bg-primary text-on-primary font-bold uppercase text-xs p-4 neo-border hover:bg-tertiary hover:text-on-tertiary hover:neo-shadow transition-all flex items-center justify-center gap-2"
+                  disabled={isBackingUp}
+                  aria-busy={isBackingUp}
+                  className="mt-auto bg-primary text-on-primary font-bold uppercase text-xs p-4 neo-border hover:bg-tertiary hover:text-on-tertiary hover:neo-shadow transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <span className="material-symbols-outlined text-sm">download</span>
-                  Generate & Download Backup
+                  <span className="material-symbols-outlined text-sm" aria-hidden="true">
+                    {isBackingUp ? "hourglass_top" : "download"}
+                  </span>
+                  {isBackingUp ? "Generating backup\u2026" : "Back up now"}
                 </button>
               </div>
 
