@@ -101,6 +101,16 @@ test('non-auth API routes use the shared auth guard', () => {
   }
 });
 
+test('production boot refuses to serve without APP_PASSWORD and AUTH_SECRET', () => {
+  const auth = readFileSync('lib/auth.ts', 'utf8');
+  const proxy = readFileSync('proxy.ts', 'utf8');
+  assert.match(auth, /assertProductionAuthEnvironment/);
+  assert.match(auth, /APP_PASSWORD/);
+  assert.match(auth, /AUTH_SECRET/);
+  assert.match(proxy, /assertProductionAuthEnvironment/);
+  assert.match(proxy, /\b503\b/);
+});
+
 test('proxy keeps SSRF defenses enabled', () => {
   const proxyRoute = readFileSync('app/api/proxy/route.ts', 'utf8');
   assert.match(proxyRoute, /redirect:\s*'manual'/);

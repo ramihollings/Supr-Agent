@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifySessionToken } from '@/lib/session';
 import { telemetry } from '@/lib/telemetry';
+import { assertProductionAuthEnvironment } from '@/lib/auth';
 
 let isAppSecured: boolean | null = null;
 
@@ -86,6 +87,19 @@ export async function proxy(request: NextRequest) {
   if (isAuthRoute || isWebhookRoute || isLoginPage || isStaticFile) {
     const response = NextResponse.next();
     response.headers.set('x-request-id', requestId);
+    return response;
+  }
+
+  // Fail-closed in production: refuse to serve any non-static request until
+  // APP_PASSWORD and AUTH_SECRET are both set.
+  const envCheck = assertProductionAuthEnvironment();
+  if (!envCheck.ok) {
+    const response = new NextResponse(envCheck.reason, { status: 503 });
+    response.headers.set('content-type', 'text/plain; charset=utf-8');
+    response.headers.set('x-request-id', requestId);
+    response.headers.set('retry-after', '60');
+    telemetry.error('proxy.production_env_missing', undefined, { reason: envCheck.reason }, requestId);
+    logRequest(request, requestId, response.status, Date.now() - startedAt);
     return response;
   }
 
