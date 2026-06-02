@@ -770,3 +770,24 @@ test('repo hygiene: leftover debug + tunnel artifacts are not tracked and the .g
   assert.equal(existsSync('test_keys_direct.js'), false, 'test_keys_direct.js must be removed');
   assert.equal(existsSync('cloudflared.exe'), false, 'cloudflared.exe must be removed');
 });
+
+test('OpenAICompatibleProvider picks the right max-tokens field name per provider', () => {
+  const model = readFileSync('lib/providers/model.ts', 'utf8');
+  // The provider class must accept a maxTokensField option and use it as
+  // the dynamic key in the request body (computed key, not a hard-coded
+  // string).
+  assert.match(model, /maxTokensField/);
+  assert.match(model, /\[this\.maxTokensField\]:\s*options\?\.maxOutputTokens\s*\?\?\s*2048/);
+  // Every builder that constructs the class must pass the right field:
+  //   - OpenAI -> max_completion_tokens (new)
+  //   - MiniMax, xAI, OpenRouter, Groq, Mistral, DeepSeek -> max_tokens
+  //   - The user-configured "openai_compat" backup -> max_completion_tokens
+  assert.match(model, /buildMinimax[\s\S]*?maxTokensField:\s*'max_tokens'/);
+  // The preset builder for non-OpenAI providers must opt out of the
+  // new field name.
+  const preset = model.match(/buildOpenAICompatiblePreset\s*=[\s\S]*?\n\s*\}\s*;/) || [];
+  // The same builder, for the 'openai' literal, must opt in.
+  assert.match(model, /provider\s*===\s*'openai'\s*\?\s*'max_completion_tokens'\s*:\s*'max_tokens'/);
+  // The backup (openai_compat) builder defaults to the new field.
+  assert.match(model, /buildBackup[\s\S]*?maxTokensField:\s*'max_completion_tokens'/);
+});

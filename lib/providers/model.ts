@@ -82,12 +82,21 @@ export class OpenAICompatibleProvider extends ModelProvider {
   private apiKey: string;
   private baseUrl: string;
   private defaultModel: string;
+  /**
+   * Some OpenAI-compatible providers (Mistral, DeepSeek, MiniMax) have
+   * not yet adopted `max_completion_tokens` and still expect the
+   * original `max_tokens` field. OpenAI itself, xAI, Groq, and OpenRouter
+   * all accept the new field name. We pick the field name per instance
+   * so the request body matches the target provider's expectations.
+   */
+  private maxTokensField: 'max_completion_tokens' | 'max_tokens';
 
   constructor(config: {
     name?: string;
     apiKey: string;
     baseUrl: string;
     defaultModel: string;
+    maxTokensField?: 'max_completion_tokens' | 'max_tokens';
   }) {
     super();
     this.name = config.name || 'OpenAI-Compatible';
@@ -95,6 +104,7 @@ export class OpenAICompatibleProvider extends ModelProvider {
     this.baseUrl = config.baseUrl.replace(/\/$/, ''); // strip trailing slash
     this.defaultModel = config.defaultModel;
     this.modelName = config.defaultModel;
+    this.maxTokensField = config.maxTokensField ?? 'max_completion_tokens';
   }
 
   private buildMessages(prompt: string, systemInstruction?: string) {
@@ -106,6 +116,15 @@ export class OpenAICompatibleProvider extends ModelProvider {
     return messages;
   }
 
+  private buildRequestBody(prompt: string, options?: ModelOptions, stream = false) {
+    return {
+      model: options?.model || this.defaultModel,
+      messages: this.buildMessages(prompt, options?.systemInstruction),
+      [this.maxTokensField]: options?.maxOutputTokens ?? 2048,
+      ...(stream ? { stream: true } : {}),
+    };
+  }
+
   async generateContent(prompt: string, options?: ModelOptions): Promise<string> {
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -113,11 +132,7 @@ export class OpenAICompatibleProvider extends ModelProvider {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        model: options?.model || this.defaultModel,
-        messages: this.buildMessages(prompt, options?.systemInstruction),
-        max_tokens: options?.maxOutputTokens ?? 2048,
-      }),
+      body: JSON.stringify(this.buildRequestBody(prompt, options)),
     });
 
     if (!response.ok) {
@@ -136,12 +151,7 @@ export class OpenAICompatibleProvider extends ModelProvider {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        model: options?.model || this.defaultModel,
-        messages: this.buildMessages(prompt, options?.systemInstruction),
-        max_tokens: options?.maxOutputTokens ?? 2048,
-        stream: true,
-      }),
+      body: JSON.stringify(this.buildRequestBody(prompt, options, true)),
     });
 
     if (!response.ok || !response.body) {
@@ -317,6 +327,7 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
     apiKey: key,
     baseUrl: 'https://api.minimax.io/v1',
     defaultModel: model,
+    maxTokensField: 'max_tokens',
   });
 
   const buildGemini = (key?: string, model: string = DEFAULT_GEMINI_MODEL) => new GeminiProvider(key, model);
@@ -326,6 +337,7 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
     apiKey: key,
     baseUrl: url,
     defaultModel: model,
+    maxTokensField: 'max_completion_tokens',
   });
 
   const buildOpenAICompatiblePreset = (provider: string, key: string, model?: string | null) => new OpenAICompatibleProvider({
@@ -333,6 +345,11 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
     apiKey: key,
     baseUrl: OPENAI_COMPATIBLE_BASE_URLS[provider],
     defaultModel: model || defaultModelForProvider(provider) || DEFAULT_OPENAI_MODEL,
+    // OpenAI itself has fully adopted max_completion_tokens. The other
+    // OpenAI-compatible providers in our preset list (xAI, OpenRouter,
+    // Groq, Mistral, DeepSeek) still use the legacy field name. Send the
+    // right one per provider so the request body matches the target.
+    maxTokensField: provider === 'openai' ? 'max_completion_tokens' : 'max_tokens',
   });
 
   const providerKeys: Record<string, string | null | undefined> = {
