@@ -928,3 +928,17 @@ test('useSettingsSnapshot hook is the shared source of truth for active model + 
   assert.match(hook, /export function notifySettingsChanged/);
   assert.match(hook, /supr:settings-updated/);
 });
+
+test('DataTable component is a generic neobrutalist list table for shared use', () => {
+  const tbl = readFileSync('components/DataTable.tsx', 'utf8');
+  assert.match(tbl, /export function DataTable/);
+  assert.match(tbl, /export interface DataTableColumn/);
+  assert.match(tbl, /columns\.map/);
+  assert.match(tbl, /rows\.map/);
+  // Empty-state copy so callers don't reinvent it.
+  assert.match(tbl, /emptyMessage/);
+  // Optional row click so callers can render the rows as buttons.
+  assert.match(tbl, /onRowClick/);
+  // Custom renderer per column.
+  assert.match(tbl, /render\?\: \(row: T\) => ReactNode/);
+});
