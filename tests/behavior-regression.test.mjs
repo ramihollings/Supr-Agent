@@ -731,3 +731,29 @@ test('getActiveProvider caches results with a TTL and invalidates on LLM setting
   assert.match(updateBody, /key\.startsWith\(['"]global_['"]\)/);
   assert.match(updateBody, /key === ['"]runtime_mode['"]/);
 });
+
+test('SQLite schema migrations only swallow duplicate-column errors, and FK errors are translated', () => {
+  const init = readFileSync('lib/database/init.ts', 'utf8');
+  const agentActions = readFileSync('lib/runtime/agent-actions.ts', 'utf8');
+
+  // Migration guard: isBenignMigrationError must exist and only allow the
+  // benign codes (duplicate column, duplicate table).
+  assert.match(init, /isBenignMigrationError/);
+  const guard = init.match(/function isBenignMigrationError\([^)]*\): boolean \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(guard, /duplicate column name/);
+  assert.match(guard, /already exists/);
+  // Every ALTER TABLE block must call the guard (not empty catch).
+  const alts = init.match(/ALTER TABLE [A-Za-z_]+ ADD COLUMN [A-Za-z_]+/g) || [];
+  assert.ok(alts.length >= 5, `expected at least 5 ALTER blocks, found ${alts.length}`);
+  for (const _ of alts) {
+    assert.match(init, /isBenignMigrationError\(e\)/);
+  }
+  // The old empty-catch pattern must be gone.
+  assert.doesNotMatch(init, /catch\s*\(\s*e\s*\)\s*\{\s*\}/);
+
+  // FK error translation: createAgentAction must wrap its INSERT in a
+  // try and translate the error via translateDbConstraintError.
+  assert.match(agentActions, /translateDbConstraintError/);
+  const create = agentActions.match(/export async function createAgentAction[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(create, /try\s*\{[\s\S]*INSERT INTO Agent_Actions[\s\S]*?\}\s*catch/);
+});

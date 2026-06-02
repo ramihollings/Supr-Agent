@@ -8,6 +8,26 @@ const isPostgres = !!(process.env.DATABASE_URL || process.env.PGHOST);
 let db: any = null;
 let _initialized = false;
 
+/**
+ * The only SQLite errors we want to swallow during schema migrations are
+ * "duplicate column name" (when a column was added by an older version
+ * of the schema) and "table already exists" (handled by CREATE TABLE IF
+ * NOT EXISTS, but worth including for direct ALTERs that target a
+ * missing table). Anything else -- a locked DB, a permission error,
+ * a syntax error, a real schema mismatch -- is rethrown so the
+ * process fails loud at startup instead of silently shipping a
+ * half-migrated database.
+ */
+function isBenignMigrationError(error: { code?: string; message?: string }): boolean {
+  const code = error?.code;
+  if (code === 'SQLITE_ERROR') {
+    const message = String(error?.message || '').toLowerCase();
+    if (message.includes('duplicate column name')) return true;
+    if (message.includes('table') && message.includes('already exists')) return true;
+  }
+  return false;
+}
+
 function getSqliteDb(): any {
   if (isPostgres) {
     throw new Error('[init.ts] getSqliteDb() called in Postgres mode. This is a bug — check db_client.ts routing.');
@@ -234,11 +254,15 @@ export function initDatabase() {
 
   try {
     dbInstance.exec(`ALTER TABLE Cron_Jobs ADD COLUMN assigned_agent_id TEXT`);
-  } catch (e) {}
+  } catch (e: any) {
+    if (!isBenignMigrationError(e)) throw e;
+  }
 
   try {
     dbInstance.exec(`ALTER TABLE Cron_Jobs ADD COLUMN associated_task_id TEXT`);
-  } catch (e) {}
+  } catch (e: any) {
+    if (!isBenignMigrationError(e)) throw e;
+  }
 
   // 12. Settings Table
   dbInstance.exec(`
@@ -338,19 +362,27 @@ export function initDatabase() {
 
   try {
     dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN pinned INTEGER DEFAULT 0`);
-  } catch (e) {}
+  } catch (e: any) {
+    if (!isBenignMigrationError(e)) throw e;
+  }
 
   try {
     dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN reviewed_at DATETIME`);
-  } catch (e) {}
+  } catch (e: any) {
+    if (!isBenignMigrationError(e)) throw e;
+  }
 
   try {
     dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN reason TEXT`);
-  } catch (e) {}
+  } catch (e: any) {
+    if (!isBenignMigrationError(e)) throw e;
+  }
 
   try {
     dbInstance.exec(`ALTER TABLE Approvals ADD COLUMN agent_action_id TEXT`);
-  } catch (e) {}
+  } catch (e: any) {
+    if (!isBenignMigrationError(e)) throw e;
+  }
 
   // 19. Agent Actions Table - shared runtime queue for all agent/tool work
   dbInstance.exec(`

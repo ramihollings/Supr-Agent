@@ -16,6 +16,22 @@ function safeJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
+/**
+ * Wrap a SQLite write in a friendly error if a foreign key or unique
+ * constraint was violated, instead of returning the raw error message
+ * to the API caller.
+ */
+function translateDbConstraintError(error: any, context: string): Error {
+  const code = error?.code;
+  if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+    return new Error(`${context}: referenced record does not exist (foreign key constraint failed).`);
+  }
+  if (code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    return new Error(`${context}: a record with the same unique key already exists.`);
+  }
+  return error instanceof Error ? error : new Error(`${context}: ${String(error)}`);
+}
+
 function mapRow(row: any): AgentActionRecord {
   return {
     id: row.id,
@@ -100,25 +116,29 @@ export async function emitActionTimelineEvent(
 export async function createAgentAction(input: AgentActionInput): Promise<AgentActionRecord> {
   const actionId = id('act');
   const traceId = id('trace');
-  await dbClient.execute(
-    `INSERT INTO Agent_Actions
-      (id, mission_id, task_id, agent_id, capability, intent, inputs, risk_level, required_permission, status, trace_id, metadata)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      actionId,
-      input.missionId,
-      input.taskId || null,
-      input.agentId,
-      input.capability,
-      input.intent,
-      JSON.stringify(input.inputs || {}),
-      input.riskLevel || 'Low',
-      input.requiredPermission || 'Observe',
-      'draft',
-      traceId,
-      JSON.stringify(input.metadata || {}),
-    ]
-  );
+  try {
+    await dbClient.execute(
+      `INSERT INTO Agent_Actions
+        (id, mission_id, task_id, agent_id, capability, intent, inputs, risk_level, required_permission, status, trace_id, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        actionId,
+        input.missionId,
+        input.taskId || null,
+        input.agentId,
+        input.capability,
+        input.intent,
+        JSON.stringify(input.inputs || {}),
+        input.riskLevel || 'Low',
+        input.requiredPermission || 'Observe',
+        'draft',
+        traceId,
+        JSON.stringify(input.metadata || {}),
+      ]
+    );
+  } catch (error: any) {
+    throw translateDbConstraintError(error, `Cannot create agent action for mission ${input.missionId}`);
+  }
   const action = await getAgentAction(actionId);
   if (!action) throw new Error('Agent action was not persisted.');
   await emitActionTimelineEvent(action, 'agent_action_created', `Queued ${input.capability}`, input.intent);
