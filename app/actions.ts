@@ -29,6 +29,7 @@ import { skillLearningService } from '@/src/services/skill-learning';
 import { probeDockerAvailability } from '@/src/services/execution-environment';
 import { PipelineGates } from '@/src/governance/PipelineGates';
 import { portabilityService } from '@/src/services/portability';
+import { getProductionHealth } from '@/lib/production-health';
 import crypto from 'crypto';
 import {
   ActivityEvent,
@@ -111,6 +112,7 @@ export async function fetchSupervisorConsoleAction(projectId?: string) {
       providerRouteDecisions,
       outboundMessages,
       executionSettings,
+      productionHealth,
     ] = await Promise.all([
       getAgents(),
       missionId ? agentGroupService.listForMission(missionId) : Promise.resolve([]),
@@ -132,6 +134,7 @@ export async function fetchSupervisorConsoleAction(projectId?: string) {
         `SELECT key, value FROM Settings
          WHERE key IN ('runtime_mode','docker_available','remote_execution_enabled','channels_slack','channels_discord','channels_telegram')`,
       ),
+      getProductionHealth(),
     ]);
 
     const executionSettingsMap = Object.fromEntries(executionSettings.map((row: any) => [row.key, row.value]));
@@ -170,6 +173,7 @@ export async function fetchSupervisorConsoleAction(projectId?: string) {
         createdAt: row.created_at,
       })),
       executionSettings: executionSettingsMap,
+      productionHealth,
     };
 
     return { mission, agents, groups, blueprints, memorySections, metrics, guidelinePacks, learnedSkillDrafts, runtimeDecisions };
@@ -186,6 +190,20 @@ export async function fetchSupervisorConsoleAction(projectId?: string) {
       learnedSkillDrafts: [],
       runtimeDecisions: { replanDecisions: [], providerRouteDecisions: [], outboundMessages: [], executionSettings: {} },
       error: error.message,
+    };
+  }
+}
+
+export async function fetchProductionHealthAction(options?: { probeModel?: boolean }) {
+  try {
+    return await getProductionHealth({ probeModel: options?.probeModel === true });
+  } catch (error: any) {
+    return {
+      status: 'fail',
+      generatedAt: new Date().toISOString(),
+      runtime: { mode: 'real', liveOnly: true },
+      failures: [error.message || String(error)],
+      warnings: [],
     };
   }
 }
@@ -1162,6 +1180,7 @@ import { getActiveProvider } from '@/lib/providers/model';
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
 import { DEFAULT_GEMINI_MODEL, OPENAI_COMPATIBLE_BASE_URLS } from '@/lib/providers/catalog';
 import { hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';
+import { stripModelThinking } from '@/lib/runtime/model-json';
 import { createAgentAction as createRuntimeAgentAction, fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
 import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
 import {
@@ -2248,7 +2267,7 @@ async function buildDirectSuprChatResponse(content: string) {
       systemInstruction: 'You are Supr, an agentic workspace coordinator. Answer concise direct chat questions with current context. Do not output JSON.',
       maxOutputTokens: 900,
     });
-    return response.trim() || fallbackStatus();
+    return stripModelThinking(response).trim() || fallbackStatus();
   } catch (error) {
     console.warn('[SuprChat] Direct model response failed:', error);
     return fallbackStatus();

@@ -14,7 +14,7 @@ function safeJson<T>(value: string | null | undefined, fallback: T): T {
 }
 
 async function ensureNativeToolsRegistered() {
-  toolRegistry.ensureNativeToolsRegistered();
+  await toolRegistry.ensureNativeToolsRegistered();
 }
 
 function detectLanguage(artifacts: Array<Record<string, unknown>>) {

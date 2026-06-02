@@ -1,4 +1,6 @@
 import { NextRequest } from 'next/server';
+import crypto from 'node:crypto';
+import { serializeChannelPayload } from '@/lib/channel-logging';
 import dbClient from '@/lib/database/db_client';
 import { getActiveMission } from '@/lib/db';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
@@ -115,7 +117,7 @@ export async function POST(req: NextRequest) {
     await dbClient.execute(
       `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
        VALUES (?, 'telegram', ?, ?, 'ignored', ?, ?)`,
-      [`cmd-${crypto.randomUUID()}`, text || '[telegram disabled]', JSON.stringify(update), chatId || null, 'Telegram channel disabled; core Supr runtime remains live.'],
+      [`cmd-${crypto.randomUUID()}`, text || '[telegram disabled]', serializeChannelPayload(update), chatId || null, 'Telegram channel disabled; core Supr runtime remains live.'],
     );
     return Response.json({ ok: true, ignored: true, response: 'Telegram channel is disabled; Supr runtime remains live.' });
   }
@@ -130,7 +132,7 @@ export async function POST(req: NextRequest) {
     await dbClient.execute(
       `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
        VALUES (?, 'telegram', ?, ?, 'rejected', ?, ?)`,
-      [`cmd-${crypto.randomUUID()}`, text || '[non-text]', JSON.stringify(update), chatId, 'Unauthorized Telegram chat.'],
+      [`cmd-${crypto.randomUUID()}`, text || '[non-text]', serializeChannelPayload(update), chatId, 'Unauthorized Telegram chat.'],
     );
     return Response.json({ ok: false, error: 'Unauthorized Telegram chat.' }, { status: 403 });
   }

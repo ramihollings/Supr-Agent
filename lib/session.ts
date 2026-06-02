@@ -7,6 +7,13 @@ function getAuthSecret() {
   return process.env.AUTH_SECRET || process.env.APP_PASSWORD || process.env.NEXTAUTH_SECRET || 'supr-local-dev-secret';
 }
 
+export function getAuthSecretMetadata() {
+  if (process.env.AUTH_SECRET) return { source: 'AUTH_SECRET', usesDefaultSecret: false };
+  if (process.env.APP_PASSWORD) return { source: 'APP_PASSWORD', usesDefaultSecret: false };
+  if (process.env.NEXTAUTH_SECRET) return { source: 'NEXTAUTH_SECRET', usesDefaultSecret: false };
+  return { source: 'default_dev_secret', usesDefaultSecret: true };
+}
+
 export function base64UrlEncode(bytes: Uint8Array) {
   let binary = '';
   bytes.forEach((byte) => {
@@ -71,7 +78,7 @@ export function setSessionCookie(response: NextResponse, token: string, request:
   const isHttps = request.url.startsWith('https:') || request.headers.get('x-forwarded-proto') === 'https';
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: isHttps,
+    secure: process.env.NODE_ENV === 'production' || isHttps,
     sameSite: 'lax',
     path: '/',
     maxAge: SESSION_TTL_SECONDS,

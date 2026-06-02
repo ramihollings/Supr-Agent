@@ -3,7 +3,6 @@ import "./web-search";
 import "./subagent";
 import "./todo";
 import "./skill-invoker";
-import "./plugin-dispatcher";
 import "./project-flow";
 
 import { toolRegistry } from "../../lib/tools/registry";

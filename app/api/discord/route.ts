@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server';
 import crypto from 'node:crypto';
+import dbClient from '@/lib/database/db_client';
+import { serializeChannelPayload } from '@/lib/channel-logging';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
 import { routeIntakeToProjectFlow } from '@/lib/runtime/project-flow';
 
@@ -17,8 +19,20 @@ async function verifyDiscordToken(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_discord');
-  if (enabled === 'false') {
-    return Response.json({ ok: false, error: 'Discord channel is disabled.' }, { status: 403 });
+  if (enabled !== 'true') {
+    const payload = await req.json().catch(() => ({}));
+    await dbClient.execute(
+      `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
+       VALUES (?, 'discord', ?, ?, 'ignored', ?, ?)`,
+      [
+        `cmd-${crypto.randomUUID()}`,
+        String(payload?.content || payload?.message?.content || '[discord disabled]'),
+        serializeChannelPayload(payload),
+        String(payload?.author?.id || payload?.user?.id || 'discord'),
+        'Discord channel disabled; core Supr runtime remains live.',
+      ],
+    );
+    return Response.json({ ok: true, ignored: true, response: 'Discord channel is disabled; Supr runtime remains live.' });
   }
 
   const verified = await verifyDiscordToken(req);

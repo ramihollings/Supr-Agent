@@ -12,7 +12,7 @@ export interface ToolDefinition<TParams = any, TResult = any> {
 
 class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
-  private nativeRegistrationAttempted = false;
+  private nativeRegistrationPromise: Promise<void> | null = null;
 
   registerTool(tool: ToolDefinition) {
     this.tools.set(tool.name, tool);
@@ -26,14 +26,14 @@ class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
-  ensureNativeToolsRegistered() {
-    this.ensureNativeToolsRegisteredInternal();
+  async ensureNativeToolsRegistered() {
+    await this.ensureNativeToolsRegisteredInternal();
   }
 
   async executeTool(name: string, params: any, agentId?: string, missionId?: string): Promise<any> {
     let tool = this.tools.get(name);
     if (!tool) {
-      this.ensureNativeToolsRegisteredInternal();
+      await this.ensureNativeToolsRegisteredInternal();
       tool = this.tools.get(name);
     }
     if (!tool) throw new Error(`Tool ${name} not found in registry.`);
@@ -60,16 +60,17 @@ class ToolRegistry {
     return tool.execute(parsedParams);
   }
 
-  private ensureNativeToolsRegisteredInternal() {
-    if (this.nativeRegistrationAttempted) return;
-    this.nativeRegistrationAttempted = true;
+  private async ensureNativeToolsRegisteredInternal() {
+    if (this.nativeRegistrationPromise) return this.nativeRegistrationPromise;
     if (process.env.NEXT_PHASE === 'phase-production-build') return;
-    try {
-      const runtimeRequire = eval('require') as NodeRequire;
-      runtimeRequire('../../src/tools/register');
-    } catch (err: any) {
-      console.warn(`[ToolRegistry] Native tool auto-registration unavailable: ${err.message}`);
-    }
+    const nativeToolsModule = '../../src/tools/' + 'register';
+    this.nativeRegistrationPromise = import(nativeToolsModule)
+      .then(() => undefined)
+      .catch((err: any) => {
+        this.nativeRegistrationPromise = null;
+        console.warn(`[ToolRegistry] Native tool auto-registration unavailable: ${err.message}`);
+      });
+    return this.nativeRegistrationPromise;
   }
 }
 

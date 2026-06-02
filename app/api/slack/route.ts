@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { NextRequest } from 'next/server';
+import { serializeChannelPayload } from '@/lib/channel-logging';
 import dbClient from '@/lib/database/db_client';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
 import { routeIntakeToProjectFlow } from '@/lib/runtime/project-flow';
@@ -33,20 +34,36 @@ async function storeRejected(command: string, actorId: string, payload: unknown,
   await dbClient.execute(
     `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
      VALUES (?, 'slack', ?, ?, 'rejected', ?, ?)`,
-    [`cmd-${crypto.randomUUID()}`, command || '[empty]', JSON.stringify(payload), actorId, response],
+    [`cmd-${crypto.randomUUID()}`, command || '[empty]', serializeChannelPayload(payload), actorId, response],
+  );
+}
+
+async function storeIgnored(command: string, actorId: string, payload: unknown, response: string) {
+  await dbClient.execute(
+    `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
+     VALUES (?, 'slack', ?, ?, 'ignored', ?, ?)`,
+    [`cmd-${crypto.randomUUID()}`, command || '[slack disabled]', serializeChannelPayload(payload), actorId || 'slack', response],
   );
 }
 
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_slack');
-  if (enabled === 'false') {
-    return Response.json({ ok: false, error: 'Slack channel is disabled.' }, { status: 403 });
+  if (enabled !== 'true') {
+    const raw = await req.text().catch(() => '');
+    let payload: any = {};
+    try {
+      payload = raw ? JSON.parse(raw) : {};
+    } catch {
+      payload = { raw: raw.slice(0, 500) };
+    }
+    await storeIgnored(String(payload?.text || payload?.event?.text || '[slack disabled]'), String(payload?.user_id || payload?.event?.user || 'slack'), payload, 'Slack channel disabled; core Supr runtime remains live.');
+    return Response.json({ ok: true, ignored: true, response: 'Slack channel is disabled; Supr runtime remains live.' });
   }
 
   const rawBody = await req.text();
   const verified = await verifySlackSignature(req, rawBody);
   if (!verified) {
-    await storeRejected('[unverified]', 'slack', { headers: { retry: req.headers.get('x-slack-retry-num') } }, 'Invalid Slack signature.');
+    await storeRejected('[unverified]', 'slack', { headers: { retry: req.headers.get('x-slack-retry-num'), signature: req.headers.get('x-slack-signature') } }, 'Invalid Slack signature.');
     return Response.json({ ok: false, error: 'Invalid Slack signature.' }, { status: 401 });
   }
 

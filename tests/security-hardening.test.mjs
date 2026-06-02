@@ -36,6 +36,45 @@ test('global auth gate uses the Next proxy convention', () => {
   assert.equal(existsSync('middleware.ts'), false);
 });
 
+test('production health is authenticated and reports live readiness without secrets', () => {
+  const route = readFileSync('app/api/health/production/route.ts', 'utf8');
+  const health = readFileSync('lib/production-health.ts', 'utf8');
+  const session = readFileSync('lib/session.ts', 'utf8');
+  const supervisor = readFileSync('app/supervisor/page.tsx', 'utf8');
+  const actions = readFileSync('app/actions.ts', 'utf8');
+
+  assert.match(route, /requireApiAuth/);
+  assert.match(route, /probeModel/);
+  assert.match(health, /getProductionHealth/);
+  assert.match(health, /minimaxPlaceholder/);
+  assert.match(health, /passwordLooksDefault/);
+  assert.match(health, /No live LLM provider is configured/);
+  assert.match(health, /runModelProbe/);
+  assert.doesNotMatch(health, /console\.log/);
+  assert.match(session, /getAuthSecretMetadata/);
+  assert.match(session, /secure: process\.env\.NODE_ENV === 'production' \|\| isHttps/);
+  assert.match(actions, /fetchProductionHealthAction/);
+  assert.match(supervisor, /Production Health/);
+  assert.match(supervisor, /Probe Live Model/);
+});
+
+test('optional disabled channels are ignored without blocking live runtime and logs are scrubbed', () => {
+  const scrubber = readFileSync('lib/channel-logging.ts', 'utf8');
+  const telegram = readFileSync('app/api/telegram/route.ts', 'utf8');
+  const slack = readFileSync('app/api/slack/route.ts', 'utf8');
+  const discord = readFileSync('app/api/discord/route.ts', 'utf8');
+
+  assert.match(scrubber, /scrubChannelPayload/);
+  assert.match(scrubber, /SCRUBBED/);
+  for (const route of [telegram, slack, discord]) {
+    assert.match(route, /serializeChannelPayload/);
+    assert.match(route, /core Supr runtime remains live/);
+    assert.match(route, /ignored/);
+    assert.match(route, /enabled !== 'true'/);
+  }
+  assert.doesNotMatch(telegram + slack + discord, /JSON\.stringify\(update\)|JSON\.stringify\(payload\)/);
+});
+
 test('theme bootstrap only applies whitelisted appearance classes', () => {
   const layout = readFileSync('app/layout.tsx', 'utf8');
   const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
@@ -219,6 +258,7 @@ test('timeline, approvals, and connector health read runtime state', () => {
 
 test('project flow runtime exposes controls, intake routing, and telegram commands', () => {
   const actions = readFileSync('app/actions.ts', 'utf8');
+  const initSql = readFileSync('lib/database/init.ts', 'utf8');
   const runtime = readFileSync('lib/runtime/project-flow.ts', 'utf8');
   const governance = readFileSync('lib/services/governance.ts', 'utf8');
   const agentActions = readFileSync('lib/runtime/agent-actions.ts', 'utf8');
@@ -257,6 +297,10 @@ test('project flow runtime exposes controls, intake routing, and telegram comman
   assert.match(runtime, /execute_command/);
   assert.match(runtime, /governance_review/);
   assert.match(runtime, /delivery_package/);
+  assert.match(initSql, /Seed\/update default capabilities and bindings/);
+  assert.doesNotMatch(initSql, /if \(capCount\.cnt === 0\)/);
+  assert.match(initSql, /insertCap\.run\('web_search'/);
+  assert.match(initSql, /insertAgentCap\.run\('a2', 'web_search'\)/);
   assert.match(runtime, /runAgentRuntimeAction/);
   assert.doesNotMatch(runtime, /executeConcreteAgentWork/);
   assert.match(runner, /toolRegistry\.executeTool/);
@@ -359,9 +403,10 @@ test('broken harness hardening wires native governance, tools, heartbeat, and pl
   assert.match(governance, /SafetyRuleEngine/);
   assert.match(governance, /RuleEngine/);
   assert.match(registry, /evaluateToolRules\(name, params/);
-  for (const tool of ['shell', 'web-search', 'subagent', 'todo', 'skill-invoker', 'plugin-dispatcher', 'project-flow']) {
+  for (const tool of ['shell', 'web-search', 'subagent', 'todo', 'skill-invoker', 'project-flow']) {
     assert.match(nativeRegister, new RegExp(`\\.\\/${tool}`));
   }
+  assert.doesNotMatch(nativeRegister, /\.\/plugin-dispatcher/);
   assert.match(heartbeat, /runAgentRuntimeAction/);
   assert.doesNotMatch(heartbeat, /heartbeat_task/);
   assert.doesNotMatch(heartbeat, /createAgentAction/);
@@ -639,6 +684,23 @@ test('LLM entry routes delegate to thinking-tolerant structured parsers', () => 
   assert.match(codeRoute, /runAgentRuntimeAction/);
   assert.match(codeRoute, /parseModelJson\(raw\)/);
   assert.match(skillLearning, /stripModelThinking\(raw\)/);
+  assert.match(actions, /stripModelThinking\(response\)\.trim\(\)/);
+});
+
+test('project flow registers native tools before runtime context and records routing failures', () => {
+  const registry = readFileSync('lib/tools/registry.ts', 'utf8');
+  const contextAssembler = readFileSync('lib/runtime/context-assembler.ts', 'utf8');
+  const projectFlow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
+
+  assert.match(registry, /nativeRegistrationPromise: Promise<void> \| null/);
+  assert.match(registry, /await this\.ensureNativeToolsRegisteredInternal\(\)/);
+  assert.match(registry, /const nativeToolsModule = '\.\.\/\.\.\/src\/tools\/' \+ 'register'/);
+  assert.match(registry, /import\(nativeToolsModule\)/);
+  assert.doesNotMatch(registry, /eval\('require'\)/);
+  assert.match(contextAssembler, /await toolRegistry\.ensureNativeToolsRegistered\(\)/);
+  assert.match(projectFlow, /catch \(error: any\)/);
+  assert.match(projectFlow, /UPDATE Channel_Commands SET status = 'failed', response = \?/);
+  assert.match(projectFlow, /Unable to route Project Flow request/);
 });
 
 test('activity log event ids are collision resistant under rapid chat routing', () => {
@@ -703,6 +765,8 @@ test('minimax live runtime defaults do not depend on telegram', () => {
   const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
 
   assert.match(initSql, /insertSetting\.run\('runtime_mode', 'real'\)/);
+  assert.match(initSql, /insertSetting\.run\('channels_slack', 'false'\)/);
+  assert.match(initSql, /insertSetting\.run\('default_channel', 'telegram'\)/);
   assert.match(runtimeMode, /const MODES = new Set<RuntimeMode>\(\['real'\]\)/);
   assert.match(runtimeMode, /return false/);
   assert.match(telegramRoute, /Telegram channel disabled; core Supr runtime remains live/);

@@ -5,6 +5,7 @@ import {
   createAgentBlueprintAction,
   createAgentGroupAction,
   fetchSupervisorConsoleAction,
+  fetchProductionHealthAction,
   promoteLearnedSkillDraftAction,
   rejectLearnedSkillDraftAction,
   requestLearnedSkillReviewAction,
@@ -42,6 +43,7 @@ function SupervisorConsoleContent() {
   const activeAgents = useMemo(() => data.agents.filter((agent: any) => agent.isActive), [data.agents]);
   const supervisor = activeAgents.find((agent: any) => agent.name?.toLowerCase() === "supr") || activeAgents[0];
   const runtimeDecisions = data.runtimeDecisions || { replanDecisions: [], providerRouteDecisions: [], outboundMessages: [], executionSettings: {} };
+  const productionHealth = runtimeDecisions.productionHealth;
 
   const showToast = (message: string) => {
     setToast(message);
@@ -112,6 +114,19 @@ function SupervisorConsoleContent() {
     const res = await rejectLearnedSkillDraftAction(draftId);
     showToast(res.success ? "Learned skill rejected" : res.error || "Reject failed");
     if (res.success) await load();
+  };
+
+  const handleModelProbe = async () => {
+    showToast("Running live model probe");
+    const health = await fetchProductionHealthAction({ probeModel: true });
+    setData((prev: any) => ({
+      ...prev,
+      runtimeDecisions: {
+        ...(prev.runtimeDecisions || {}),
+        productionHealth: health,
+      },
+    }));
+    showToast(health.status === "fail" ? "Production probe failed" : "Production probe complete");
   };
 
   return (
@@ -200,6 +215,73 @@ function SupervisorConsoleContent() {
                         {message.error ? <p className="text-error mt-1">{message.error}</p> : null}
                       </div>
                     ))}
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section className="xl:col-span-3 neo-border bg-background">
+              <div className="bg-surface-variant border-b-4 border-primary p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <h2 className="font-headline font-black uppercase text-xl text-primary flex items-center gap-2">
+                  <span className="material-symbols-outlined">health_and_safety</span>
+                  Production Health
+                </h2>
+                <button
+                  onClick={handleModelProbe}
+                  className="neo-border-sm bg-primary text-on-primary px-3 py-2 font-headline font-black uppercase text-xs hover:bg-tertiary hover:text-on-tertiary transition-colors"
+                >
+                  Probe Live Model
+                </button>
+              </div>
+              <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Status</h3>
+                  <p className={`mt-2 font-headline font-black uppercase text-2xl ${
+                    productionHealth?.status === "fail" ? "text-error" : productionHealth?.status === "warn" ? "text-secondary" : "text-tertiary"
+                  }`}>
+                    {productionHealth?.status || "unknown"}
+                  </p>
+                  <p className="font-mono text-[9px] uppercase text-on-surface-variant mt-1">{productionHealth?.generatedAt || "not checked"}</p>
+                </article>
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">LLM</h3>
+                  <dl className="mt-2 space-y-1 font-mono text-[10px]">
+                    <div className="flex justify-between gap-3"><dt>Provider</dt><dd>{productionHealth?.llm?.activeProvider?.name || "missing"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Model</dt><dd>{productionHealth?.llm?.activeProvider?.model || productionHealth?.llm?.minimaxModel || "unknown"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>MiniMax</dt><dd>{productionHealth?.llm?.minimaxConfigured ? "configured" : "missing"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Probe</dt><dd>{productionHealth?.llm?.modelProbe ? (productionHealth.llm.modelProbe.ok ? "pass" : "fail") : "not run"}</dd></div>
+                  </dl>
+                </article>
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Auth</h3>
+                  <dl className="mt-2 space-y-1 font-mono text-[10px]">
+                    <div className="flex justify-between gap-3"><dt>Secured</dt><dd>{productionHealth?.auth?.secured ? "yes" : "no"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Password</dt><dd>{productionHealth?.auth?.passwordLooksDefault ? "default risk" : "set"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Session</dt><dd>{productionHealth?.auth?.sessionSecretSource || "unknown"}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Cookies</dt><dd>{productionHealth?.auth?.secureCookiePolicy || "unknown"}</dd></div>
+                  </dl>
+                </article>
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Channels</h3>
+                  <div className="mt-2 space-y-1 font-mono text-[10px]">
+                    {(productionHealth?.channels || []).map((channel: any) => (
+                      <div key={channel.id} className="flex justify-between gap-3">
+                        <span>{channel.id}</span>
+                        <span>{channel.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+                <article className="md:col-span-2 bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Warnings</h3>
+                  <div className="mt-2 space-y-1 font-body text-[11px] text-on-surface-variant max-h-32 overflow-y-auto custom-scrollbar">
+                    {(productionHealth?.warnings || []).length === 0 ? <p>No warnings.</p> : productionHealth.warnings.map((item: string, index: number) => <p key={index}>{item}</p>)}
+                  </div>
+                </article>
+                <article className="md:col-span-2 bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm">Failures</h3>
+                  <div className="mt-2 space-y-1 font-body text-[11px] text-on-surface-variant max-h-32 overflow-y-auto custom-scrollbar">
+                    {(productionHealth?.failures || []).length === 0 ? <p>No failures.</p> : productionHealth.failures.map((item: string, index: number) => <p key={index} className="text-error">{item}</p>)}
                   </div>
                 </article>
               </div>

@@ -859,18 +859,28 @@ export async function routeIntakeToProjectFlow(input: {
      VALUES (?, ?, ?, ?, ?, 'received', ?)`,
     [commandId, input.source, mission.id, input.content, JSON.stringify({ attachments: input.attachments || [] }), input.actorId || null],
   );
-  await logFlowEvent(mission.id, 'supr_decision', 'Supr', `Received ${input.source} request`, input.content);
-  const start = await startProjectFlow(mission.id, input.source);
-  const run = start.success ? await runProjectFlow(mission.id) : start;
-  const response = start.success
-    ? `Supr routed this into Project Flow. Flow ${start.flowRunId} started; ${'completed' in run ? run.completed : 0} action(s) completed and ${'gated' in run ? run.gated : 0} need approval.`
-    : start.error || 'Unable to start Project Flow.';
-  await dbClient.execute(`UPDATE Channel_Commands SET status = ?, response = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [
-    start.success ? 'processed' : 'failed',
-    response,
-    commandId,
-  ]);
-  return { success: start.success, commandId, missionId: mission.id, response, flowRunId: start.flowRunId };
+  try {
+    await logFlowEvent(mission.id, 'supr_decision', 'Supr', `Received ${input.source} request`, input.content);
+    const start = await startProjectFlow(mission.id, input.source);
+    const run = start.success ? await runProjectFlow(mission.id) : start;
+    const response = start.success
+      ? `Supr routed this into Project Flow. Flow ${start.flowRunId} started; ${'completed' in run ? run.completed : 0} action(s) completed and ${'gated' in run ? run.gated : 0} need approval.`
+      : start.error || 'Unable to start Project Flow.';
+    await dbClient.execute(`UPDATE Channel_Commands SET status = ?, response = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [
+      start.success ? 'processed' : 'failed',
+      response,
+      commandId,
+    ]);
+    return { success: start.success, commandId, missionId: mission.id, response, flowRunId: start.flowRunId };
+  } catch (error: any) {
+    const response = `Unable to route Project Flow request: ${error.message || String(error)}`;
+    await dbClient.execute(`UPDATE Channel_Commands SET status = 'failed', response = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [
+      response,
+      commandId,
+    ]);
+    await logFlowEvent(mission.id, 'runtime_error', 'Supr', 'Project Flow routing failed', response).catch(() => undefined);
+    return { success: false, commandId, missionId: mission.id, response, error: response };
+  }
 }
 
 export async function parseTelegramCommand(text: string) {

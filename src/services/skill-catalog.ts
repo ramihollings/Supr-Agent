@@ -1,11 +1,8 @@
 import { SkillResolver, type DiscoveredSkill } from "./skill-resolver";
 import { writeIdentityProfile, type AgentIdentityProfile } from "../../lib/agents";
-import path from "node:path";
 
 function defaultSkillSearchPaths() {
-  return [
-    path.join(/* turbopackIgnore: true */ process.cwd(), ".agents", "skills"),
-  ];
+  return [".agents/skills"];
 }
 
 export class SkillCatalog {

@@ -144,7 +144,7 @@ export default function SettingsPage() {
 
   // Channels States
   const [emailEnabled, setEmailEnabled] = useState(true);
-  const [slackEnabled, setSlackEnabled] = useState(true);
+  const [slackEnabled, setSlackEnabled] = useState(false);
   const [discordEnabled, setDiscordEnabled] = useState(false);
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [socialEnabled, setSocialEnabled] = useState(false);

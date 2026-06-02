@@ -745,9 +745,10 @@ export function initDatabase() {
   insertSetting.run('permission_boundary', 'governed');
   insertSetting.run('governance_standards', JSON.stringify(['SOX', 'SOC2']));
   insertSetting.run('channels_email', 'true');
-  insertSetting.run('channels_slack', 'true');
+  insertSetting.run('channels_slack', 'false');
   insertSetting.run('channels_discord', 'false');
   insertSetting.run('channels_telegram', 'false');
+  insertSetting.run('default_channel', 'telegram');
   insertSetting.run('channels_social', 'false');
   
   // Seeding new appearance and integration settings
@@ -945,9 +946,8 @@ export function initDatabase() {
     }
   }
 
-  // Seed default capabilities if table is empty
-  const capCount = dbInstance.prepare(`SELECT COUNT(*) as cnt FROM Capabilities`).get() as { cnt: number };
-  if (capCount.cnt === 0) {
+  // Seed/update default capabilities and bindings so upgraded databases do not miss runtime tools.
+  {
     // Seed default agents first to satisfy foreign key constraints
     const insertAgent = dbInstance.prepare(`
       INSERT OR IGNORE INTO Agents (id, name, role, type, permission_tier, status)
@@ -965,6 +965,7 @@ export function initDatabase() {
     `);
     
     insertCap.run('web_scrape', 'web_scrape', 'direct', 'Observe', 'Low', 'Scrapes text content and HTML from a URL using headless browser.');
+    insertCap.run('web_search', 'web_search', 'direct', 'Observe', 'Low', 'Searches the web using a configured live search provider.');
     insertCap.run('workspace_write_artifact', 'workspace_write_artifact', 'direct', 'Edit', 'Medium', 'Creates or updates project artifacts in the workspace.');
     insertCap.run('workspace_write_file', 'workspace_write_file', 'direct', 'Edit', 'Medium', 'Creates or updates a scoped file in the secure local workspace.');
     insertCap.run('workspace_validate_outputs', 'workspace_validate_outputs', 'direct', 'Draft', 'Low', 'Validates project artifacts, queue state, and readiness evidence.');
@@ -985,6 +986,7 @@ export function initDatabase() {
 
     // Supr (a1) gets all
     insertAgentCap.run('a1', 'web_scrape');
+    insertAgentCap.run('a1', 'web_search');
     insertAgentCap.run('a1', 'workspace_write_artifact');
     insertAgentCap.run('a1', 'workspace_write_file');
     insertAgentCap.run('a1', 'workspace_validate_outputs');
@@ -997,8 +999,9 @@ export function initDatabase() {
     insertAgentCap.run('a1', 'github_create_issue');
     insertAgentCap.run('a1', 'obra_superpowers');
 
-    // Research Agent (a2) gets web_scrape
+    // Research Agent (a2) gets web research tools
     insertAgentCap.run('a2', 'web_scrape');
+    insertAgentCap.run('a2', 'web_search');
 
     // Code Agent (a3) gets workspace writing, sandbox execution, and GitHub issue creation
     insertAgentCap.run('a3', 'workspace_write_artifact');
@@ -1010,6 +1013,7 @@ export function initDatabase() {
     // QA Agent (a4) gets validation, browsing, and sandbox execution
     insertAgentCap.run('a4', 'workspace_validate_outputs');
     insertAgentCap.run('a4', 'web_scrape');
+    insertAgentCap.run('a4', 'web_search');
     insertAgentCap.run('a4', 'execute_command');
     insertAgentCap.run('a4', 'execute_sandboxed_command');
 
