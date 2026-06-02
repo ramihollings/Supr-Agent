@@ -988,6 +988,11 @@ export async function updateSettingAction(key: string, value: string) {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
     `;
     await dbClient.execute(sql, [key, value]);
+    // Any LLM or runtime mode change must invalidate the provider cache
+    // so the next getActiveProvider() call re-resolves from settings.
+    if (key.startsWith('llm_') || key.startsWith('global_') || key === 'runtime_mode' || key === 'operating_mode') {
+      invalidateProviderCache();
+    }
     return { success: true };
   } catch (error) {
     console.error(`Failed to update setting ${key}:`, error);
@@ -1216,7 +1221,7 @@ import path from 'path';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { GoogleGenAI } from '@google/genai';
-import { getActiveProvider } from '@/lib/providers/model';
+import { getActiveProvider, invalidateProviderCache } from '@/lib/providers/model';
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
 import { DEFAULT_GEMINI_MODEL, OPENAI_COMPATIBLE_BASE_URLS } from '@/lib/providers/catalog';
 import { hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';

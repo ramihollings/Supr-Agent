@@ -270,7 +270,31 @@ async function getSetting(key: string): Promise<string | null> {
 // Singleton/factory. Dynamically returns the provider configured for the
 // requested agent role, checking SQLite overrides first, then falling back to
 // global settings, and finally process.env.
+//
+// Performance note: each call resolves 10+ secret settings from SQLite. The
+// dashboard / supr-chat / runtime all call this in tight loops, so we cache
+// the resolved provider per (role, role-override-key) for a short TTL. The
+// cache is keyed by the values that influence provider selection, not the
+// secret values themselves (which never appear in keys).
 // ─────────────────────────────────────────────────────────────────────────────
+
+const PROVIDER_CACHE_TTL_MS = 30_000;
+
+interface ProviderCacheEntry {
+  provider: ModelProvider;
+  expiresAt: number;
+  cacheKey: string;
+}
+const providerCache = new Map<string, ProviderCacheEntry>();
+
+function buildProviderCacheKey(agentRole: string | undefined, roleProvider: string, roleModel: string | null, roleUrl: string | null, hasRoleKey: boolean): string {
+  return `${agentRole ?? 'none'}|${roleProvider}|${roleModel ?? ''}|${roleUrl ?? ''}|${hasRoleKey ? '1' : '0'}`;
+}
+
+export function invalidateProviderCache(): void {
+  providerCache.clear();
+}
+
 export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research' | 'reflection' | 'sub'): Promise<ModelProvider> {
   // 1. Resolve Global Keys (SQLite overrides first, then process.env)
   const minimaxKey  = await getSecretSetting('global_minimax_key', process.env.MINIMAX_API_KEY);
@@ -327,46 +351,75 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
     const roleKey      = await getSecretSetting(`llm_key_${agentRole}`);
     const roleModel    = await getSetting(`llm_model_${agentRole}`);
     const roleUrl      = await getSetting(`llm_url_${agentRole}`);
+    const cacheKey = buildProviderCacheKey(agentRole, roleProvider, roleModel, roleUrl, Boolean(roleKey));
+    const cached = providerCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.provider;
 
+    let provider: ModelProvider;
     if (roleProvider !== 'default') {
       if (roleProvider === 'gemini') {
         const key = roleKey || geminiKey;
-        return buildGemini(key || undefined, roleModel || DEFAULT_GEMINI_MODEL);
-      }
-      if (roleProvider === 'minimax') {
+        provider = buildGemini(key || undefined, roleModel || DEFAULT_GEMINI_MODEL);
+      } else if (roleProvider === 'minimax') {
         const key = roleKey || minimaxKey;
         if (!key) {
           throw new Error(`MiniMax API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
         }
-        return buildMinimax(key, roleModel || DEFAULT_MINIMAX_MODEL);
-      }
-      if (roleProvider === 'anthropic') {
+        provider = buildMinimax(key, roleModel || DEFAULT_MINIMAX_MODEL);
+      } else if (roleProvider === 'anthropic') {
         const key = roleKey || anthropicKey;
         if (!key) {
           throw new Error(`Anthropic API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
         }
-        return new AnthropicProvider(key, roleModel || DEFAULT_ANTHROPIC_MODEL);
-      }
-      if (OPENAI_COMPATIBLE_BASE_URLS[roleProvider]) {
+        provider = new AnthropicProvider(key, roleModel || DEFAULT_ANTHROPIC_MODEL);
+      } else if (OPENAI_COMPATIBLE_BASE_URLS[roleProvider]) {
         const key = roleKey || providerKeys[roleProvider];
         if (!key) {
           throw new Error(`${roleProvider} API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
         }
-        return buildOpenAICompatiblePreset(roleProvider, key, roleModel);
-      }
-      if (roleProvider === 'openai_compat') {
+        provider = buildOpenAICompatiblePreset(roleProvider, key, roleModel);
+      } else if (roleProvider === 'openai_compat') {
         const key = roleKey || backupKey;
         const url = roleUrl || backupUrl;
         const model = roleModel || backupModel;
         if (!key) {
           throw new Error(`OpenAI-compatible API Key is missing for agent role '${agentRole}'. Please configure it in settings.`);
         }
-        return buildBackup(key, url, model, `Custom-${agentRole}`);
+        provider = buildBackup(key, url, model, `Custom-${agentRole}`);
+      } else {
+        throw new Error(`Unknown provider '${roleProvider}' for agent role '${agentRole}'.`);
       }
+    } else {
+      // roleProvider === 'default': fall through to the global chain below.
+      provider = await resolveGlobalProvider(minimaxKey, geminiKey, openaiKey, anthropicKey, backupKey, backupUrl, backupModel, backupName, buildMinimax, buildGemini, buildOpenAICompatiblePreset, buildBackup);
     }
+
+    providerCache.set(cacheKey, { provider, expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS, cacheKey });
+    return provider;
   }
 
-  // 4. Fallback to Global priority chain (MiniMax > Gemini > Backup)
+  // 4. Unscoped (no agentRole): always resolve the global chain.
+  return resolveGlobalProvider(minimaxKey, geminiKey, openaiKey, anthropicKey, backupKey, backupUrl, backupModel, backupName, buildMinimax, buildGemini, buildOpenAICompatiblePreset, buildBackup);
+}
+
+async function resolveGlobalProvider(
+  minimaxKey: string | null | undefined,
+  geminiKey: string | null | undefined,
+  openaiKey: string | null | undefined,
+  anthropicKey: string | null | undefined,
+  backupKey: string | null | undefined,
+  backupUrl: string,
+  backupModel: string,
+  backupName: string,
+  buildMinimax: (key: string, model?: string) => ModelProvider,
+  buildGemini: (key?: string, model?: string) => ModelProvider,
+  buildOpenAICompatiblePreset: (provider: string, key: string, model?: string | null) => ModelProvider,
+  buildBackup: (key: string, url: string, model: string, name: string) => ModelProvider,
+): Promise<ModelProvider> {
+  const cacheKey = `global|minimax=${Boolean(minimaxKey)}|gemini=${Boolean(geminiKey)}|openai=${Boolean(openaiKey)}|anthropic=${Boolean(anthropicKey)}|backup=${Boolean(backupKey)}|model=${backupModel}|name=${backupName}`;
+  const cached = providerCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.provider;
+
   let primary: ModelProvider | null = null;
   if (minimaxKey) {
     primary = buildMinimax(minimaxKey);
@@ -378,12 +431,17 @@ export async function getActiveProvider(agentRole?: 'supr' | 'code' | 'research'
     primary = new AnthropicProvider(anthropicKey, DEFAULT_ANTHROPIC_MODEL);
   }
 
+  let resolved: ModelProvider;
   if (primary && backupKey) {
-    return new FallbackProvider(primary, buildBackup(backupKey, backupUrl, backupModel, backupName));
+    resolved = new FallbackProvider(primary, buildBackup(backupKey, backupUrl, backupModel, backupName));
+  } else if (primary) {
+    resolved = primary;
+  } else if (backupKey) {
+    resolved = buildBackup(backupKey, backupUrl, backupModel, backupName);
+  } else {
+    throw new Error('No model provider is configured. Live runtime requires MiniMax or another configured LLM provider.');
   }
 
-  if (primary) return primary;
-  if (backupKey) return buildBackup(backupKey, backupUrl, backupModel, backupName);
-
-  throw new Error('No model provider is configured. Live runtime requires MiniMax or another configured LLM provider.');
+  providerCache.set(cacheKey, { provider: resolved, expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS, cacheKey });
+  return resolved;
 }

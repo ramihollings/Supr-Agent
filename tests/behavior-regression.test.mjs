@@ -710,3 +710,24 @@ test('PermissionEngine loads native rules via dynamic import, not require()', ()
   assert.match(registry, /import\s*\{[^}]*PermissionEngine[^}]*\}\s*from\s*['"]\.\.\/services\/governance['"]/);
   assert.doesNotMatch(registry, /\brequire\(['"]\.\.\/services\/governance['"]\)/);
 });
+
+test('getActiveProvider caches results with a TTL and invalidates on LLM setting changes', () => {
+  const model = readFileSync('lib/providers/model.ts', 'utf8');
+  const actions = readFileSync('app/actions.ts', 'utf8');
+  assert.match(model, /providerCache/);
+  assert.match(model, /PROVIDER_CACHE_TTL_MS/);
+  assert.match(model, /invalidateProviderCache/);
+  assert.match(actions, /invalidateProviderCache/);
+  // The TTL must be a finite, reasonable value (5s .. 10min).
+  // Allow numeric separators (30_000).
+  const ttlMatch = model.match(/PROVIDER_CACHE_TTL_MS\s*=\s*(\d[\d_]*)/);
+  assert.ok(ttlMatch, 'PROVIDER_CACHE_TTL_MS must be a number literal');
+  const ttl = Number(ttlMatch[1].replace(/_/g, ''));
+  assert.ok(ttl >= 5_000 && ttl <= 600_000, `expected TTL in [5s, 10m], got ${ttl}ms`);
+  // updateSettingAction must invalidate the cache for the LLM/operating
+  // mode key families only, not for every setting.
+  const updateBody = actions.match(/export async function updateSettingAction[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(updateBody, /key\.startsWith\(['"]llm_['"]\)/);
+  assert.match(updateBody, /key\.startsWith\(['"]global_['"]\)/);
+  assert.match(updateBody, /key === ['"]runtime_mode['"]/);
+});
