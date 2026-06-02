@@ -451,12 +451,14 @@ async function resolveGlobalProvider(
   let resolved: ModelProvider;
   if (primary && backupKey) {
     resolved = new FallbackProvider(primary, buildBackup(backupKey, backupUrl, backupModel, backupName));
-  } else if (primary) {
+  } else   if (primary) {
     resolved = primary;
   } else if (backupKey) {
     resolved = buildBackup(backupKey, backupUrl, backupModel, backupName);
   } else {
-    throw new Error('No model provider is configured. Live runtime requires MiniMax or another configured LLM provider.');
+    throw new Error(
+      'No model provider is configured. Set at least one of MINIMAX_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or BACKUP_LLM_API_KEY in the environment, or store the equivalent in Settings.',
+    );
   }
 
   providerCache.set(cacheKey, { provider: resolved, expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS, cacheKey });

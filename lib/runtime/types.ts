@@ -27,7 +27,12 @@ export interface AgentRuntimeRunInput {
   mode?: RuntimeMode;
   budget?: AgentRuntimeBudget;
   cancellationToken?: { aborted?: boolean; reason?: string };
-  resumeCursor?: string | null;
+  /**
+   * @deprecated The runtime is single-shot: a 5-step timeout produces a
+   * failed action and a fresh runtime call has to re-read the action
+   * from the DB to resume. The previous resumeCursor was never
+   * written or read anywhere; removed to keep the type honest.
+   */
 }
 
 export interface AgentRuntimeRunResult {

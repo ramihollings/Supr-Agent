@@ -853,3 +853,15 @@ test('getDb loads all missions in a fixed number of batched queries, not N+1', (
   assert.match(db, /getMissionsBatch\(missions\.map\(\(m\) => m\.id\)\)/);
   assert.doesNotMatch(db, /missions\.map\(m => getMissionById\(m\.id\)\)/);
 });
+
+test('dead field AgentRuntimeRunInput.resumeCursor is removed and the no-provider error is helpful', () => {
+  const types = readFileSync('lib/runtime/types.ts', 'utf8');
+  const model = readFileSync('lib/providers/model.ts', 'utf8');
+  assert.doesNotMatch(types, /\bresumeCursor\b/);
+  // The no-provider error must list the env vars operators can set.
+  const noProvider = model.match(/No model provider is configured[\s\S]{0,400}/);
+  assert.ok(noProvider, 'expected the no-provider error message in model.ts');
+  for (const v of ['MINIMAX_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'BACKUP_LLM_API_KEY']) {
+    assert.match(noProvider[0], new RegExp(v));
+  }
+});
