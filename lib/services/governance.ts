@@ -42,11 +42,16 @@ const TIER_LEVELS: Record<PermissionTier, number> = {
 export class PermissionEngine {
   private static nativeRulesReady = false;
 
-  private static ensureNativeRules() {
+  private static async ensureNativeRules() {
     if (this.nativeRulesReady) return;
     try {
-      const { safetyRuleEngine } = require('../../src/governance/SafetyRuleEngine');
-      const { RuleEngine } = require('../../src/governance/RuleEngine');
+      // Dynamic imports keep the native rule engines out of the initial
+      // module graph (they pull in `node:fs` and `node:path` and would
+      // not be safe to load in the browser bundle). The older require()
+      // pattern is intentionally avoided here because it does not work
+      // under Turbopack's ESM-only module loader.
+      const { safetyRuleEngine } = await import('../../src/governance/SafetyRuleEngine');
+      const { RuleEngine } = await import('../../src/governance/RuleEngine');
       if (!safetyRuleEngine.getRules().some((rule: any) => rule.name === 'ConditionRuleEngine')) {
         safetyRuleEngine.registerRule(new RuleEngine());
       }
@@ -57,10 +62,10 @@ export class PermissionEngine {
     }
   }
 
-  static evaluateToolRules(toolName: string, toolArgs: Record<string, any> = {}): GovernanceDecision {
-    this.ensureNativeRules();
+  static async evaluateToolRules(toolName: string, toolArgs: Record<string, any> = {}): Promise<GovernanceDecision> {
+    await this.ensureNativeRules();
     try {
-      const { safetyRuleEngine } = require('../../src/governance/SafetyRuleEngine');
+      const { safetyRuleEngine } = await import('../../src/governance/SafetyRuleEngine');
       const decision = safetyRuleEngine.check(toolName, toolArgs);
       const reason = decision.reason || decision.approvalPrompt;
       return mapRuleDecision(decision.result, reason) || { status: 'Approved', reason: 'No configured governance rule matched.' };
@@ -107,7 +112,7 @@ export class PermissionEngine {
     capabilityArgs: Record<string, any> = {}
   ): Promise<GovernanceDecision> {
     try {
-      const { getSqliteDb } = require('../database/init');
+      const { getSqliteDb } = await import('../database/init');
       const db = getSqliteDb();
 
       const ruleDecision = this.evaluateToolRules(capabilityName, capabilityArgs);

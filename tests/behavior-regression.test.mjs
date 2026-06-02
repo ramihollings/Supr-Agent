@@ -695,3 +695,18 @@ test('flow run records the configured operating mode, not a hardcoded autonomous
   // helper variable (mode) as a parameter, not a hardcoded literal.
   assert.match(helper, /\[flowRunId, missionId, mode, source\]/);
 });
+
+test('PermissionEngine loads native rules via dynamic import, not require()', () => {
+  const governance = readFileSync('lib/services/governance.ts', 'utf8');
+  // The lazy-load helper and the two call sites must use await import().
+  assert.match(governance, /await import\(['"]\.\.\/\.\.\/src\/governance\/SafetyRuleEngine['"]\)/);
+  assert.match(governance, /await import\(['"]\.\.\/\.\.\/src\/governance\/RuleEngine['"]\)/);
+  assert.match(governance, /await import\(['"]\.\.\/database\/init['"]\)/);
+  // And no require() calls anywhere in governance code (Turbopack rejects them).
+  // Match require( followed by a quote so we don't trip on the word in a comment.
+  assert.doesNotMatch(governance, /\brequire\(\s*['"]/);
+  // ToolRegistry must use a static import of PermissionEngine too.
+  const registry = readFileSync('lib/tools/registry.ts', 'utf8');
+  assert.match(registry, /import\s*\{[^}]*PermissionEngine[^}]*\}\s*from\s*['"]\.\.\/services\/governance['"]/);
+  assert.doesNotMatch(registry, /\brequire\(['"]\.\.\/services\/governance['"]\)/);
+});

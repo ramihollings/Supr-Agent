@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PermissionTier } from '../services/governance';
+import { PermissionEngine, PermissionTier } from '../services/governance';
 
 export interface ToolDefinition<TParams = any, TResult = any> {
   name: string;
@@ -38,8 +38,7 @@ class ToolRegistry {
     }
     if (!tool) throw new Error(`Tool ${name} not found in registry.`);
 
-    const { PermissionEngine } = require('../services/governance');
-    const ruleDecision = PermissionEngine.evaluateToolRules(name, params || {});
+    const ruleDecision = await PermissionEngine.evaluateToolRules(name, params || {});
     if (ruleDecision.status === 'Denied') {
       throw new Error(`Governance Denied: ${ruleDecision.reason}`);
     } else if (ruleDecision.status === 'RequiresApproval') {
