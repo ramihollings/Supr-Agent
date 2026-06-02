@@ -50,8 +50,8 @@ export class PermissionEngine {
       // not be safe to load in the browser bundle). The older require()
       // pattern is intentionally avoided here because it does not work
       // under Turbopack's ESM-only module loader.
-      const { safetyRuleEngine } = await import('../../src/governance/SafetyRuleEngine');
-      const { RuleEngine } = await import('../../src/governance/RuleEngine');
+      const { safetyRuleEngine } = await import('../governance/SafetyRuleEngine');
+      const { RuleEngine } = await import('../governance/RuleEngine');
       if (!safetyRuleEngine.getRules().some((rule: any) => rule.name === 'ConditionRuleEngine')) {
         safetyRuleEngine.registerRule(new RuleEngine());
       }
@@ -65,7 +65,7 @@ export class PermissionEngine {
   static async evaluateToolRules(toolName: string, toolArgs: Record<string, any> = {}): Promise<GovernanceDecision> {
     await this.ensureNativeRules();
     try {
-      const { safetyRuleEngine } = await import('../../src/governance/SafetyRuleEngine');
+      const { safetyRuleEngine } = await import('../governance/SafetyRuleEngine');
       const decision = safetyRuleEngine.check(toolName, toolArgs);
       const reason = decision.reason || decision.approvalPrompt;
       return mapRuleDecision(decision.result, reason) || { status: 'Approved', reason: 'No configured governance rule matched.' };

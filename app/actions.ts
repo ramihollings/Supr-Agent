@@ -20,15 +20,15 @@ import {
   getMissionById
 } from '@/lib/db';
 import { writeIdentityProfile, deleteIdentityProfile } from '@/lib/agents';
-import { agentBlueprintService } from '@/src/services/agent-blueprints';
-import { agentGroupService } from '@/src/services/agent-groups';
-import { guidelinePackService } from '@/src/services/guideline-packs';
-import { memorySectionService } from '@/src/services/memory-sections';
-import { operationalMetrics } from '@/src/services/operational-metrics';
-import { skillLearningService } from '@/src/services/skill-learning';
-import { probeDockerAvailability } from '@/src/services/execution-environment';
-import { PipelineGates } from '@/src/governance/PipelineGates';
-import { portabilityService } from '@/src/services/portability';
+import { agentBlueprintService } from '@/lib/services/agent-blueprints';
+import { agentGroupService } from '@/lib/services/agent-groups';
+import { guidelinePackService } from '@/lib/services/guideline-packs';
+import { memorySectionService } from '@/lib/services/memory-sections';
+import { operationalMetrics } from '@/lib/services/operational-metrics';
+import { skillLearningService } from '@/lib/services/skill-learning';
+import { probeDockerAvailability } from '@/lib/services/execution-environment';
+import { PipelineGates } from '@/lib/governance/PipelineGates';
+import { portabilityService } from '@/lib/services/portability';
 import { getProductionHealth } from '@/lib/production-health';
 import crypto from 'crypto';
 import {

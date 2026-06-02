@@ -5,7 +5,7 @@ import { runAgentRuntimeAction } from './agent-runtime-runner';
 import { getActiveProvider } from '@/lib/providers/model';
 import { getRuntimeMode, hasConfiguredModelProvider } from './runtime-mode';
 import { parseModelJson } from './model-json';
-import { messagingGateway } from '@/src/services/messaging-gateway';
+import { messagingGateway } from '@/lib/services/messaging-gateway';
 import { serializeChannelPayload } from '@/lib/channel-logging';
 import { telemetry } from '@/lib/telemetry';
 import { notifyMissionChanged } from '@/lib/events/bus';

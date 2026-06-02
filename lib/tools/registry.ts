@@ -62,7 +62,7 @@ class ToolRegistry {
   private async ensureNativeToolsRegisteredInternal() {
     if (this.nativeRegistrationPromise) return this.nativeRegistrationPromise;
     if (process.env.NEXT_PHASE === 'phase-production-build') return;
-    const nativeToolsModule = '../../src/tools/' + 'register';
+    const nativeToolsModule = '../tools/' + 'register';
     this.nativeRegistrationPromise = import(nativeToolsModule)
       .then(() => undefined)
       .catch((err: any) => {

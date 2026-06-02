@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -697,8 +697,8 @@ test('flow run records the configured operating mode, not a hardcoded autonomous
 test('PermissionEngine loads native rules via dynamic import, not require()', () => {
   const governance = readFileSync('lib/services/governance.ts', 'utf8');
   // The lazy-load helper and the two call sites must use await import().
-  assert.match(governance, /await import\(['"]\.\.\/\.\.\/src\/governance\/SafetyRuleEngine['"]\)/);
-  assert.match(governance, /await import\(['"]\.\.\/\.\.\/src\/governance\/RuleEngine['"]\)/);
+  assert.match(governance, /await import\(['"]\.\.\/governance\/SafetyRuleEngine['"]\)/);
+  assert.match(governance, /await import\(['"]\.\.\/governance\/RuleEngine['"]\)/);
   assert.match(governance, /await import\(['"]\.\.\/database\/init['"]\)/);
   // And no require() calls anywhere in governance code (Turbopack rejects them).
   // Match require( followed by a quote so we don't trip on the word in a comment.
@@ -870,4 +870,37 @@ test('dead field AgentRuntimeRunInput.resumeCursor is removed and the no-provide
   for (const v of ['MINIMAX_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'BACKUP_LLM_API_KEY']) {
     assert.match(noProvider[0], new RegExp(v));
   }
+});
+
+test('lib and src are consolidated: no @/src/ imports anywhere', () => {
+  // After PR18, every former src/ module lives under lib/ and the
+  // old @/src/ alias is gone. This guards against accidental
+  // re-introduction.
+
+  // No @/src/ imports anywhere in app, components, lib, proxy.ts.
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir)) {
+      const p = join(dir, entry);
+      const stat = statSync(p);
+      if (stat.isDirectory()) {
+        walk(p);
+      } else if (/\.(ts|tsx)$/.test(entry)) {
+        const s = readFileSync(p, 'utf8');
+        if (s.includes("'@/src/")) offenders.push(p);
+      }
+    }
+  };
+  for (const top of ['app', 'components', 'lib']) {
+    if (existsSync(top)) walk(top);
+  }
+  // proxy.ts is a single file at the repo root, not a directory.
+  if (existsSync('proxy.ts')) {
+    const s = readFileSync('proxy.ts', 'utf8');
+    if (s.includes("'@/src/")) offenders.push('proxy.ts');
+  }
+  assert.equal(offenders.length, 0, `unexpected @/src/ imports: ${offenders.join('\n')}`);
+
+  // The src/ directory must not exist.
+  assert.equal(existsSync('src'), false, 'src/ directory should be removed after consolidation');
 });

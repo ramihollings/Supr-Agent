@@ -1,7 +1,7 @@
 import dbClient from '@/lib/database/db_client';
 import { toolRegistry } from '@/lib/tools/registry';
-import { guidelinePackService } from '@/src/services/guideline-packs';
-import { memorySectionService } from '@/src/services/memory-sections';
+import { guidelinePackService } from '@/lib/services/guideline-packs';
+import { memorySectionService } from '@/lib/services/memory-sections';
 import type { AgentActionRecord, AgentContextBundle, SkillMatch } from './types';
 
 function safeJson<T>(value: string | null | undefined, fallback: T): T {
@@ -37,7 +37,7 @@ async function findSkillMatches(action: AgentActionRecord): Promise<{ matches: S
     return { matches: [], context: '' };
   }
 
-  const skillCatalogModule = '@/src/services/' + 'skill-catalog';
+  const skillCatalogModule = '@/lib/services/' + 'skill-catalog';
   const { skillCatalog } = await import(skillCatalogModule);
   const haystack = [
     action.capability,

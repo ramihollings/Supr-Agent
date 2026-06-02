@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/auth";
-import { costTracker } from "@/src/services/cost-tracker";
-import { budgetEngine, BudgetScopeType } from "@/src/services/budget-engine";
+import { costTracker } from "@/lib/services/cost-tracker";
+import { budgetEngine, BudgetScopeType } from "@/lib/services/budget-engine";
 
 export const dynamic = "force-dynamic";
 

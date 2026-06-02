@@ -187,7 +187,7 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
   const runtimeTypes = readFileSync('lib/runtime/types.ts', 'utf8');
   const contextAssembler = readFileSync('lib/runtime/context-assembler.ts', 'utf8');
   const glidepath = readFileSync('lib/runtime/glidepath.ts', 'utf8');
-  const shellTool = readFileSync('src/tools/shell.ts', 'utf8');
+  const shellTool = readFileSync('lib/tools/shell.ts', 'utf8');
   const dashboardModel = readFileSync('lib/dashboard-model.ts', 'utf8');
   const transcriptView = readFileSync('components/RunTranscriptView.tsx', 'utf8');
   const workflowCanvas = readFileSync('components/ProjectWorkflowCanvas.tsx', 'utf8');
@@ -289,7 +289,7 @@ test('project flow runtime exposes controls, intake routing, and telegram comman
   const agentActions = readFileSync('lib/runtime/agent-actions.ts', 'utf8');
   const runner = readFileSync('lib/runtime/agent-runtime-runner.ts', 'utf8');
   const toolAdapters = readFileSync('lib/runtime/tool-adapters.ts', 'utf8');
-  const projectFlowTools = readFileSync('src/tools/project-flow.ts', 'utf8');
+  const projectFlowTools = readFileSync('lib/tools/project-flow.ts', 'utf8');
   const page = readFileSync('app/page.tsx', 'utf8');
   const workflowCanvas = readFileSync('components/ProjectWorkflowCanvas.tsx', 'utf8');
   const chatPage = readFileSync('app/supr-chat/page.tsx', 'utf8');
@@ -413,13 +413,13 @@ test('broken harness hardening wires native governance, tools, heartbeat, and pl
   const initSql = readFileSync('lib/database/init.ts', 'utf8');
   const governance = readFileSync('lib/services/governance.ts', 'utf8');
   const registry = readFileSync('lib/tools/registry.ts', 'utf8');
-  const nativeRegister = readFileSync('src/tools/register.ts', 'utf8');
-  const heartbeat = readFileSync('src/services/heartbeat.ts', 'utf8');
-  const pluginDispatcher = readFileSync('src/tools/plugin-dispatcher.ts', 'utf8');
-  const pluginWorkers = readFileSync('src/services/plugin-workers.ts', 'utf8');
+  const nativeRegister = readFileSync('lib/tools/register.ts', 'utf8');
+  const heartbeat = readFileSync('lib/services/heartbeat.ts', 'utf8');
+  const pluginDispatcher = readFileSync('lib/tools/plugin-dispatcher.ts', 'utf8');
+  const pluginWorkers = readFileSync('lib/services/plugin-workers.ts', 'utf8');
   const eslintConfig = readFileSync('eslint.config.mjs', 'utf8');
   const tsconfig = readFileSync('tsconfig.json', 'utf8');
-  const skillCatalog = readFileSync('src/services/skill-catalog.ts', 'utf8');
+  const skillCatalog = readFileSync('lib/services/skill-catalog.ts', 'utf8');
   const hexProvider = readFileSync('lib/adapters/HexAgentProvider.ts', 'utf8');
   const traceProvider = readFileSync('lib/adapters/TraceProvider.ts', 'utf8');
   const rules = readFileSync('agent-config/governance_rules.json', 'utf8');
@@ -466,11 +466,11 @@ test('supervisor features expose groups, blueprints, editable memory, analytics,
   const actions = readFileSync('app/actions.ts', 'utf8');
   const page = readFileSync('app/supervisor/page.tsx', 'utf8');
   const sidebar = readFileSync('components/Sidebar.tsx', 'utf8');
-  const groups = readFileSync('src/services/agent-groups.ts', 'utf8');
-  const blueprints = readFileSync('src/services/agent-blueprints.ts', 'utf8');
-  const memorySections = readFileSync('src/services/memory-sections.ts', 'utf8');
-  const metrics = readFileSync('src/services/operational-metrics.ts', 'utf8');
-  const guidelines = readFileSync('src/services/guideline-packs.ts', 'utf8');
+  const groups = readFileSync('lib/services/agent-groups.ts', 'utf8');
+  const blueprints = readFileSync('lib/services/agent-blueprints.ts', 'utf8');
+  const memorySections = readFileSync('lib/services/memory-sections.ts', 'utf8');
+  const metrics = readFileSync('lib/services/operational-metrics.ts', 'utf8');
+  const guidelines = readFileSync('lib/services/guideline-packs.ts', 'utf8');
 
   for (const table of ['Agent_Groups', 'Agent_Group_Members', 'Agent_Blueprints', 'Memory_Sections', 'Operational_Metrics', 'Guideline_Packs']) {
     assert.match(initSql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
@@ -507,7 +507,7 @@ test('planned native skills are discoverable by matching folder and skill names'
 
 test('organization import requires server-side overwrite confirmation', () => {
   const actions = readFileSync('app/actions.ts', 'utf8');
-  const portability = readFileSync('src/services/portability.ts', 'utf8');
+  const portability = readFileSync('lib/services/portability.ts', 'utf8');
   const settings = readFileSync('app/settings/page.tsx', 'utf8');
 
   assert.match(actions, /importOrganizationAction\(serializedData: string, options\?: \{ allowOverwrite\?: boolean \}/);
@@ -521,10 +521,10 @@ test('organization import requires server-side overwrite confirmation', () => {
 
 test('live runtime is the only active mode and blocks diagnostic mock successes', () => {
   const runtimeMode = readFileSync('lib/runtime/runtime-mode.ts', 'utf8');
-  const webSearch = readFileSync('src/tools/web-search.ts', 'utf8');
+  const webSearch = readFileSync('lib/tools/web-search.ts', 'utf8');
   const browser = readFileSync('lib/tools/browser.ts', 'utf8');
   const composio = readFileSync('lib/tools/composio.ts', 'utf8');
-  const httpProvider = readFileSync('src/adapters/HttpAgentProvider.ts', 'utf8');
+  const httpProvider = readFileSync('lib/adapters/HttpAgentProvider.ts', 'utf8');
   const modelProvider = readFileSync('lib/providers/model.ts', 'utf8');
 
   assert.match(runtimeMode, /RuntimeMode/);
@@ -544,12 +544,12 @@ test('gap closure wires governed learning, replanning, messaging, streaming, and
   const runner = readFileSync('lib/runtime/agent-runtime-runner.ts', 'utf8');
   const projectFlow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
   const contextAssembler = readFileSync('lib/runtime/context-assembler.ts', 'utf8');
-  const skillLearning = readFileSync('src/services/skill-learning.ts', 'utf8');
-  const messaging = readFileSync('src/services/messaging-gateway.ts', 'utf8');
-  const executionPolicy = readFileSync('src/services/command-execution-policy.ts', 'utf8');
-  const shellTool = readFileSync('src/tools/shell.ts', 'utf8');
+  const skillLearning = readFileSync('lib/services/skill-learning.ts', 'utf8');
+  const messaging = readFileSync('lib/services/messaging-gateway.ts', 'utf8');
+  const executionPolicy = readFileSync('lib/services/command-execution-policy.ts', 'utf8');
+  const shellTool = readFileSync('lib/tools/shell.ts', 'utf8');
   const browser = readFileSync('lib/tools/browser.ts', 'utf8');
-  const agentBlueprints = readFileSync('src/services/agent-blueprints.ts', 'utf8');
+  const agentBlueprints = readFileSync('lib/services/agent-blueprints.ts', 'utf8');
 
   for (const table of ['Learned_Skill_Drafts', 'Outbound_Messages', 'Replan_Decisions', 'Provider_Route_Decisions']) {
     assert.match(initSql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
@@ -614,7 +614,7 @@ test('gap closure wires governed learning, replanning, messaging, streaming, and
   assert.match(executionPolicy, /resolveCommandExecutionPolicy/);
   assert.match(executionPolicy, /docker_available/);
   assert.match(executionPolicy, /remote_disabled/);
-  const executionEnvironment = readFileSync('src/services/execution-environment.ts', 'utf8');
+  const executionEnvironment = readFileSync('lib/services/execution-environment.ts', 'utf8');
   const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
   const actions = readFileSync('app/actions.ts', 'utf8');
   assert.match(executionEnvironment, /probeDockerAvailability/);
@@ -700,7 +700,7 @@ test('LLM entry routes delegate to thinking-tolerant structured parsers', () => 
   const discordRoute = readFileSync('app/api/discord/route.ts', 'utf8');
   const telegramRoute = readFileSync('app/api/telegram/route.ts', 'utf8');
   const actions = readFileSync('app/actions.ts', 'utf8');
-  const skillLearning = readFileSync('src/services/skill-learning.ts', 'utf8');
+  const skillLearning = readFileSync('lib/services/skill-learning.ts', 'utf8');
 
   assert.match(agentRoute, /routeIntakeToProjectFlow/);
   assert.match(slackRoute, /routeIntakeToProjectFlow/);
@@ -721,7 +721,7 @@ test('project flow registers native tools before runtime context and records rou
 
   assert.match(registry, /nativeRegistrationPromise: Promise<void> \| null/);
   assert.match(registry, /await this\.ensureNativeToolsRegisteredInternal\(\)/);
-  assert.match(registry, /const nativeToolsModule = '\.\.\/\.\.\/src\/tools\/' \+ 'register'/);
+  assert.match(registry, /const nativeToolsModule = '\.\.\/tools\/' \+ 'register'/);
   assert.match(registry, /import\(nativeToolsModule\)/);
   assert.doesNotMatch(registry, /eval\('require'\)/);
   assert.match(contextAssembler, /await toolRegistry\.ensureNativeToolsRegistered\(\)/);
@@ -769,7 +769,7 @@ test('research runtime avoids legacy approval timestamps and duplicate log ids',
   const contextAssembler = readFileSync('lib/runtime/context-assembler.ts', 'utf8');
   const researchPage = readFileSync('app/research/page.tsx', 'utf8');
 
-  assert.match(contextAssembler, /const skillCatalogModule = '@\/src\/services\/' \+ 'skill-catalog'/);
+  assert.match(contextAssembler, /const skillCatalogModule = '@\/lib\/services\/' \+ 'skill-catalog'/);
   assert.match(contextAssembler, /await import\(skillCatalogModule\)/);
   assert.doesNotMatch(contextAssembler, /eval\('require'\)/);
   assert.match(contextAssembler, /FROM Approvals WHERE mission_id = \? ORDER BY rowid DESC LIMIT 12/);

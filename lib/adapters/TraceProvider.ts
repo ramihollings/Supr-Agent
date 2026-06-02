@@ -1,4 +1,4 @@
-import { operationalMetrics } from '../../src/services/operational-metrics';
+import { operationalMetrics } from '../services/operational-metrics';
 
 export interface TraceEvent {
   timestamp: string;
