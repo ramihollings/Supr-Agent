@@ -5,26 +5,33 @@ import Image from 'next/image';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState, Suspense } from 'react';
 import { MissionWizard } from './MissionWizard';
+import { useUiMode, UiMode } from './UiModeProvider';
 
 const navItems = [
-  { href: '/', icon: 'dashboard', label: 'Dashboard' },
-  { href: '/supr-chat', icon: 'chat', label: 'Supr-Chat' },
-  { href: '/orchestration', icon: 'visibility', label: 'Observability' },
-  { href: '/supervisor', icon: 'admin_panel_settings', label: 'Supervisor' },
-  { href: '/agents', icon: 'smart_toy', label: 'Agents' },
-  { href: '/reasoning', icon: 'psychology', label: 'Reasoning Core' },
-  { href: '/skills', icon: 'construction', label: 'Skills' },
-  { href: '/cron-jobs', icon: 'schedule', label: 'Cron Jobs' },
+  { href: '/', icon: 'dashboard', label: 'Dashboard', minMode: 'mobile' },
+  { href: '/supr-chat', icon: 'chat', label: 'Supr-Chat', minMode: 'mobile' },
+  { href: '/orchestration', icon: 'visibility', label: 'Observability', minMode: 'pro' },
+  { href: '/supervisor', icon: 'admin_panel_settings', label: 'Supervisor', minMode: 'pro' },
+  { href: '/agents', icon: 'smart_toy', label: 'Agents', minMode: 'pro' },
+  { href: '/skills', icon: 'construction', label: 'Skills', minMode: 'pro' },
+  { href: '/reasoning', icon: 'psychology', label: 'Reasoning Core', minMode: 'dev' },
+  { href: '/cron-jobs', icon: 'schedule', label: 'Cron Jobs', minMode: 'dev' },
 ];
 
 const bottomItems = [
-  { href: '/code', icon: 'code', label: 'Code' },
-  { href: '/research', icon: 'travel_explore', label: 'Research' },
-  { href: '/library', icon: 'folder_open', label: 'Library' },
-  { href: '/mission-packet', icon: 'inventory_2', label: 'Project Report' },
-  { href: '/settings', icon: 'settings', label: 'Settings' },
-  { href: '/help', icon: 'help_outline', label: 'Help' },
+  { href: '/mission-packet', icon: 'inventory_2', label: 'Project Report', minMode: 'pro' },
+  { href: '/code', icon: 'code', label: 'Code', minMode: 'dev' },
+  { href: '/research', icon: 'travel_explore', label: 'Research', minMode: 'dev' },
+  { href: '/library', icon: 'folder_open', label: 'Library', minMode: 'dev' },
+  { href: '/settings', icon: 'settings', label: 'Settings', minMode: 'mobile' },
+  { href: '/help', icon: 'help_outline', label: 'Help', minMode: 'mobile' },
 ];
+
+const modeWeights: Record<UiMode, number> = {
+  mobile: 1,
+  pro: 2,
+  dev: 3,
+};
 
 function SidebarSkeleton() {
   return (
@@ -48,6 +55,7 @@ function SidebarContent() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get('id');
   const [showWizard, setShowWizard] = useState(false);
+  const { mode, setMode } = useUiMode();
 
   const handleNewMission = () => {
     setShowWizard(true);
@@ -60,6 +68,10 @@ function SidebarContent() {
     if (!projectId) return href;
     return `${href}?id=${projectId}`;
   };
+
+  const currentWeight = modeWeights[mode];
+  const filteredNavItems = navItems.filter(item => modeWeights[item.minMode as UiMode] <= currentWeight);
+  const filteredBottomItems = bottomItems.filter(item => modeWeights[item.minMode as UiMode] <= currentWeight);
 
   return (
     <>
@@ -83,7 +95,7 @@ function SidebarContent() {
         </div>
 
         <ul className="flex-1 overflow-y-auto flex flex-col py-4 gap-1 px-2">
-          {navItems.map((item) => (
+          {filteredNavItems.map((item) => (
             <li key={item.href}>
               <Link
                 href={getHrefWithParam(item.href)}
@@ -100,9 +112,9 @@ function SidebarContent() {
           ))}
         </ul>
 
-        <div className="border-t-4 border-primary p-2">
-          <ul className="space-y-1 mb-4">
-            {bottomItems.map((item) => (
+        <div className="border-t-4 border-primary p-2 flex flex-col">
+          <ul className="space-y-1 mb-2">
+            {filteredBottomItems.map((item) => (
               <li key={item.href}>
                 <Link
                   href={getHrefWithParam(item.href)}
@@ -118,11 +130,27 @@ function SidebarContent() {
               </li>
             ))}
           </ul>
+          
+          <div className="flex bg-surface-container border-2 border-primary p-1 mb-2">
+            {(['mobile', 'pro', 'dev'] as UiMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`flex-1 text-[10px] font-bold uppercase py-1.5 transition-colors ${
+                  mode === m 
+                  ? 'bg-primary text-on-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] border-2 border-primary' 
+                  : 'text-on-surface-variant hover:text-primary border-2 border-transparent'
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
 
           <div className="relative">
             <button
               onClick={handleNewMission}
-              className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-3 border-2 border-primary hover:bg-primary-fixed hover:text-primary transition-colors duration-100 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] active:translate-x-1 active:translate-y-1 active:shadow-none mb-2 flex items-center justify-center gap-2"
+              className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-3 border-2 border-primary hover:bg-primary-fixed hover:text-primary transition-colors duration-100 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] active:translate-x-1 active:translate-y-1 active:shadow-none flex items-center justify-center gap-2"
             >
               <span className="material-symbols-outlined text-[18px]">add</span>
               New Project
@@ -141,4 +169,3 @@ export function Sidebar() {
     </Suspense>
   );
 }
-

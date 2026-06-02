@@ -2,6 +2,7 @@ import type {Metadata} from 'next';
 import { Inter, Space_Grotesk } from 'next/font/google';
 import './globals.css';
 import { Sidebar } from '@/components/Sidebar';
+import { UiModeProvider } from '@/components/UiModeProvider';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space-grotesk' });
@@ -32,8 +33,10 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
         `}} />
       </head>
       <body suppressHydrationWarning className="bg-background text-on-background font-body min-h-screen flex flex-col md:flex-row antialiased selection:bg-primary-container selection:text-on-primary-container">
-        <Sidebar />
-        {children}
+        <UiModeProvider>
+          <Sidebar />
+          {children}
+        </UiModeProvider>
       </body>
     </html>
   );

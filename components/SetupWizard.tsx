@@ -60,14 +60,14 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
   }, []);
 
   const requiredChecks = [
-    { label: "Master access key", ok: health?.auth?.secured === true },
-    { label: "MiniMax API key", ok: minimaxKey.trim().length > 0 || health?.llm?.minimaxConfigured === true },
-    { label: "Live runtime mode", ok: health?.runtime?.mode === "real" },
+    { label: "Master access key", ok: (health as any)?.auth?.secured === true },
+    { label: "MiniMax API key", ok: minimaxKey.trim().length > 0 || (health as any)?.llm?.minimaxConfigured === true },
+    { label: "Live runtime mode", ok: (health as any)?.runtime?.mode === "real" },
   ];
 
   const canAdvance = () => {
     if (step === 2) return minimaxKey.trim().length > 0;
-    if (step === 4) return health?.llm?.modelProbe?.ok === true;
+    if (step === 4) return (health as any)?.llm?.modelProbe?.ok === true;
     return true;
   };
 
@@ -123,7 +123,7 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
     setIsSaving(true);
     setError("");
     try {
-      if (health?.llm?.modelProbe?.ok !== true) {
+      if ((health as any)?.llm?.modelProbe?.ok !== true) {
         throw new Error("Run the live MiniMax probe before launching Supr.");
       }
       const result = await updateSettingAction("has_completed_wizard", "true");
@@ -348,8 +348,8 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
                 <div className="bg-surface-container neo-border p-4">
                   <p className="font-headline font-black uppercase text-xs text-primary">Model probe</p>
                   <p className="mt-2 font-mono text-xs">
-                    {health?.llm?.modelProbe?.ok
-                      ? `${health.llm.modelProbe.provider} / ${health.llm.modelProbe.model} / ${health.llm.modelProbe.latencyMs}ms`
+                    {(health as any)?.llm?.modelProbe?.ok
+                      ? `${(health as any).llm.modelProbe.provider} / ${(health as any).llm.modelProbe.model} / ${(health as any).llm.modelProbe.latencyMs}ms`
                       : "Not run yet"}
                   </p>
                 </div>
@@ -412,7 +412,7 @@ export function SetupWizard({ onClose, required = false }: SetupWizardProps) {
               <button
                 type="button"
                 onClick={handleFinish}
-                disabled={isSaving || health?.llm?.modelProbe?.ok !== true}
+                disabled={isSaving || (health as any)?.llm?.modelProbe?.ok !== true}
                 className="bg-tertiary text-on-tertiary neo-border px-6 py-3 font-headline font-black uppercase text-xs hover:bg-primary hover:text-on-primary disabled:opacity-50 flex items-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />

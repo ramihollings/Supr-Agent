@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, Suspense } from 'react';
 import { fetchConnectorHealthAction } from '@/app/actions';
+import { useUiMode } from './UiModeProvider';
 
 function TopNavSkeleton({ title }: { title: string }) {
   return (
@@ -32,6 +33,7 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
   const [showNotificationToast, setShowNotificationToast] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [systemMode, setSystemMode] = useState('Live Runtime');
+  const { mode } = useUiMode();
 
   useEffect(() => {
     fetchConnectorHealthAction().then((connectors) => {
@@ -123,19 +125,33 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
         {isMobileMenuOpen && (
           <div className="absolute top-full left-0 right-0 bg-background border-b-4 border-primary p-4 z-50 neo-shadow-lg">
              <ul className="flex flex-col gap-2">
-                <li><Link href={getHrefWithParam('/')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Dashboard</Link></li>
-                <li><Link href={getHrefWithParam('/supr-chat')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Supr-Chat</Link></li>
-                <li><Link href={getHrefWithParam('/orchestration')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Observability</Link></li>
-                <li><Link href={getHrefWithParam('/supervisor')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Supervisor</Link></li>
-                <li><Link href={getHrefWithParam('/agents')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Agents</Link></li>
-                <li><Link href={getHrefWithParam('/reasoning')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Reasoning Core</Link></li>
-                <li><Link href={getHrefWithParam('/skills')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Skills</Link></li>
-                <li><Link href={getHrefWithParam('/cron-jobs')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary">Cron Jobs</Link></li>
-                <li className="border-t-2 border-outline-variant pt-2 mt-2"><Link href={getHrefWithParam('/code')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary text-sm">Code</Link></li>
-                <li><Link href={getHrefWithParam('/research')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary text-sm">Research</Link></li>
-                <li><Link href={getHrefWithParam('/library')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary text-sm">Library</Link></li>
-                <li><Link href={getHrefWithParam('/mission-packet')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary text-sm">Project Report</Link></li>
-                <li><Link href={getHrefWithParam('/help')} onClick={() => setIsMobileMenuOpen(false)} className="block py-2 font-headline font-bold uppercase hover:text-tertiary text-sm">Help</Link></li>
+                {[
+                  { href: '/', label: 'Dashboard', minMode: 'mobile' },
+                  { href: '/supr-chat', label: 'Supr-Chat', minMode: 'mobile' },
+                  { href: '/orchestration', label: 'Observability', minMode: 'pro' },
+                  { href: '/supervisor', label: 'Supervisor', minMode: 'pro' },
+                  { href: '/agents', label: 'Agents', minMode: 'pro' },
+                  { href: '/reasoning', label: 'Reasoning Core', minMode: 'dev' },
+                  { href: '/skills', label: 'Skills', minMode: 'pro' },
+                  { href: '/cron-jobs', label: 'Cron Jobs', minMode: 'dev' },
+                  { href: '/code', label: 'Code', minMode: 'dev', isBottom: true },
+                  { href: '/research', label: 'Research', minMode: 'dev', isBottom: true },
+                  { href: '/library', label: 'Library', minMode: 'dev', isBottom: true },
+                  { href: '/mission-packet', label: 'Project Report', minMode: 'pro', isBottom: true },
+                  { href: '/help', label: 'Help', minMode: 'mobile', isBottom: true },
+                ].filter(item => {
+                   const weights: Record<string, number> = { mobile: 1, pro: 2, dev: 3 };
+                   return weights[item.minMode] <= weights[mode];
+                }).map((item, idx, arr) => {
+                   const isFirstBottom = item.isBottom && !arr[idx - 1]?.isBottom;
+                   return (
+                     <li key={item.href} className={isFirstBottom ? "border-t-2 border-outline-variant pt-2 mt-2" : ""}>
+                       <Link href={getHrefWithParam(item.href)} onClick={() => setIsMobileMenuOpen(false)} className={`block py-2 font-headline font-bold uppercase hover:text-tertiary ${item.isBottom ? 'text-sm' : ''}`}>
+                         {item.label}
+                       </Link>
+                     </li>
+                   );
+                })}
              </ul>
           </div>
         )}
@@ -151,4 +167,3 @@ export function TopNav({ title = "Dashboard", children }: { title?: string, chil
     </Suspense>
   );
 }
-
