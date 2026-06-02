@@ -204,7 +204,9 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
   assert.match(runtime, /humanGateRequired/);
   assert.match(runner, /ModelToolResponse/);
   assert.match(runner, /toolRegistry\.executeTool/);
-  assert.match(runner, /Live runtime requires MiniMax or another configured model provider/);
+  // The runtime no longer pre-checks hasConfiguredModelProvider; the
+  // new "no model provider" error is emitted by getActiveProvider()
+  // and lists the env vars.
   assert.match(runner, /parseModelJson\(raw\)/);
   assert.match(runner, /Tool_Invocations/);
   assert.match(runner, /runtime_context/);
@@ -533,7 +535,7 @@ test('live runtime is the only active mode and blocks diagnostic mock successes'
   assert.doesNotMatch(browser, /mock diagnostic|isMockAllowed/);
   assert.match(composio, /requires COMPOSIO_API_KEY in live runtime/);
   assert.match(httpProvider, /EXTERNAL_AGENT_ENDPOINT must point to a live provider in real runtime mode/);
-  assert.match(modelProvider, /Live runtime requires MiniMax or another configured LLM provider/);
+  assert.match(modelProvider, /No model provider is configured\. Set at least one of MINIMAX_API_KEY/);
 });
 
 test('gap closure wires governed learning, replanning, messaging, streaming, and execution policy', () => {

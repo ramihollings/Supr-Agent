@@ -97,7 +97,7 @@ export async function getMissionsBatch(missionIds: string[]): Promise<Mission[]>
       status: t.status,
     }));
 
-    let phases: Phase[] = dbTasks.length > 0 ? derivePhasesFromTaskStatuses(dbTasks).toPhaseList() : [];
+    let phases: Phase[] = dbTasks.length > 0 ? phaseListFromStatuses(phaseStatusFromTaskStatuses(dbTasks)) : [];
     if (phases.length === 0) {
       const gp = glideById.get(row.id);
       if (gp) {
@@ -156,8 +156,8 @@ export async function getMissionsBatch(missionIds: string[]): Promise<Mission[]>
       })),
       artifacts: artifacts.map((a: any) => ({
         id: a.id,
+        filename: a.title,
         type: a.type,
-        title: a.title,
         content: a.content,
       })),
       memoryItems: memoryItems.map((m: any) => ({
@@ -215,12 +215,15 @@ export function phaseStatusFromTaskStatuses(tasks: Array<{ phase_id: string | nu
     const phase = (task.phase_id || '').trim();
     if (!result.has(phase)) continue;
     const status = (task.status || '').toLowerCase();
-    const current = result.get(phase)!;
-    if (current === 'Active') continue;
-    if (status === 'completed') {
-      result.set(phase, current === 'Active' ? 'Active' : 'Done');
-    } else if (status === 'failed' || status === 'pending' || status === 'running' || status === 'in_progress') {
+    if (status === 'failed' || status === 'pending' || status === 'running' || status === 'in_progress') {
+      // Mark this phase Active as soon as any task in it is in flight.
       result.set(phase, 'Active');
+    } else if (status === 'completed') {
+      // A task is only Done after the phase is no longer Active. We
+      // check the current value via the Map and skip if Active is set.
+      if (result.get(phase) !== 'Active') {
+        result.set(phase, 'Done');
+      }
     }
   }
   return result;

@@ -7,7 +7,7 @@ import { providerRouteDecisionService } from '@/src/services/provider-route-deci
 import { skillLearningService } from '@/src/services/skill-learning';
 import { executeAgentAction, getAgentAction } from './agent-actions';
 import { assembleAgentContext } from './context-assembler';
-import { getRuntimeMode, hasConfiguredModelProvider } from './runtime-mode';
+import { getRuntimeMode } from './runtime-mode';
 import { parseModelJson } from './model-json';
 import type {
   AgentActionRecord,
@@ -320,10 +320,9 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
         if (deadline && Date.now() >= deadline) {
           throw new Error(`Runtime timeout exceeded after ${Date.now() - startedAt}ms.`);
         }
-        let response: ModelToolResponse;
-        if (!await hasConfiguredModelProvider()) {
-          throw new Error('Live runtime requires MiniMax or another configured model provider.');
-        }
+        // Note: getModelResponse() already calls getActiveProvider(), which
+        // throws a helpful "No model provider is configured..." error if
+        // no key is set. No need to pre-check here.
         const raw = await withRuntimeTimeout(getModelResponse({
           action,
           context,
@@ -333,7 +332,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           deadline,
           transcriptIds,
         }), deadline, 'model response');
-        response = parseModelToolResponse(raw);
+        const response = parseModelToolResponse(raw);
 
         if (response.type === 'invalid') {
           transcriptIds.push(await recordStep({
