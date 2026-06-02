@@ -1,5 +1,22 @@
 import type { NextConfig } from 'next';
 
+const cspDirectives = [
+  "default-src 'self'",
+  // Next.js requires inline styles for hydration and Tailwind utilities.
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  // Material Symbols + Space Grotesk / Inter fonts.
+  "font-src 'self' https://fonts.gstatic.com data:",
+  // Next.js needs unsafe-eval in dev for HMR. Keep it on; refine if HMR is off.
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self' https://api.minimax.io https://generativelanguage.googleapis.com",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "upgrade-insecure-requests",
+].join('; ');
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   turbopack: {},
@@ -21,6 +38,22 @@ const nextConfig: NextConfig = {
     '*': ['./next.config.ts'],
   },
   transpilePackages: ['motion'],
+  async headers() {
+    const securityHeaders = [
+      { key: 'Content-Security-Policy', value: cspDirectives },
+      { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+      { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+    ];
+    return [
+      {
+        source: '/:path*',
+        headers: securityHeaders,
+      },
+    ];
+  },
   webpack: (config, { dev }) => {
     if (dev && process.env.DISABLE_HMR === 'true') {
       config.watchOptions = {

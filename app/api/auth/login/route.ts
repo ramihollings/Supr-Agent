@@ -6,6 +6,7 @@ import {
   upgradeStoredPasswordIfNeeded,
   verifyPassword,
 } from '@/lib/auth';
+import { telemetry } from '@/lib/telemetry';
 
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 10;
@@ -44,10 +45,11 @@ export async function POST(request: Request) {
       await upgradeStoredPasswordIfNeeded(password, expectedPassword);
       const response = NextResponse.json({ success: true, message: 'Authentication successful' });
       setSessionCookie(response, await createSessionToken(), request);
-
+      telemetry.info('auth.login', { actor: actorKey(request) });
       return response;
     }
 
+    telemetry.warn('auth.login.failed', { actor: actorKey(request) });
     return NextResponse.json({ success: false, error: 'Invalid password' }, { status: 401 });
   } catch (error) {
     console.error("Login verification failed:", error);

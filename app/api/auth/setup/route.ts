@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import dbClient from '@/lib/database/db_client';
 import { createSessionToken, hashPassword, setSessionCookie } from '@/lib/auth';
+import { telemetry } from '@/lib/telemetry';
 
 const SETUP_WINDOW_MS = 15 * 60 * 1000;
 const SETUP_MAX_ATTEMPTS = 5;
@@ -53,12 +54,14 @@ export async function POST(request: Request) {
 
     // Create session response
     const response = NextResponse.json({ success: true, message: 'Authentication successful' });
-    
+
     setSessionCookie(response, await createSessionToken(), request);
+    telemetry.info('auth.setup', { actor: actorKey(request) });
 
     return response;
   } catch (error) {
     console.error("Failed to secure application:", error);
+    telemetry.error('auth.setup.failed', error, { actor: actorKey(request) });
     return NextResponse.json({ success: false, error: 'An unexpected error occurred' }, { status: 500 });
   }
 }
