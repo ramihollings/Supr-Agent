@@ -608,8 +608,19 @@ test('supervisor dashboard exposes consolidated object, transcript, artifact, an
 
   const dashboard = readFileSync('app/page.tsx', 'utf8');
   assert.match(dashboard, /DashboardObjectDrawer/);
-  assert.match(dashboard, /RunTranscriptView/);
-  assert.match(dashboard, /RuntimeConsoleStrip/);
+  assert.match(dashboard, /OperationsPanel/);
+  assert.match(dashboard, /ObjectsRail/);
+  assert.match(dashboard, /WorkPanel/);
+
+  const operationsPanel = readFileSync('components/OperationsPanel.tsx', 'utf8');
+  assert.match(operationsPanel, /RuntimeConsoleStrip/);
+
+  const workPanel = readFileSync('components/WorkPanel.tsx', 'utf8');
+  assert.match(workPanel, /ProjectWorkflowCanvas/);
+  assert.match(workPanel, /RunTranscriptView/);
+
+  const objectsRail = readFileSync('components/ObjectsRail.tsx', 'utf8');
+  assert.match(objectsRail, /dashboardObjects/);
 
   const library = readFileSync('app/library/page.tsx', 'utf8');
   assert.match(library, /ArtifactSourcePreview/);
