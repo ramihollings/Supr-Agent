@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { DashboardObject, ObjectAction, RunEvent } from '@/types';
+import { useFocusTrap } from '@/lib/hooks/useFocusTrap';
 
 const actionStyles: Record<NonNullable<ObjectAction['risk']>, string> = {
   low: 'bg-background text-primary hover:bg-surface-container',
@@ -18,6 +19,8 @@ type DashboardObjectDrawerProps = {
 
 export function DashboardObjectDrawer({ object, timeline = [], onClose, onAction }: DashboardObjectDrawerProps) {
   const [confirmAction, setConfirmAction] = useState<ObjectAction | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  useFocusTrap(panelRef, true, onClose);
 
   // Filter timeline events that act as evidence for this specific object
   const linkedEvidence = useMemo(() => {
@@ -51,11 +54,17 @@ export function DashboardObjectDrawer({ object, timeline = [], onClose, onAction
   };
 
   return (
-    <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-background border-l-4 border-primary shadow-[-6px_0_0_0_var(--color-primary)] flex flex-col">
+    <aside
+      ref={panelRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="object-drawer-title"
+      className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-background border-l-4 border-primary shadow-[-6px_0_0_0_var(--color-primary)] flex flex-col"
+    >
       <header className="p-4 border-b-4 border-primary bg-surface-container-high flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-[10px] uppercase text-on-surface-variant">{object.type} / {object.status}</p>
-          <h2 className="font-headline font-black uppercase text-xl text-primary truncate">{object.title}</h2>
+          <h2 id="object-drawer-title" className="font-headline font-black uppercase text-xl text-primary truncate">{object.title}</h2>
           <p className="font-body text-xs text-on-surface-variant mt-1 line-clamp-2">{object.description || 'No description recorded.'}</p>
         </div>
         <button

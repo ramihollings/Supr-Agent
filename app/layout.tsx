@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk } from 'next/font/google';
 import './globals.css';
 import { Sidebar } from '@/components/Sidebar';
 import { UiModeProvider } from '@/components/UiModeProvider';
+import { ToastProvider } from '@/components/ToastProvider';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space-grotesk' });
@@ -21,11 +22,11 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
         <script dangerouslySetInnerHTML={{ __html: `
           (function() {
             try {
-              var theme = localStorage.getItem('supr_theme') || 'neobrutalist';
+              var theme = localStorage.getItem('supr_theme') || 'supr-clean';
               var palette = localStorage.getItem('supr_palette') || 'classic';
-              var allowedThemes = ['neobrutalist', 'openclaw', 'hermes', 'google-neural', 'crt', 'cyberpunk', 'minimalist', 'design-notion', 'design-verge', 'design-carbon'];
+              var allowedThemes = ['supr-clean', 'neobrutalist', 'openclaw', 'hermes', 'google-neural', 'crt', 'cyberpunk', 'minimalist', 'design-notion', 'design-verge', 'design-carbon'];
               var allowedPalettes = ['classic', 'cyberpunk-neon', 'nordic-frost', 'forest-moss', 'vintage-orange', 'matrix-digital', 'sunset-glow', 'ocean-breeze', 'royal-velvet', 'sakura-pastel', 'minimal-monochrome', 'desert-cactus', 'corporate-tech', 'toxic-spill', 'warm-autumn', 'design-notion', 'design-verge'];
-              if (allowedThemes.indexOf(theme) === -1) theme = 'neobrutalist';
+              if (allowedThemes.indexOf(theme) === -1) theme = 'supr-clean';
               if (allowedPalettes.indexOf(palette) === -1) palette = 'classic';
               document.documentElement.className = 'theme-' + theme + ' palette-' + palette + ' ' + document.documentElement.className;
             } catch (e) {}
@@ -33,9 +34,19 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
         `}} />
       </head>
       <body suppressHydrationWarning className="bg-background text-on-background font-body min-h-screen flex flex-col md:flex-row antialiased selection:bg-primary-container selection:text-on-primary-container">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[200] focus:bg-primary focus:text-on-primary focus:px-4 focus:py-2 focus:rounded focus:shadow-lg"
+        >
+          Skip to main content
+        </a>
         <UiModeProvider>
-          <Sidebar />
-          {children}
+          <ToastProvider>
+            <Sidebar />
+            <main id="main-content" tabIndex={-1} className="flex-1 min-w-0">
+              {children}
+            </main>
+          </ToastProvider>
         </UiModeProvider>
       </body>
     </html>

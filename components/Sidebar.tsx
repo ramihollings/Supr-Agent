@@ -94,18 +94,19 @@ function SidebarContent() {
           </div>
         </div>
 
-        <ul className="flex-1 overflow-y-auto flex flex-col py-4 gap-1 px-2">
+        <ul className="flex-1 overflow-y-auto flex flex-col py-4 gap-1 px-2" aria-label="Primary navigation">
           {filteredNavItems.map((item) => (
             <li key={item.href}>
               <Link
                 href={getHrefWithParam(item.href)}
+                aria-current={isActive(item.href) ? 'page' : undefined}
                 className={`flex items-center gap-3 px-4 py-3 font-body font-bold uppercase text-sm transition-all active:translate-x-0.5 active:translate-y-0.5 border-2 ${
                   isActive(item.href)
                     ? 'bg-primary text-on-primary border-primary shadow-[3px_3px_0px_0px_rgba(26,26,26,1)]'
                     : 'text-primary border-transparent hover:bg-surface-container hover:border-outline-variant'
                 }`}
               >
-                <span className="material-symbols-outlined">{item.icon}</span>
+                <span className="material-symbols-outlined" aria-hidden="true">{item.icon}</span>
                 <span>{item.label}</span>
               </Link>
             </li>
@@ -113,38 +114,49 @@ function SidebarContent() {
         </ul>
 
         <div className="border-t-4 border-primary p-2 flex flex-col">
-          <ul className="space-y-1 mb-2">
+          <ul className="space-y-1 mb-2" aria-label="Secondary navigation">
             {filteredBottomItems.map((item) => (
               <li key={item.href}>
                 <Link
                   href={getHrefWithParam(item.href)}
+                  aria-current={isActive(item.href) ? 'page' : undefined}
                   className={`flex items-center gap-3 px-4 py-3 font-body font-bold uppercase text-sm transition-all active:translate-x-0.5 active:translate-y-0.5 border-2 ${
                     isActive(item.href)
                       ? 'bg-primary text-on-primary border-primary shadow-[3px_3px_0px_0px_rgba(26,26,26,1)]'
                       : 'text-primary border-transparent hover:bg-surface-container hover:border-outline-variant'
                   }`}
                 >
-                  <span className="material-symbols-outlined">{item.icon}</span>
+                  <span className="material-symbols-outlined" aria-hidden="true">{item.icon}</span>
                   <span>{item.label}</span>
                 </Link>
               </li>
             ))}
           </ul>
           
-          <div className="flex bg-surface-container border-2 border-primary p-1 mb-2">
-            {(['mobile', 'pro', 'dev'] as UiMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`flex-1 text-[10px] font-bold uppercase py-1.5 transition-colors ${
-                  mode === m 
-                  ? 'bg-primary text-on-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] border-2 border-primary' 
-                  : 'text-on-surface-variant hover:text-primary border-2 border-transparent'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
+          <div className="bg-surface-container border border-outline-variant p-2 mb-2" role="radiogroup" aria-label="Interface level">
+            <p className="px-2 py-1 text-[9px] font-bold uppercase text-on-surface-variant tracking-wider">Interface level</p>
+            <div className="flex">
+              {([
+                { id: 'mobile' as const, label: 'Essential', desc: 'Show only the basics' },
+                { id: 'pro' as const, label: 'Pro', desc: 'Show supervisor and agent tools' },
+                { id: 'dev' as const, label: 'Dev', desc: 'Show all technical views' },
+              ]).map((m) => (
+                <button
+                  key={m.id}
+                  role="radio"
+                  aria-checked={mode === m.id}
+                  title={m.desc}
+                  onClick={() => setMode(m.id)}
+                  className={`flex-1 text-[10px] font-bold uppercase py-1.5 transition-colors ${
+                    mode === m.id
+                      ? 'bg-primary text-on-primary border border-primary'
+                      : 'text-on-surface-variant hover:text-primary border border-transparent'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="relative">

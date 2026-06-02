@@ -17,7 +17,7 @@ function TopNavSkeleton({ title }: { title: string }) {
         </div>
       </nav>
       {/* Mobile Skeleton */}
-      <nav className="lg:hidden flex justify-between items-center w-full px-4 py-4 border-b-4 border-primary sticky top-0 bg-background z-50 h-[77px]">
+      <nav className="md:hidden flex justify-between items-center w-full px-4 py-4 border-b-4 border-primary sticky top-0 bg-background z-50 h-[77px]">
         <span className="font-headline text-2xl font-black uppercase tracking-tighter text-primary flex items-center gap-2">
           Supr
         </span>
@@ -70,29 +70,23 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-4">
             {children || (
-              <>
-                <div className="flex items-center gap-2 bg-surface neo-border-sm px-3 py-1.5 font-headline font-bold text-xs uppercase text-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-black animate-pulse inline-block"></span>
-                  <span>{systemMode}</span>
-                </div>
-                <div className="flex items-center gap-2 bg-surface neo-border-sm px-3 py-1.5 font-headline font-bold text-xs uppercase text-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-                  <span className="material-symbols-outlined text-xs text-primary font-bold">verified_user</span>
-                  <span>Autopilot: Active</span>
-                </div>
-              </>
+              <div className="flex items-center gap-2 bg-surface neo-border-sm px-3 py-1.5 font-headline font-bold text-xs uppercase text-primary shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-black animate-pulse inline-block"></span>
+                <span>{systemMode}</span>
+              </div>
             )}
           </div>
           <div className="flex gap-4 border-l-4 border-primary pl-6">
             <Link href={getHrefWithParam('/settings')} aria-label="Settings" className="hover:text-tertiary transition-colors">
-              <span className="material-symbols-outlined">settings</span>
+              <span className="material-symbols-outlined" aria-hidden="true">settings</span>
             </Link>
             <div className="relative">
-              <button 
+              <button
                 onClick={handleNotificationClick}
-                aria-label="Notifications" 
+                aria-label="Notifications"
                 className="hover:text-tertiary transition-colors"
               >
-                <span className="material-symbols-outlined">notifications</span>
+                <span className="material-symbols-outlined" aria-hidden="true">notifications</span>
               </button>
               {showNotificationToast && (
                 <div className="absolute top-full right-0 mt-2 w-48 bg-surface-container-high border-2 border-primary p-2 text-[10px] font-bold uppercase text-center neo-shadow z-50">
@@ -105,20 +99,22 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
       </nav>
 
       {/* Mobile TopNav */}
-      <nav className="lg:hidden flex justify-between items-center w-full px-4 py-4 border-b-4 border-primary sticky top-0 bg-background z-50">
+      <nav className="md:hidden flex justify-between items-center w-full px-4 py-4 border-b-4 border-primary sticky top-0 bg-background z-50">
         <Link href={getHrefWithParam('/')} className="font-headline text-2xl font-black uppercase tracking-tighter text-primary flex items-center gap-2">
           <Image src="/supr_logo.svg" alt="Supr Logo" width={28} height={28} />
           Supr
         </Link>
         <div className="flex items-center gap-2 text-primary">
-          <Link href={getHrefWithParam('/settings')} className="p-2 border-2 border-transparent hover:bg-primary hover:text-on-primary transition-colors active:translate-x-1 active:translate-y-1">
-            <span className="material-symbols-outlined">settings</span>
+          <Link href={getHrefWithParam('/settings')} aria-label="Settings" className="p-2 border-2 border-transparent hover:bg-primary hover:text-on-primary transition-colors active:translate-x-1 active:translate-y-1">
+            <span className="material-symbols-outlined" aria-hidden="true">settings</span>
           </Link>
-          <button 
+          <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            aria-label={isMobileMenuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={isMobileMenuOpen}
             className="p-2 border-2 border-transparent hover:bg-primary hover:text-on-primary transition-colors active:translate-x-1 active:translate-y-1"
           >
-            <span className="material-symbols-outlined">{isMobileMenuOpen ? 'close' : 'menu'}</span>
+            <span className="material-symbols-outlined" aria-hidden="true">{isMobileMenuOpen ? 'close' : 'menu'}</span>
           </button>
         </div>
         
