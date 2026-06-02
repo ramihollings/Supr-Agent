@@ -593,8 +593,6 @@ test('supervisor dashboard exposes consolidated object, transcript, artifact, an
     'components/RunTranscriptView.tsx',
     'components/ArtifactSourcePreview.tsx',
     'components/RuntimeConsoleStrip.tsx',
-    'components/EvidenceSourcePanel.tsx',
-    'components/ReportManifestPanel.tsx',
   ];
 
   for (const file of requiredFiles) {
@@ -626,11 +624,11 @@ test('supervisor dashboard exposes consolidated object, transcript, artifact, an
   assert.match(library, /ArtifactSourcePreview/);
   assert.doesNotMatch(library, /Artifact source\/preview portal/);
 
-  const research = readFileSync('app/research/page.tsx', 'utf8');
-  assert.match(research, /EvidenceSourcePanel/);
-
-  const report = readFileSync('app/mission-packet/page.tsx', 'utf8');
-  assert.match(report, /ReportManifestPanel/);
+  // app/research and app/mission-packet previously consumed the
+  // EvidenceSourcePanel and ReportManifestPanel components. Both
+  // components have been removed as dead code (chore(dead-code));
+  // the pages themselves remain and render their own inline evidence
+  // and report surfaces.
 
   const code = readFileSync('app/code/page.tsx', 'utf8');
   assert.match(code, /RunTranscriptView/);

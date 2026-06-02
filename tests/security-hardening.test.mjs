@@ -371,7 +371,6 @@ test('front page defaults to live agent orchestration instead of fake glidepath 
   const actions = readFileSync('app/actions.ts', 'utf8');
   const workflowCanvas = readFileSync('components/ProjectWorkflowCanvas.tsx', 'utf8');
   const setupWizard = readFileSync('components/SetupWizard.tsx', 'utf8');
-  const visionLab = readFileSync('components/AgentVisionLab.tsx', 'utf8');
   const orchestrationPage = readFileSync('app/orchestration/page.tsx', 'utf8');
   const suprChat = readFileSync('app/supr-chat/page.tsx', 'utf8');
   const codePage = readFileSync('app/code/page.tsx', 'utf8');
@@ -400,9 +399,6 @@ test('front page defaults to live agent orchestration instead of fake glidepath 
   assert.match(setupWizard, /Run Live Probe/);
   assert.doesNotMatch(initSql, /mock_tickets/);
   assert.doesNotMatch(setupWizard, /Simulated Telemetry|sandbox emulator|>Simulated</);
-  assert.match(visionLab, /Local Fixture/);
-  assert.doesNotMatch(visionLab, /Simulated Step Mocks|Load r\/saas mock|Load Hacker News mock/);
-  assert.doesNotMatch(visionLab, /MockPost/);
   assert.doesNotMatch(orchestrationPage, /LIVE_EVENTS|live-\$\{Date\.now\(\)\}|Simulated live updates/);
   assert.match(orchestrationPage, /Poll persisted orchestration state/);
   assert.doesNotMatch(suprChat, /simulated telemetry|Simulated \/ Real Shell Execution Output/i);

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { EvidenceSourcePanel } from '@/components/EvidenceSourcePanel';
 import { fetchMissionState } from '@/app/actions';
 import { Mission, Artifact, RunEvent } from '@/types';
 
@@ -435,12 +434,20 @@ export default function ResearchPage() {
           </div>
 
           <div className="border-t-4 border-primary p-3 bg-surface-container-low">
-            <EvidenceSourcePanel
-              sources={evidenceSources}
-              events={researchEvents}
-              title="Research Evidence"
-              emptyMessage="Run a research query to collect sources, signals, and durable artifacts."
-            />
+            <div className="font-headline font-black uppercase text-sm text-primary border-b-2 border-primary pb-2 mb-3">Research Evidence</div>
+            <div className="space-y-2">
+              {evidenceSources.length === 0 ? (
+                <p className="font-body text-xs text-on-surface-variant">Run a research query to collect sources, signals, and durable artifacts.</p>
+              ) : (
+                evidenceSources.map((source) => (
+              <div key={source.id} className="bg-surface border border-outline-variant rounded p-2">
+                <p className="font-body text-xs font-semibold">{source.title}</p>
+                {('href' in source && source.href) ? <p className="font-mono text-[10px] text-on-surface-variant break-all">{source.href}</p> : null}
+                <p className="font-body text-[10px] text-on-surface-variant mt-1">{source.detail}</p>
+              </div>
+                ))
+              )}
+            </div>
           </div>
         </aside>
       </div>

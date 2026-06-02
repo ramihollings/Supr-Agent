@@ -1,7 +1,6 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
-import { ReportManifestPanel } from '@/components/ReportManifestPanel';
 import { useState, useEffect, startTransition } from 'react';
 import { getActiveMissionAction } from '@/app/actions';
 import { Mission } from '@/types';
@@ -324,15 +323,35 @@ SANDBOX_CONTAINER_MEMORY=512m`}
           </div>
         </section>
 
-        <ReportManifestPanel
-          mission={mission}
-          checklist={checklist}
-          onDownloadArtifact={(artifact) => handleDownloadSingle(artifact.filename, artifact.content)}
-          onDownloadBundle={handleDownloadBundle}
-        />
+        <section className="bg-background p-6 neo-border shadow-[6px_6px_0px_0px_rgba(26,26,26,1)]">
+          <div className="flex items-center gap-3 border-b-4 border-primary pb-4 mb-6">
+            <span className="material-symbols-outlined text-3xl text-primary font-black">inventory_2</span>
+            <h2 className="font-headline text-3xl font-black uppercase text-primary tracking-tight">Mission Report Manifest</h2>
+          </div>
+          {mission && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {(mission.artifacts || []).map((artifact) => (
+                <button
+                  key={artifact.filename}
+                  onClick={() => handleDownloadSingle(artifact.filename, artifact.content)}
+                  className="text-left bg-surface border-2 border-primary p-3 hover:bg-primary hover:text-on-primary"
+                >
+                  <p className="font-headline font-bold uppercase text-xs truncate">{artifact.filename}</p>
+                  <p className="font-mono text-[10px] text-on-surface-variant uppercase mt-1">{artifact.type} · {artifact.content.length}b</p>
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={handleDownloadBundle}
+            className="mt-4 bg-primary text-on-primary font-bold uppercase text-xs p-3 neo-border hover:bg-tertiary hover:text-on-tertiary w-full"
+          >
+            Download Full Bundle
+          </button>
+        </section>
 
         {/* Deliverables Explorer */}
-        {mission.artifacts && mission.artifacts.length > 0 && (
+        {mission && mission.artifacts && mission.artifacts.length > 0 && (
           <section className="bg-background p-6 neo-border shadow-[6px_6px_0px_0px_rgba(26,26,26,1)]">
             <div className="flex items-center gap-3 border-b-4 border-primary pb-4 mb-6">
               <span className="material-symbols-outlined text-3xl text-primary font-black">inventory_2</span>
