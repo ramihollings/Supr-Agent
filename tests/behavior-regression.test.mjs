@@ -826,7 +826,7 @@ test('mission phases are derived from the relational Tasks table, not the Glidep
   assert.match(db, /export async function derivePhasesFromTasks/);
   assert.match(db, /SELECT phase_id, status FROM Tasks WHERE mission_id = \?/);
   // Read path must use the derived phases when Tasks rows exist.
-  assert.match(db, /phases\s*=\s*dbTasks\.length\s*>\s*0\s*\?\s*await derivePhasesFromTasks\(id\)/);
+  assert.match(db, /phases\s*=\s*dbTasks\.length\s*>\s*0\s*\?\s*phaseListFromStatuses/);
 
   // Runtime no longer writes the Glidepaths.phases JSON column.
   assert.doesNotMatch(flow, /UPDATE Glidepaths SET phases = \?/);
@@ -834,4 +834,22 @@ test('mission phases are derived from the relational Tasks table, not the Glidep
   assert.doesNotMatch(db, /INSERT INTO Glidepaths \(id, mission_id, phases, tasks, readiness_score\)/);
   // But the Tasks column is still used (createAgentAction etc.).
   assert.match(db, /INSERT INTO Glidepaths \(id, mission_id, tasks, readiness_score\)/);
+});
+
+test('getDb loads all missions in a fixed number of batched queries, not N+1', () => {
+  const db = readFileSync('lib/db.ts', 'utf8');
+  // The new getMissionsBatch helper must exist and use WHERE id IN (?)
+  // for each related table so a 50-mission dashboard does 7 queries
+  // instead of 400.
+  assert.match(db, /export async function getMissionsBatch/);
+  assert.match(db, /SELECT \* FROM Missions WHERE id IN/);
+  assert.match(db, /SELECT \* FROM Glidepaths WHERE mission_id IN/);
+  assert.match(db, /SELECT \* FROM Tasks WHERE mission_id IN/);
+  assert.match(db, /SELECT \* FROM Event_Log WHERE mission_id IN/);
+  assert.match(db, /SELECT \* FROM Failure_Events WHERE mission_id IN/);
+  assert.match(db, /SELECT \* FROM Artifacts WHERE mission_id IN/);
+  assert.match(db, /SELECT \* FROM Memory_Items WHERE mission_id IN/);
+  // The wrapper must use the batch helper, not the N+1 pattern.
+  assert.match(db, /getMissionsBatch\(missions\.map\(\(m\) => m\.id\)\)/);
+  assert.doesNotMatch(db, /missions\.map\(m => getMissionById\(m\.id\)\)/);
 });

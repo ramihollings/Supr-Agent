@@ -10,8 +10,167 @@ export async function ensureDbExists() {
 export async function getDb(): Promise<DatabaseSchema> {
   const agents = await getAgents();
   const missions = await dbClient.query<{ id: string }>(`SELECT id FROM Missions`);
-  const fullMissions = await Promise.all(missions.map(m => getMissionById(m.id)));
-  return { agents, missions: fullMissions.filter(Boolean) as Mission[] };
+  const fullMissions = await getMissionsBatch(missions.map((m) => m.id));
+  return { agents, missions: fullMissions };
+}
+
+/**
+ * Load many missions in a fixed number of queries, regardless of the
+ * number of missions.
+ *
+ * The previous implementation called getMissionById once per mission,
+ * which itself does 7-8 queries (Missions, Glidepaths, Tasks,
+ * Event_Log, Failure_Events, Artifacts, Memory_Items). For 50
+ * missions that was ~400 round-trips on every dashboard mount.
+ *
+ * This implementation issues 7 batched queries (one per related
+ * table) keyed by the IN list of mission ids, then assembles the
+ * Mission objects in JavaScript. Cost is O(1) in mission count.
+ *
+ * Self-healing seed artifacts (the markdown / python / json stubs
+ * that getMissionById inserts when a mission has no Artifacts rows)
+ * are NOT applied here. getDb() is used as a read snapshot; a
+ * mission that happens to have no Artifacts is just returned with an
+ * empty list, which the UI already handles.
+ */
+export async function getMissionsBatch(missionIds: string[]): Promise<Mission[]> {
+  if (missionIds.length === 0) return [];
+  const placeholders = missionIds.map(() => '?').join(',');
+
+  const [missionRows, glideRows, taskRows, eventRows, failureRows, artifactRows, memoryRows] = await Promise.all([
+    dbClient.query<any>(`SELECT * FROM Missions WHERE id IN (${placeholders})`, missionIds),
+    dbClient.query<any>(`SELECT * FROM Glidepaths WHERE mission_id IN (${placeholders})`, missionIds),
+    dbClient.query<any>(`SELECT * FROM Tasks WHERE mission_id IN (${placeholders})`, missionIds),
+    dbClient.query<any>(`SELECT * FROM Event_Log WHERE mission_id IN (${placeholders})`, missionIds),
+    dbClient.query<any>(`SELECT * FROM Failure_Events WHERE mission_id IN (${placeholders})`, missionIds),
+    dbClient.query<any>(`SELECT * FROM Artifacts WHERE mission_id IN (${placeholders})`, missionIds),
+    dbClient.query<any>(`SELECT * FROM Memory_Items WHERE mission_id IN (${placeholders})`, missionIds),
+  ]);
+
+  const glideById = new Map<string, any>();
+  for (const row of glideRows) glideById.set(row.mission_id, row);
+
+  const tasksById = new Map<string, any[]>();
+  for (const row of taskRows) {
+    const list = tasksById.get(row.mission_id) || [];
+    list.push(row);
+    tasksById.set(row.mission_id, list);
+  }
+
+  const eventsById = new Map<string, any[]>();
+  for (const row of eventRows) {
+    const list = eventsById.get(row.mission_id) || [];
+    list.push(row);
+    eventsById.set(row.mission_id, list);
+  }
+
+  const failuresById = new Map<string, any[]>();
+  for (const row of failureRows) {
+    const list = failuresById.get(row.mission_id) || [];
+    list.push(row);
+    failuresById.set(row.mission_id, list);
+  }
+
+  const artifactsById = new Map<string, any[]>();
+  for (const row of artifactRows) {
+    const list = artifactsById.get(row.mission_id) || [];
+    list.push(row);
+    artifactsById.set(row.mission_id, list);
+  }
+
+  const memoryById = new Map<string, any[]>();
+  for (const row of memoryRows) {
+    const list = memoryById.get(row.mission_id) || [];
+    list.push(row);
+    memoryById.set(row.mission_id, list);
+  }
+
+  const out: Mission[] = [];
+  for (const row of missionRows) {
+    const dbTasks = tasksById.get(row.id) || [];
+    const mappedTasks = dbTasks.map((t: any) => ({
+      id: t.id,
+      title: t.title,
+      description: '',
+      agentName: t.owner_agent_id || 'Supr',
+      agentIcon: 'smart_toy',
+      status: t.status,
+    }));
+
+    let phases: Phase[] = dbTasks.length > 0 ? derivePhasesFromTaskStatuses(dbTasks).toPhaseList() : [];
+    if (phases.length === 0) {
+      const gp = glideById.get(row.id);
+      if (gp) {
+        try { phases = JSON.parse(gp.phases || '[]'); } catch { /* ignore */ }
+      }
+    }
+    if (phases.length === 0) {
+      phases = ['Intake', 'Research', 'Build', 'Verify', 'Deliver'].map((name) => ({
+        id: `phase-${name.toLowerCase()}`,
+        name,
+        status: 'Pending' as const,
+      }));
+    }
+
+    const gp = glideById.get(row.id);
+    const legacyTasks: Task[] = gp
+      ? (() => { try { return JSON.parse(gp.tasks || '[]'); } catch { return []; } })()
+      : [];
+
+    const events = eventsById.get(row.id) || [];
+    const failures = failuresById.get(row.id) || [];
+    const artifacts = artifactsById.get(row.id) || [];
+    const memoryItems = memoryById.get(row.id) || [];
+
+    out.push({
+      id: row.id,
+      name: row.title,
+      objective: row.goal || '',
+      status: row.status,
+      readinessScore: gp ? gp.readiness_score : 0,
+      phases,
+      tasks: mappedTasks.length > 0 ? mappedTasks : legacyTasks,
+      messages: [],
+      activityLog: events.map((e: any) => {
+        let det = '';
+        try { det = JSON.parse(e.metadata).detail; } catch { /* ignore */ }
+        return {
+          id: e.id,
+          eventType: e.event_type,
+          actor: e.actor_id,
+          actorIcon: 'smart_toy',
+          summary: e.summary,
+          detail: det,
+          timestamp: e.timestamp,
+        };
+      }),
+      failures: failures.map((f: any) => ({
+        id: f.id,
+        taskId: f.task_id,
+        agentName: f.agent_id,
+        failureType: f.failure_type,
+        attemptNumber: f.attempt_number,
+        summary: f.failure_summary,
+        suprGuidance: f.supr_guidance,
+        resolved: f.resolution_status === 'resolved',
+      })),
+      artifacts: artifacts.map((a: any) => ({
+        id: a.id,
+        type: a.type,
+        title: a.title,
+        content: a.content,
+      })),
+      memoryItems: memoryItems.map((m: any) => ({
+        id: m.id,
+        key: m.key,
+        value: m.value,
+        category: m.category,
+        importance: m.importance,
+        pinned: !!m.pinned,
+      })),
+    });
+  }
+  return out;
 }
 
 export async function saveDb(data: DatabaseSchema): Promise<void> {
@@ -23,6 +182,14 @@ function id(prefix: string) {
 }
 
 const PHASE_NAMES = ['Intake', 'Research', 'Build', 'Verify', 'Deliver'] as const;
+
+function phaseListFromStatuses(statuses: Map<string, 'Done' | 'Active' | 'Pending'>): Phase[] {
+  return PHASE_NAMES.map((name) => ({
+    id: `phase-${name.toLowerCase()}`,
+    name,
+    status: statuses.get(name) || 'Pending',
+  }));
+}
 
 /**
  * Derive the mission's phase list from the relational Tasks table.
@@ -64,12 +231,7 @@ export async function derivePhasesFromTasks(missionId: string): Promise<Phase[]>
     `SELECT phase_id, status FROM Tasks WHERE mission_id = ?`,
     [missionId],
   );
-  const statuses = phaseStatusFromTaskStatuses(rows);
-  return PHASE_NAMES.map((name, index) => ({
-    id: `phase-${name.toLowerCase()}`,
-    name,
-    status: statuses.get(name) || 'Pending',
-  }));
+  return phaseListFromStatuses(phaseStatusFromTaskStatuses(rows));
 }
 
 export async function getMissionById(id: string): Promise<Mission | undefined> {
@@ -95,9 +257,9 @@ export async function getMissionById(id: string): Promise<Mission | undefined> {
   // Phases are derived from the relational Tasks table. Falls back to
   // the Glidepaths JSON column for legacy data where the table was
   // empty but the JSON was still authoritative.
-  let phases: Phase[] = dbTasks.length > 0
-    ? await derivePhasesFromTasks(id)
-    : [];
+    let phases: Phase[] = dbTasks.length > 0
+      ? phaseListFromStatuses(phaseStatusFromTaskStatuses(dbTasks))
+      : [];
   if (phases.length === 0 && gp) {
     try { phases = JSON.parse(gp.phases || '[]'); } catch(e){}
   }
