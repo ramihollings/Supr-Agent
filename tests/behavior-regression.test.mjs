@@ -637,3 +637,14 @@ test('supervisor dashboard exposes consolidated object, transcript, artifact, an
   assert.match(code, /codeRunEvents/);
   assert.match(code, /Raw terminal/);
 });
+
+test('production model probe does strict JSON shape checking, not substring matches', () => {
+  const health = readFileSync('lib/production-health.ts', 'utf8');
+  // Must parse JSON; must check for { ok: true } exactly.
+  assert.match(health, /JSON\.parse\(response\)/);
+  assert.match(health, /\(parsed as Record<string, unknown>\)\.ok === true/);
+  assert.match(health, /Object\.keys\(parsed as Record<string, unknown>\)\.length === 1/);
+  // The old loose regex must be gone.
+  assert.doesNotMatch(health, /"ok"\\s*:\\s*true\|ok\/i/);
+  assert.doesNotMatch(health, /\btest\(.*"ok"\s*:\s*true\|ok/i);
+});

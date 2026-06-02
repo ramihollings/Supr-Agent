@@ -43,11 +43,26 @@ async function runModelProbe() {
       maxOutputTokens: 32,
     },
   ), 15000, 'model probe');
+
+  // Strict shape check: must be valid JSON, must be exactly { ok: true }.
+  // Previously this was a regex that matched any string containing "ok",
+  // which produced false green checks against responses like
+  // "All systems ok" or "ok, I'll continue".
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(response);
+  } catch {
+    return { ok: false, provider: provider.name, model: provider.modelName, latencyMs: Date.now() - startedAt, reason: 'Model probe did not return valid JSON.' };
+  }
+  const ok = typeof parsed === 'object' && parsed !== null
+    && (parsed as Record<string, unknown>).ok === true
+    && Object.keys(parsed as Record<string, unknown>).length === 1;
   return {
-    ok: /"ok"\s*:\s*true|ok/i.test(response),
+    ok,
     provider: provider.name,
     model: provider.modelName,
     latencyMs: Date.now() - startedAt,
+    ...(ok ? {} : { reason: 'Model probe JSON did not match the expected { ok: true } shape.' }),
   };
 }
 
@@ -91,11 +106,11 @@ export async function getProductionHealth(options: { probeModel?: boolean } = {}
     }
   }
 
-  let modelProbe = null as null | { ok: boolean; provider?: string; model?: string; latencyMs?: number; error?: string };
+  let modelProbe = null as null | { ok: boolean; provider?: string; model?: string; latencyMs?: number; error?: string; reason?: string };
   if (options.probeModel) {
     try {
       modelProbe = await runModelProbe();
-      if (!modelProbe.ok) warnings.push('Model probe returned an unexpected response.');
+      if (!modelProbe.ok) warnings.push(`Model probe did not confirm readiness${modelProbe.reason ? `: ${modelProbe.reason}` : ''}.`);
     } catch (error: any) {
       modelProbe = { ok: false, error: error.message || String(error) };
       failures.push(`Model probe failed: ${modelProbe.error}`);
