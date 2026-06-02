@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
 import { TopNav } from '@/components/TopNav';
+import { useSettingsSnapshot } from '@/hooks/useSettingsSnapshot';
 import { 
   fetchChatMessagesAction, 
   updateChatMessageAction,
@@ -99,6 +100,27 @@ export default function SuprChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const settingsSnapshot = useSettingsSnapshot();
+
+  useEffect(() => {
+    if (!settingsSnapshot.loaded) return;
+    // Shared snapshot is the source of truth for these four fields.
+    setActiveModel(settingsSnapshot.activeModel);
+    setActiveModelName(settingsSnapshot.activeModelName);
+    setAutonomyMode(settingsSnapshot.autonomyMode);
+    setSandboxAllowKeys(settingsSnapshot.sandboxAllowKeys);
+    if (Object.keys(settingsSnapshot.liveProviderModels).length > 0) {
+      setLiveProviderModels(settingsSnapshot.liveProviderModels);
+    }
+  }, [
+    settingsSnapshot.loaded,
+    settingsSnapshot.activeModel,
+    settingsSnapshot.activeModelName,
+    settingsSnapshot.autonomyMode,
+    settingsSnapshot.sandboxAllowKeys,
+    settingsSnapshot.liveProviderModels,
+  ]);
+
   const loadData = async () => {
     const [msgs, settings, projectsList, filesList, statuses] = await Promise.all([
       fetchChatMessagesAction(),
@@ -109,11 +131,6 @@ export default function SuprChatPage() {
     ]);
 
     setAgentStatuses(statuses);
-    const configuredProvider = settings.llm_provider_supr || 'default';
-    setActiveModel(configuredProvider);
-    setActiveModelName(settings.llm_model_supr || defaultModelForProvider(configuredProvider));
-    if (settings.operating_mode) setAutonomyMode(settings.operating_mode);
-    if (settings.sandbox_allow_api_keys) setSandboxAllowKeys(settings.sandbox_allow_api_keys === 'true');
 
     let processedMsgs = [...msgs];
     if (processedMsgs.length <= 1) {

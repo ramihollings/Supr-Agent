@@ -904,3 +904,18 @@ test('lib and src are consolidated: no @/src/ imports anywhere', () => {
   // The src/ directory must not exist.
   assert.equal(existsSync('src'), false, 'src/ directory should be removed after consolidation');
 });
+
+test('useSettingsSnapshot hook is the shared source of truth for active model + autonomy', () => {
+  const hook = readFileSync('hooks/useSettingsSnapshot.ts', 'utf8');
+  assert.match(hook, /export function useSettingsSnapshot/);
+  assert.match(hook, /fetchSettingsAction/);
+  assert.match(hook, /llm_provider_supr/);
+  assert.match(hook, /llm_model_supr/);
+  assert.match(hook, /operating_mode/);
+  assert.match(hook, /sandbox_allow_api_keys/);
+
+  // The chat page must use the shared hook rather than re-deriving
+  // the same four settings itself.
+  const chat = readFileSync('app/supr-chat/page.tsx', 'utf8');
+  assert.match(chat, /useSettingsSnapshot/);
+});
