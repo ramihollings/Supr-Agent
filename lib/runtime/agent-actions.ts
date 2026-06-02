@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import dbClient from '@/lib/database/db_client';
 import { PermissionEngine } from '@/lib/services/governance';
 import type { AgentActionInput, AgentActionRecord, AgentActionStatus, ExecutionResult } from './types';
+import { notifyMissionChanged } from '@/lib/events/bus';
 
 function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -142,6 +143,7 @@ export async function createAgentAction(input: AgentActionInput): Promise<AgentA
   const action = await getAgentAction(actionId);
   if (!action) throw new Error('Agent action was not persisted.');
   await emitActionTimelineEvent(action, 'agent_action_created', `Queued ${input.capability}`, input.intent);
+  notifyMissionChanged(input.missionId, 'agent_action_created');
   await recordRuntimeAudit({
     missionId: input.missionId,
     actorType: 'agent',
@@ -249,11 +251,13 @@ export async function executeAgentAction<T>(
     await updateActionStatus(actionId, 'completed', { result: serialized });
     const completed = await getAgentAction(actionId);
     if (completed) await emitActionTimelineEvent(completed, 'agent_action_completed', `Completed ${running.capability}`, running.intent);
+    notifyMissionChanged(running.missionId, 'agent_action_completed');
     return { status: 'completed', action: completed || running, result };
   } catch (error: any) {
     await updateActionStatus(actionId, 'failed', { error: error.message || String(error) });
     const failed = await getAgentAction(actionId);
     if (failed) await emitActionTimelineEvent(failed, 'agent_action_failed', `Failed ${running.capability}`, error.message || String(error));
+    notifyMissionChanged(running.missionId, 'agent_action_failed');
     throw error;
   }
 }

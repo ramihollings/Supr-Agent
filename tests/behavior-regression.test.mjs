@@ -789,3 +789,31 @@ test('OpenAICompatibleProvider picks the right max-tokens field name per provide
   // The backup (openai_compat) builder defaults to the new field.
   assert.match(model, /buildBackup[\s\S]*?maxTokensField:\s*'max_completion_tokens'/);
 });
+
+test('mission state changes are published through a process-local event bus, not via polling', () => {
+  const bus = readFileSync('lib/events/bus.ts', 'utf8');
+  assert.match(bus, /class MissionEventBus extends EventEmitter/);
+  assert.match(bus, /emitChange/);
+  assert.match(bus, /onChange/);
+  assert.match(bus, /notifyMissionChanged/);
+  assert.match(bus, /setMaxListeners/);
+
+  // The stream route must subscribe, not poll exclusively.
+  const stream = readFileSync('app/api/mission/stream/route.ts', 'utf8');
+  assert.match(stream, /missionEventBus/);
+  assert.match(stream, /onChange/);
+  // The old 2-second-only poll must be gone; the safety-net poll must
+  // be substantially longer (>= 5s).
+  const pollMatch = stream.match(/SAFETY_NET_POLL_MS\s*=\s*(\d[\d_]*)/);
+  assert.ok(pollMatch, 'SAFETY_NET_POLL_MS must be a number literal');
+  const poll = Number(pollMatch[1].replace(/_/g, ''));
+  assert.ok(poll >= 5_000, `safety-net poll should be at least 5s, got ${poll}ms`);
+
+  // Emitters in the runtime must call notifyMissionChanged on the
+  // mutation paths (logFlowEvent, createAgentAction, success and
+  // failure branches of executeAgentAction).
+  const flow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
+  assert.match(flow, /notifyMissionChanged/);
+  const agentActions = readFileSync('lib/runtime/agent-actions.ts', 'utf8');
+  assert.match(agentActions, /notifyMissionChanged/);
+});

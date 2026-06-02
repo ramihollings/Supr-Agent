@@ -8,6 +8,7 @@ import { parseModelJson } from './model-json';
 import { messagingGateway } from '@/src/services/messaging-gateway';
 import { serializeChannelPayload } from '@/lib/channel-logging';
 import { telemetry } from '@/lib/telemetry';
+import { notifyMissionChanged } from '@/lib/events/bus';
 import type { PermissionTier } from '@/lib/services/governance';
 import type { RiskLevel, RuntimeMode } from './types';
 
@@ -58,6 +59,10 @@ async function logFlowEvent(missionId: string, eventType: string, actor: string,
     summary,
     detail,
   });
+  // Any flow event implies the mission may have changed state. Notify
+  // the stream so connected dashboards update without waiting for the
+  // safety-net poll.
+  notifyMissionChanged(missionId, eventType === 'agent_action' ? 'agent_action_created' : 'mission_updated');
 }
 
 async function ensurePresetAgent(preset: Preset) {
