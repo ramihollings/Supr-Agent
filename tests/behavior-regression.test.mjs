@@ -1103,8 +1103,11 @@ test('Settings page uses the extracted LLMConfigSection component', () => {
   assert.match(comp, /Global Providers &amp; Fallbacks|Global Providers & Fallbacks/);
   assert.match(comp, /Backup Provider Config/);
   // The component must declare its ref as a prop.
-  const propsType = comp.match(/export interface LLMConfigSectionProps[\s\S]*?\}/)?.[0] || '';
+  const propsType = comp.match(/export interface LlmConfigSectionProps[\s\S]*?\}/)?.[0] || '';
   assert.match(propsType, /ref: Ref<HTMLDivElement>/);
+  // The destructure on the function body should consume the ref
+  // (so the page can scroll to it) rather than reading props.ref.
+  assert.match(comp, /export function LLMConfigSection\(\{ ref, \.\.\.props \}[\s\S]{0,80}\<div ref=\{ref\}/);
   // The component takes role configs as 4 props (supr/code/research/sub).
   assert.match(propsType, /supr: LlmRoleConfig/);
   assert.match(propsType, /code: LlmRoleConfig/);

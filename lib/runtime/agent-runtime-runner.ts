@@ -9,12 +9,21 @@ import { executeAgentAction, getAgentAction } from './agent-actions';
 import { assembleAgentContext } from './context-assembler';
 import { getRuntimeMode } from './runtime-mode';
 import { parseModelJson } from './model-json';
+import {
+  DEFAULT_RUNTIME_BUDGET,
+  hasCompletionEvidence,
+  hasMeaningfulToolOutput,
+  inferProviderRole,
+  mergeEvidence,
+  parseModelToolResponse,
+  withRuntimeTimeout,
+} from './agent-runtime-pure';
 import type {
   AgentActionRecord,
   AgentContextBundle,
+  AgentRuntimeBudget,
   AgentRuntimeRunInput,
   AgentRuntimeRunResult,
-  ModelToolResponse,
   RuntimeMode,
 } from './types';
 
@@ -34,33 +43,6 @@ function safeJson<T>(value: string | null | undefined, fallback: T): T {
 function summarize(value: unknown, max = 8000) {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return text.length > max ? `${text.slice(0, max)}...` : text;
-}
-
-function parseModelToolResponse(raw: string): ModelToolResponse {
-  if (!raw.trim()) return { type: 'invalid', reason: 'Model returned empty output.', raw };
-  try {
-    const parsed = parseModelJson(raw);
-    if (parsed.type === 'tool_call' && parsed.toolName && parsed.arguments && typeof parsed.arguments === 'object') {
-      return {
-        type: 'tool_call',
-        toolName: String(parsed.toolName),
-        arguments: parsed.arguments,
-        rationale: parsed.rationale ? String(parsed.rationale) : undefined,
-      };
-    }
-    if (parsed.type === 'final' && parsed.summary) {
-      return { type: 'final', summary: String(parsed.summary), evidence: parsed.evidence || undefined };
-    }
-    if (parsed.type === 'needs_approval' && parsed.reason) {
-      return { type: 'needs_approval', reason: String(parsed.reason) };
-    }
-    if (parsed.type === 'message' && parsed.content) {
-      return { type: 'message', content: String(parsed.content) };
-    }
-    return { type: 'invalid', reason: 'Model response did not match the runtime protocol.', raw };
-  } catch (error: any) {
-    return { type: 'invalid', reason: `Model response was not valid JSON: ${error.message}`, raw };
-  }
 }
 
 function buildRuntimePrompt(action: AgentActionRecord, context: AgentContextBundle, toolResults: Array<Record<string, unknown>>) {
@@ -122,13 +104,6 @@ async function createAgentRun(action: AgentActionRecord, flowRunId?: string | nu
   return runId;
 }
 
-function inferProviderRole(action: AgentActionRecord): 'supr' | 'code' | 'research' | 'reflection' | 'sub' {
-  if (action.capability.includes('web')) return 'research';
-  if (action.capability.includes('workspace') || action.capability.includes('execute')) return 'code';
-  if (action.capability.includes('skill') || /sial|reflection|learn/i.test(action.intent || '')) return 'reflection';
-  return 'supr';
-}
-
 async function getModelResponse(input: {
   action: AgentActionRecord;
   context: AgentContextBundle;
@@ -137,8 +112,9 @@ async function getModelResponse(input: {
   mode: RuntimeMode;
   deadline: number | null;
   transcriptIds: string[];
+  budget: AgentRuntimeBudget;
 }) {
-  const role = inferProviderRole(input.action);
+  const role = inferProviderRole(input.action.capability, input.action.intent);
   const provider = await getActiveProvider(role);
   await providerRouteDecisionService.record({
     missionId: input.action.missionId,
@@ -151,12 +127,13 @@ async function getModelResponse(input: {
     failureReason: null,
   });
   const prompt = buildRuntimePrompt(input.action, input.context, input.toolResults);
+  const modelOptions = {
+    systemInstruction: 'Return only one JSON object matching the Supr runtime protocol. Do not include markdown.',
+    maxOutputTokens: input.budget.maxOutputTokens,
+  };
   let streamed = '';
   try {
-    for await (const chunk of provider.streamContent(prompt, {
-      systemInstruction: 'Return only one JSON object matching the Supr runtime protocol. Do not include markdown.',
-      maxOutputTokens: 1200,
-    })) {
+    for await (const chunk of provider.streamContent(prompt, modelOptions)) {
       streamed += chunk;
       if (chunk.trim()) {
         input.transcriptIds.push(await recordStep({
@@ -181,10 +158,7 @@ async function getModelResponse(input: {
       runtimeMode: input.mode,
       failureReason: error.message || String(error),
     });
-    return withRuntimeTimeout(provider.generateContent(prompt, {
-      systemInstruction: 'Return only one JSON object matching the Supr runtime protocol. Do not include markdown.',
-      maxOutputTokens: 1200,
-    }), input.deadline, 'model response');
+    return withRuntimeTimeout(provider.generateContent(prompt, modelOptions), input.deadline, 'model response');
   }
 }
 
@@ -228,31 +202,8 @@ async function recordToolInvocation(input: {
 async function completeToolInvocation(invocationId: string, output: unknown, error?: string) {
   await dbClient.execute(
     `UPDATE Tool_Invocations SET status = ?, output = ?, error = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [error ? 'failed' : 'completed', output === undefined ? null : summarize(output), error || null, invocationId],
+    [error ? 'failed' : 'completed', output === undefined ? null : summarize(output), error || null],
   );
-}
-
-function mergeEvidence(current: Record<string, string[]>, next: Record<string, string[]> = {}) {
-  for (const [key, values] of Object.entries(next)) {
-    current[key] = Array.from(new Set([...(current[key] || []), ...(Array.isArray(values) ? values : [])]));
-  }
-}
-
-function hasCompletionEvidence(evidence: Record<string, string[]>) {
-  return Object.values(evidence).some((values) => Array.isArray(values) && values.length > 0);
-}
-
-function hasMeaningfulToolOutput(output: unknown) {
-  if (output === null || output === undefined) return false;
-  if (typeof output === 'string') {
-    const trimmed = output.trim();
-    if (!trimmed) return false;
-    if (trimmed === '[]' || trimmed === '{}') return false;
-    return true;
-  }
-  if (Array.isArray(output)) return output.length > 0;
-  if (typeof output === 'object') return Object.keys(output).length > 0;
-  return true;
 }
 
 function assertNotCancelled(input: AgentRuntimeRunInput) {
@@ -261,26 +212,15 @@ function assertNotCancelled(input: AgentRuntimeRunInput) {
   }
 }
 
-function remainingTime(deadline: number | null) {
-  if (!deadline) return null;
-  return Math.max(0, deadline - Date.now());
-}
-
-async function withRuntimeTimeout<T>(operation: Promise<T>, deadline: number | null, label: string): Promise<T> {
-  const remaining = remainingTime(deadline);
-  if (remaining === null) return operation;
-  if (remaining <= 0) throw new Error(`Runtime timeout before ${label}.`);
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Runtime timeout during ${label}.`)), remaining);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+function effectiveBudget(budget: AgentRuntimeBudget | undefined): Required<AgentRuntimeBudget> {
+  return {
+    maxSteps: budget?.maxSteps ?? DEFAULT_RUNTIME_BUDGET.maxSteps,
+    timeoutMs: budget?.timeoutMs ? Math.max(1000, budget.timeoutMs) : DEFAULT_RUNTIME_BUDGET.timeoutMs,
+    retryLimit: budget?.retryLimit !== undefined
+      ? Math.max(0, Math.min(3, budget.retryLimit))
+      : DEFAULT_RUNTIME_BUDGET.retryLimit,
+    maxOutputTokens: budget?.maxOutputTokens ?? DEFAULT_RUNTIME_BUDGET.maxOutputTokens,
+  };
 }
 
 export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flowRunId?: string | null } | string): Promise<AgentRuntimeRunResult> {
@@ -290,9 +230,10 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
 
   const mode = normalized.mode || await getRuntimeMode();
   const startedAt = Date.now();
-  const timeoutMs = normalized.budget?.timeoutMs ? Math.max(1000, normalized.budget.timeoutMs) : null;
-  const deadline = timeoutMs ? startedAt + timeoutMs : null;
-  const retryLimit = Math.max(0, Math.min(3, normalized.budget?.retryLimit || 0));
+  const budget = effectiveBudget(normalized.budget);
+  const timeoutMs = budget.timeoutMs;
+  const deadline = startedAt + timeoutMs;
+  const retryLimit = budget.retryLimit;
   const metricIds: string[] = [];
 
   const lifecycle = await executeAgentAction(normalized.actionId, async (action) => {
@@ -314,15 +255,12 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
         metadata: { injectedSections: context.injectedSections, toolCount: context.tools.length, mode, timeoutMs, retryLimit },
       }));
 
-      const maxSteps = Math.max(1, Math.min(10, normalized.budget?.maxSteps || 4));
+      const maxSteps = budget.maxSteps;
       for (let step = 0; step < maxSteps; step += 1) {
         assertNotCancelled(normalized);
-        if (deadline && Date.now() >= deadline) {
+        if (Date.now() >= deadline) {
           throw new Error(`Runtime timeout exceeded after ${Date.now() - startedAt}ms.`);
         }
-        // Note: getModelResponse() already calls getActiveProvider(), which
-        // throws a helpful "No model provider is configured..." error if
-        // no key is set. No need to pre-check here.
         const raw = await withRuntimeTimeout(getModelResponse({
           action,
           context,
@@ -331,6 +269,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           mode,
           deadline,
           transcriptIds,
+          budget,
         }), deadline, 'model response');
         const response = parseModelToolResponse(raw);
 

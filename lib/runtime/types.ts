@@ -18,6 +18,7 @@ export interface AgentRuntimeBudget {
   maxSteps?: number;
   timeoutMs?: number;
   retryLimit?: number;
+  maxOutputTokens?: number;
 }
 
 export interface AgentRuntimeRunInput {

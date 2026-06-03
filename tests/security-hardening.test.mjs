@@ -204,10 +204,10 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
   assert.match(runtime, /humanGateRequired/);
   assert.match(runner, /ModelToolResponse/);
   assert.match(runner, /toolRegistry\.executeTool/);
-  // The runtime no longer pre-checks hasConfiguredModelProvider; the
-  // new "no model provider" error is emitted by getActiveProvider()
-  // and lists the env vars.
-  assert.match(runner, /parseModelJson\(raw\)/);
+  // The runtime delegates JSON parsing to the pure helper
+  // `parseModelToolResponse` in agent-runtime-pure.ts, which itself
+  // calls `parseModelJson` after stripping provider thinking preambles.
+  assert.match(runner, /parseModelToolResponse\(raw\)/);
   assert.match(runner, /Tool_Invocations/);
   assert.match(runner, /runtime_context/);
   assert.match(runner, /runtime_failure/);
@@ -215,7 +215,7 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
   assert.match(runner, /hasMeaningfulToolOutput/);
   assert.match(runner, /returned empty output; refusing to treat it as durable execution evidence/);
   assert.match(runner, /withRuntimeTimeout/);
-  assert.match(runner, /Runtime timeout during/);
+  assert.match(runner, /Runtime timeout exceeded/);
   assert.match(runner, /assertNotCancelled/);
   assert.match(runner, /retryLimit/);
   assert.match(runner, /failed attempt/);
@@ -666,7 +666,7 @@ test('model JSON parsing tolerates provider thinking preambles', () => {
   assert.match(parser, /<think>\[\\s\\S\]\*\?<\\\/think>/);
   assert.match(parser, /extractFirstJsonObject/);
   assert.match(parser, /parseModelJson/);
-  assert.match(runner, /parseModelJson\(raw\)/);
+  assert.match(runner, /parseModelToolResponse\(raw\)/);
   assert.match(projectFlow, /parseModelJson\(raw\)/);
   assert.match(codeRoute, /parseModelJson\(raw\)/);
 });
