@@ -978,3 +978,17 @@ test('DataTable component is a generic neobrutalist list table for shared use', 
   // Custom renderer per column.
   assert.match(tbl, /render\?\: \(row: T\) => ReactNode/);
 });
+
+test('Settings page uses the extracted StandardsSection component', () => {
+  const page = readFileSync('app/settings/page.tsx', 'utf8');
+  assert.match(page, /from '@\/components\/settings\/StandardsSection'/);
+  // The page must not inline the standards checkbox grid; that
+  // belongs in the component.
+  assert.doesNotMatch(page, /Operational Standards/);
+  // The component file must exist and have the public surface.
+  const comp = readFileSync('components/settings/StandardsSection.tsx', 'utf8');
+  assert.match(comp, /export function StandardsSection/);
+  assert.match(comp, /cite_evidence/);
+  assert.match(comp, /pass_tests/);
+  assert.match(comp, /scope_approval/);
+});
