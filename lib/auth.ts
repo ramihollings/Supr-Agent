@@ -64,7 +64,7 @@ export async function isAppSecured() {
   return !!password;
 }
 
-let productionEnvChecked = false;
+let productionEnvResult: { ok: true } | { ok: false; reason: string } | null = null;
 
 /**
  * Fail-closed assertion for production deployments.
@@ -78,27 +78,33 @@ let productionEnvChecked = false;
  * If anything is missing in production, the process logs the error and
  * the first protected request returns 503, making the misconfig obvious
  * instead of silently shipping with a default secret.
+ *
+ * The result object is cached so a failed assertion stays failed for the
+ * rest of the process lifetime — we never silently flip to `{ ok: true }`
+ * after a startup failure. A previous version of this function cached a
+ * boolean and returned `{ ok: true }` after the first call regardless of
+ * outcome, which is the exact bug the auditor flagged.
  */
 export function assertProductionAuthEnvironment(): { ok: true } | { ok: false; reason: string } {
-  if (productionEnvChecked) return { ok: true };
-  if (process.env.NODE_ENV !== 'production') {
-    productionEnvChecked = true;
-    return { ok: true };
-  }
+  if (process.env.NODE_ENV !== 'production') return { ok: true };
+  if (productionEnvResult) return productionEnvResult;
 
   const missing: string[] = [];
   if (!process.env.APP_PASSWORD) missing.push('APP_PASSWORD');
   if (!process.env.AUTH_SECRET) missing.push('AUTH_SECRET');
 
-  if (missing.length > 0) {
-    const reason = `Refusing to start in production: missing required env var(s) ${missing.join(', ')}. Both APP_PASSWORD and AUTH_SECRET must be set before exposing Supr to the network.`;
-    console.error(`[Supr] ${reason}`);
-    productionEnvChecked = true;
-    return { ok: false, reason };
+  productionEnvResult = missing.length
+    ? {
+        ok: false,
+        reason: `Refusing to start in production: missing required env var(s) ${missing.join(', ')}. Both APP_PASSWORD and AUTH_SECRET must be set before exposing Supr to the network.`,
+      }
+    : { ok: true };
+
+  if (!productionEnvResult.ok) {
+    console.error(`[Supr] ${productionEnvResult.reason}`);
   }
 
-  productionEnvChecked = true;
-  return { ok: true };
+  return productionEnvResult;
 }
 
 export async function requireApiAuth(request: Request) {

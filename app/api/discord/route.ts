@@ -4,8 +4,12 @@ import dbClient from '@/lib/database/db_client';
 import { serializeChannelPayload } from '@/lib/channel-logging';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
 import { routeIntakeToProjectFlow } from '@/lib/runtime/project-flow';
+import { consume, isChannelDebugEnabled } from '@/lib/route-rate-limit';
 
 export const dynamic = 'force-dynamic';
+
+const DISABLED_CHANNEL_MAX = 5;
+const DISABLED_CHANNEL_WINDOW_MS = 60_000;
 
 async function verifyDiscordToken(req: NextRequest) {
   const configured = await getSecretSetting('discord_webhook_token', process.env.DISCORD_WEBHOOK_TOKEN);
@@ -20,18 +24,24 @@ async function verifyDiscordToken(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_discord');
   if (enabled !== 'true') {
-    const payload = await req.json().catch(() => ({}));
-    await dbClient.execute(
-      `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
-       VALUES (?, 'discord', ?, ?, 'ignored', ?, ?)`,
-      [
-        `cmd-${crypto.randomUUID()}`,
-        String(payload?.content || payload?.message?.content || '[discord disabled]'),
-        serializeChannelPayload(payload),
-        String(payload?.author?.id || payload?.user?.id || 'discord'),
-        'Discord channel disabled; core Supr runtime remains live.',
-      ],
-    );
+    if (!consume('discord:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
+      return Response.json({ ok: true, ignored: true, response: 'Discord channel is disabled; rate limit reached.' });
+    }
+    const debug = await isChannelDebugEnabled('discord');
+    if (debug) {
+      const payload = await req.json().catch(() => ({}));
+      await dbClient.execute(
+        `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
+         VALUES (?, 'discord', ?, ?, 'ignored', ?, ?)`,
+        [
+          `cmd-${crypto.randomUUID()}`,
+          String(payload?.content || payload?.message?.content || '[discord disabled]'),
+          serializeChannelPayload(payload),
+          String(payload?.author?.id || payload?.user?.id || 'discord'),
+          'Discord channel disabled; core Supr runtime remains live.',
+        ],
+      );
+    }
     return Response.json({ ok: true, ignored: true, response: 'Discord channel is disabled; Supr runtime remains live.' });
   }
 

@@ -202,7 +202,7 @@ async function recordToolInvocation(input: {
 async function completeToolInvocation(invocationId: string, output: unknown, error?: string) {
   await dbClient.execute(
     `UPDATE Tool_Invocations SET status = ?, output = ?, error = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [error ? 'failed' : 'completed', output === undefined ? null : summarize(output), error || null],
+    [error ? 'failed' : 'completed', output === undefined ? null : summarize(output), error || null, invocationId],
   );
 }
 

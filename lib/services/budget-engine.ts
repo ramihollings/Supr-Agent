@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import dbClient from "../../lib/database/db_client";
 
 export type BudgetScopeType = "global" | "agent" | "mission";
@@ -66,7 +67,7 @@ export class BudgetEngine {
    * Trigger a hard budget stop: create incident, log event, and pause target.
    */
   private async triggerHardStop(policy: any, observed: number, missionId?: string, agentId?: string): Promise<void> {
-    const incidentId = `inc-hard-${policy.id}-${Date.now()}`;
+    const incidentId = `inc-hard-${policy.id}-${crypto.randomUUID()}`;
     
     // Check if an open hard incident already exists
     const existing = await dbClient.queryOne(
@@ -99,7 +100,7 @@ export class BudgetEngine {
         `INSERT INTO Event_Log (id, mission_id, actor_type, actor_id, event_type, summary, metadata)
          VALUES (?, ?, 'system', 'budget_engine', 'governance', ?, ?)`,
         [
-          `evt-budget-${Date.now()}`,
+          `evt-budget-${crypto.randomUUID()}`,
           missionId,
           `Hard budget limit crossed for ${policy.scope_type} (${policy.scope_id}). Scope has been paused.`,
           JSON.stringify({ policyId: policy.id, limitCents: policy.limit_cents, observedCents: observed })
@@ -112,7 +113,7 @@ export class BudgetEngine {
    * Trigger a soft budget warning.
    */
   private async triggerSoftWarning(policy: any, observed: number): Promise<void> {
-    const incidentId = `inc-soft-${policy.id}-${Date.now()}`;
+    const incidentId = `inc-soft-${policy.id}-${crypto.randomUUID()}`;
 
     // Check if a warning already exists
     const existing = await dbClient.queryOne(

@@ -52,6 +52,15 @@ import {
 } from '@/lib/validations';
 import { z } from 'zod';
 
+// Helper for generating unique persisted primary keys. Uses
+// crypto.randomUUID() so parallel writers (concurrent skill saves,
+// duplicate missions, etc.) never collide on the primary key.
+// `Date.now()` is fine for UI state and timestamps, but never for
+// database IDs — two writes in the same millisecond would collide.
+function newId(prefix: string) {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
 // Helper for error handling in production
 function handleActionError(error: unknown) {
   console.error('[Action Error]:', error);
@@ -753,7 +762,7 @@ export async function fetchSkillsState() {
 
 export async function createSkillAction(skill: { name: string, description: string, provider: string, tools: string[] }) {
   try {
-    const id = `sk-${Date.now()}`;
+    const id = newId('sk');
     const sql = `
       INSERT INTO Skills (id, name, description, provider, tools)
       VALUES (?, ?, ?, ?, ?)
@@ -819,7 +828,7 @@ export async function triggerCronJobAction(id: string) {
 
 export async function createCronJobAction(data: { name: string; interval: string; targetAction: string; assignedAgentId?: string; associatedTaskId?: string }) {
   try {
-    const id = `cr-${Date.now()}`;
+    const id = newId('cr');
     const sql = `
       INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status, assigned_agent_id, associated_task_id)
       VALUES (?, ?, ?, ?, NULL, 'Active', ?, ?)
@@ -1183,7 +1192,7 @@ export async function addGlobalMemoryItemAction(key: string, value: string, impo
     `;
     const impVal = importance === 'High' ? 0.8 : importance === 'Medium' ? 0.5 : 0.2;
     await dbClient.execute(sql, [
-      `mem-${Date.now()}`,
+      `mem-${crypto.randomUUID()}`,
       scope,
       'semantic',
       JSON.stringify({ key, value }),
@@ -2007,9 +2016,9 @@ export async function startRunbookAction(runbookId: string) {
       objective: row.description || row.output || `Run ${row.name}`,
       status: 'Active',
       readinessScore: 25,
-      phases: [{ id: `phase-${Date.now()}`, name: row.name, status: 'Active' }],
+      phases: [{ id: `phase-${crypto.randomUUID()}`, name: row.name, status: 'Active' }],
       tasks: agents.map((agent, index) => ({
-        id: `task-${Date.now()}-${index}`,
+        id: `task-${crypto.randomUUID()}-${index}`,
         title: `${agent}: ${row.output || row.name}`,
         status: index === 0 ? 'Active' : 'Pending',
         assignedAgent: agent,
@@ -2100,7 +2109,7 @@ export async function rollbackArtifactVersionAction(versionId: string) {
       ]);
     } else {
       await dbClient.execute(`INSERT INTO Artifacts (id, mission_id, type, title, content) VALUES (?, ?, ?, ?, ?)`, [
-        `art-${Date.now()}`,
+        `art-${crypto.randomUUID()}`,
         row.mission_id,
         row.type || 'markdown',
         row.title,
@@ -2116,7 +2125,7 @@ export async function rollbackArtifactVersionAction(versionId: string) {
       `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        `ver-${Date.now()}`,
+        `ver-${crypto.randomUUID()}`,
         row.artifact_id,
         row.mission_id,
         row.title,
@@ -2629,7 +2638,7 @@ export async function duplicateMissionAction(missionId: string) {
     const artifacts = await dbClient.query<any>(`SELECT * FROM Artifacts WHERE mission_id = ?`, [id]);
 
     // 2. Generate new IDs
-    const newMissionId = `m-${Date.now()}`;
+    const newMissionId = newId('m');
     const newTitle = `${mission.title} (Copy)`;
 
     const operations: { sql: string; params: any[] }[] = [

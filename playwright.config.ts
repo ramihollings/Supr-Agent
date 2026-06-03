@@ -28,7 +28,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `node --disable-warning=DEP0205 node_modules/next/dist/bin/next start -p ${PORT}`,
+    // Use the Next.js standalone build for the E2E test server.
+    // This is closer to a real production deployment than `next start`
+    // and catches issues with the standalone bundler that would
+    // otherwise only show up in a packaged deploy.
+    command: `node .next/standalone/server.js`,
     url: `${BASE_URL}/api/auth/status`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

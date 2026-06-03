@@ -7,6 +7,16 @@ export async function ensureDbExists() {
   // Handled by dbClient natively
 }
 
+/**
+ * Generate a unique prefixed ID. Uses crypto.randomUUID() so parallel
+ * writers (rapid agent runs, concurrent artifact saves) never collide
+ * on the primary key. Previously these IDs used `Date.now()` which can
+ * produce duplicate values when two writes happen in the same millisecond.
+ */
+function newId(prefix: string) {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
 export async function getDb(): Promise<DatabaseSchema> {
   const agents = await getAgents();
   const missions = await dbClient.query<{ id: string }>(`SELECT id FROM Missions`);
@@ -444,7 +454,7 @@ export async function recordFailure(missionId: string, failure: Omit<FailureEven
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
   await dbClient.execute(sql, [
-    `f-${Date.now()}`,
+    newId('f'),
     missionId,
     failure.taskId,
     failure.agentName,
@@ -467,7 +477,7 @@ export async function updateTaskStatus(missionId: string, taskId: string, status
 }
 
 export async function addArtifact(missionId: string, artifact: Omit<Artifact, 'id'>): Promise<void> {
-  const id = `art-${Date.now()}`;
+  const id = newId('art');
   const sql = `
     INSERT INTO Artifacts (id, mission_id, type, title, content)
     VALUES (?, ?, ?, ?, ?)
@@ -476,7 +486,7 @@ export async function addArtifact(missionId: string, artifact: Omit<Artifact, 'i
   await dbClient.execute(
     `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [`av-${Date.now()}`, id, missionId, artifact.filename, artifact.type, artifact.content, 1, 'draft', 'Supr', `${artifact.content.split('\n').length} lines created`]
+    [newId('av'), id, missionId, artifact.filename, artifact.type, artifact.content, 1, 'draft', 'Supr', `${artifact.content.split('\n').length} lines created`]
   );
 }
 
@@ -489,7 +499,7 @@ export async function updateArtifact(missionId: string, title: string, content: 
     `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      `av-${Date.now()}`,
+      newId('av'),
       artifact?.id || null,
       missionId,
       title,
@@ -509,7 +519,7 @@ export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'i
     VALUES (?, ?, ?, ?, ?)
   `;
   await dbClient.execute(sql, [
-    `mem-${Date.now()}`, 
+    newId('mem'),
     missionId, 
     'semantic', 
     JSON.stringify({ key: item.key, value: item.value }),
@@ -518,7 +528,7 @@ export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'i
 }
 
 export async function createMission(missionData: Omit<Mission, 'id'>): Promise<Mission> {
-  const newMissionId = `m-${Date.now()}`;
+  const newMissionId = newId('m');
 
   await dbClient.runTransaction([
     {
@@ -532,7 +542,7 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
     {
       sql: `INSERT INTO Artifacts (id, mission_id, type, title, content) VALUES (?, ?, ?, ?, ?)`,
       params: [
-        `art-brief-${Date.now()}`,
+        newId('art-brief'),
         newMissionId,
         'markdown',
         'strategic_briefing.md',
@@ -542,7 +552,7 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
     {
       sql: `INSERT INTO Artifacts (id, mission_id, type, title, content) VALUES (?, ?, ?, ?, ?)`,
       params: [
-        `art-check-${Date.now()}`,
+        newId('art-check'),
         newMissionId,
         'json',
         'project_checklists.json',

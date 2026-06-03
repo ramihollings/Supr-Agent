@@ -4,8 +4,14 @@ import { serializeChannelPayload } from '@/lib/channel-logging';
 import dbClient from '@/lib/database/db_client';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
 import { routeIntakeToProjectFlow } from '@/lib/runtime/project-flow';
+import { consume, isChannelDebugEnabled } from '@/lib/route-rate-limit';
 
 export const dynamic = 'force-dynamic';
+
+// Disabled-channel rate limit: 5 requests per 60s, per process.
+// Stops a noisy bot from filling the DB with ignored rows.
+const DISABLED_CHANNEL_MAX = 5;
+const DISABLED_CHANNEL_WINDOW_MS = 60_000;
 
 function safeEqual(left: string, right: string) {
   const leftBuffer = Buffer.from(left);
@@ -49,14 +55,20 @@ async function storeIgnored(command: string, actorId: string, payload: unknown, 
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_slack');
   if (enabled !== 'true') {
-    const raw = await req.text().catch(() => '');
-    let payload: any = {};
-    try {
-      payload = raw ? JSON.parse(raw) : {};
-    } catch {
-      payload = { raw: raw.slice(0, 500) };
+    // Rate-limit unauthenticated traffic on disabled channels so a
+    // noisy bot cannot fill the DB. The token bucket is per-process.
+    if (!consume('slack:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
+      return Response.json({ ok: true, ignored: true, response: 'Slack channel is disabled; rate limit reached.' });
     }
-    await storeIgnored(String(payload?.text || payload?.event?.text || '[slack disabled]'), String(payload?.user_id || payload?.event?.user || 'slack'), payload, 'Slack channel disabled; core Supr runtime remains live.');
+    // Default: do NOT persist the payload. Operators can opt in via
+    // the `channels_slack_debug` setting when investigating traffic.
+    const debug = await isChannelDebugEnabled('slack');
+    if (debug) {
+      const raw = await req.text().catch(() => '');
+      let payload: any = {};
+      try { payload = raw ? JSON.parse(raw) : {}; } catch { payload = { raw: raw.slice(0, 500) }; }
+      await storeIgnored(String(payload?.text || payload?.event?.text || '[slack disabled]'), String(payload?.user_id || payload?.event?.user || 'slack'), payload, 'Slack channel disabled; core Supr runtime remains live.');
+    }
     return Response.json({ ok: true, ignored: true, response: 'Slack channel is disabled; Supr runtime remains live.' });
   }
 

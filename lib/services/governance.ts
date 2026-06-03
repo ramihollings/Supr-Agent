@@ -1,4 +1,6 @@
 export type PermissionTier = 'Observe' | 'Draft' | 'Edit' | 'Execute' | 'External_Act' | 'Root';
+import crypto from 'crypto';
+import dbClient from '@/lib/database/db_client';
 
 export interface AgentContext {
   id: string;
@@ -112,33 +114,31 @@ export class PermissionEngine {
     capabilityArgs: Record<string, any> = {}
   ): Promise<GovernanceDecision> {
     try {
-      const { getSqliteDb } = await import('../database/init');
-      const db = getSqliteDb();
-
       const ruleDecision = await this.evaluateToolRules(capabilityName, capabilityArgs);
       if (ruleDecision.status !== 'Approved') {
-        const capability = db.prepare("SELECT * FROM Capabilities WHERE name = ?").get(capabilityName) as any;
-        db.prepare(`
-          INSERT INTO Policy_Decisions (id, mission_id, agent_id, capability_id, decision, reason)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).run(`dec-${Date.now()}-rule`, missionId, agentId, capability?.id || null, ruleDecision.status, ruleDecision.reason);
+        const capability = await dbClient.queryOne<any>(`SELECT * FROM Capabilities WHERE name = ?`, [capabilityName]);
+        await dbClient.execute(
+          `INSERT INTO Policy_Decisions (id, mission_id, agent_id, capability_id, decision, reason)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [`dec-${crypto.randomUUID()}-rule`, missionId, agentId, capability?.id || null, ruleDecision.status, ruleDecision.reason]
+        );
         return ruleDecision;
       }
 
       // 1. Fetch agent permission tier
-      const agent = db.prepare("SELECT * FROM Agents WHERE id = ?").get(agentId) as any;
+      const agent = await dbClient.queryOne<any>(`SELECT * FROM Agents WHERE id = ?`, [agentId]);
       if (!agent) {
         return { status: 'Denied', reason: `Agent '${agentId}' not found.` };
       }
 
       // 2. Fetch capability requirement
-      const capability = db.prepare("SELECT * FROM Capabilities WHERE name = ?").get(capabilityName) as any;
+      const capability = await dbClient.queryOne<any>(`SELECT * FROM Capabilities WHERE name = ?`, [capabilityName]);
       if (!capability) {
         return { status: 'Denied', reason: `Capability '${capabilityName}' is not registered. Refusing open-ended execution.` };
       }
 
       // 3. Check specific Agent_Capabilities binding
-      const agentCap = db.prepare("SELECT * FROM Agent_Capabilities WHERE agent_id = ? AND capability_id = ?").get(agentId, capability.id) as any;
+      const agentCap = await dbClient.queryOne<any>(`SELECT * FROM Agent_Capabilities WHERE agent_id = ? AND capability_id = ?`, [agentId, capability.id]);
 
       let decisionStatus: DecisionType = 'Approved';
       let reason = 'Approved by capability policy.';
@@ -163,11 +163,12 @@ export class PermissionEngine {
       }
 
       // 4. Log the policy decision in Policy_Decisions
-      const decisionId = `dec-${Date.now()}`;
-      db.prepare(`
-        INSERT INTO Policy_Decisions (id, mission_id, agent_id, capability_id, decision, reason)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(decisionId, missionId, agentId, capability.id, decisionStatus, reason);
+      const decisionId = `dec-${crypto.randomUUID()}`;
+      await dbClient.execute(
+        `INSERT INTO Policy_Decisions (id, mission_id, agent_id, capability_id, decision, reason)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [decisionId, missionId, agentId, capability.id, decisionStatus, reason]
+      );
 
       return { status: decisionStatus, reason };
     } catch (err: any) {

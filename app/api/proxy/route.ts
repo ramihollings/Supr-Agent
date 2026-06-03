@@ -232,6 +232,28 @@ function rewriteHtml(html: string, normalizedUrl: string) {
     return `<a ${attrs}href="/api/proxy?url=${encodeURIComponent(link)}"`;
   });
 
+  // XSS hardening: strip every executable surface from the proxied HTML.
+  // The per-response CSP+sandbox header (set by the caller) is the
+  // primary defense; these regexes are belt-and-suspenders so that
+  // even a CSP bypass in the browser doesn't give an attacker a way
+  // to run code in Supr's origin.
+  // - <script>...</script> blocks
+  rewritten = rewritten.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  // - <script src=...> self-closing / external
+  rewritten = rewritten.replace(/<script\b[^>]*\/?>/gi, '');
+  // - Inline event handler attributes (onclick, onerror, onload, ...)
+  rewritten = rewritten.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  // - javascript: URLs in href/src/action
+  rewritten = rewritten.replace(/(href|src|action|formaction)\s*=\s*["']\s*javascript:[^"']*["']/gi, '$1="#"');
+  // - <form> elements (proxy is read-only)
+  rewritten = rewritten.replace(/<form\b[^>]*>[\s\S]*?<\/form>/gi, '');
+  rewritten = rewritten.replace(/<form\b[^>]*\/?>/gi, '');
+  // - Active embed surfaces: <object>, <embed>, <applet>, <base>
+  rewritten = rewritten.replace(/<(object|embed|applet|base)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+  rewritten = rewritten.replace(/<(object|embed|applet|base)\b[^>]*\/?>/gi, '');
+  // - <meta http-equiv="refresh" ...> redirect tricks
+  rewritten = rewritten.replace(/<meta\s+http-equiv\s*=\s*["']?refresh["']?[^>]*>/gi, '');
+
   const injectedCode = `
     <style>
       ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -239,23 +261,6 @@ function rewriteHtml(html: string, normalizedUrl: string) {
       ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
-    <script>
-      document.addEventListener('submit', function(e) {
-        const form = e.target;
-        if (form && form.action) {
-          e.preventDefault();
-          const actionUrl = new URL(form.action, window.location.href).href;
-          const method = (form.method || 'GET').toUpperCase();
-          if (method === 'GET') {
-            const formData = new FormData(form);
-            const params = new URLSearchParams();
-            for (const [key, value] of formData.entries()) params.append(key, value.toString());
-            const separator = actionUrl.includes('?') ? '&' : '?';
-            window.location.href = '/api/proxy?url=' + encodeURIComponent(actionUrl + separator + params.toString());
-          }
-        }
-      });
-    </script>
   `;
 
   return rewritten.includes('</head>')
@@ -291,6 +296,21 @@ export async function GET(request: Request) {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'X-Content-Type-Options': 'nosniff',
+          // Per-response CSP: proxied HTML runs in a fully sandboxed
+          // context. The `sandbox` directive (with no allow-* tokens)
+          // is the most restrictive setting — the document gets an
+          // opaque origin, cannot run scripts, cannot submit forms,
+          // cannot access the parent frame's storage, and cannot
+          // navigate the top-level browsing context. The `default-src
+          // 'none'` fallback means any resource type the page tries
+          // to load that we did not explicitly allow is denied.
+          // We allow `img-src https: data:` so the page can still
+          // display images from its own origin, and `style-src
+          // 'unsafe-inline'` because we inject a <style> block for
+          // the scrollbar theming. Every <script>/event-handler/
+          // javascript: URL in the HTML body is also stripped as a
+          // second layer of defense.
+          'Content-Security-Policy': "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; sandbox",
         },
       });
     }

@@ -2,6 +2,7 @@ import { fork, ChildProcess } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import { pluginRegistry } from "./plugin-registry";
+import { isValidPluginId } from "./plugin-loader";
 
 import { pluginHost } from "./plugin-host";
 
@@ -34,9 +35,31 @@ export class PluginWorkerManager {
     }
 
     const entrypoint = plugin.manifest.entrypoint;
-    // Resolve entrypoint path relative to plugins directory
+    // The plugin id comes from the registry, which the loader populates
+    // after passing the strict allowlist check. Re-validate here as a
+    // defense-in-depth measure: a bug or future code path that lets an
+    // unvalidated id reach the worker must not be able to escape the
+    // plugins directory.
+    if (!isValidPluginId(pluginId)) {
+      throw new Error(`Plugin id '${pluginId}' is not a valid id (must match ^[a-zA-Z0-9._-]{1,64}$).`);
+    }
+    // Resolve entrypoint path relative to plugins directory.
     const pluginsDir = path.resolve(process.cwd(), "plugins");
-    const entryPath = path.resolve(pluginsDir, pluginId, entrypoint);
+    const pluginRoot = path.resolve(pluginsDir, pluginId);
+    // Defense-in-depth: pluginRoot itself must be inside pluginsDir.
+    // This guards against the (currently impossible, given the id
+    // allowlist) case where path.resolve finds a different root.
+    if (!pluginRoot.startsWith(pluginsDir + path.sep) && pluginRoot !== pluginsDir) {
+      throw new Error(`Plugin '${pluginId}' root escapes the plugins directory.`);
+    }
+    const entryPath = path.resolve(pluginRoot, entrypoint);
+
+    // Path containment: the resolved entry must be inside
+    // plugins/<pluginId>. A manifest with `../../outside.js` would
+    // otherwise escape the plugin sandbox and execute arbitrary code.
+    if (!entryPath.startsWith(pluginRoot + path.sep) && entryPath !== pluginRoot) {
+      throw new Error(`Plugin '${pluginId}' entrypoint '${entrypoint}' escapes the plugin directory.`);
+    }
 
     if (!fs.existsSync(entryPath)) {
       throw new Error(`Entrypoint not found for plugin '${pluginId}' at path: ${entryPath}`);
@@ -44,12 +67,16 @@ export class PluginWorkerManager {
 
     console.log(`[PluginWorkers] Starting worker for plugin '${pluginId}' (entrypoint: ${entrypoint})...`);
 
-    // Fork the worker process (isolated environment)
+    // Fork the worker process with a *scoped* environment. The previous
+    // implementation inherited all of process.env (including OPENAI_API_KEY,
+    // GEMINI_API_KEY, AUTH_SECRET, etc.) which let any plugin exfiltrate
+    // host secrets. Plugins now get only the two vars they need to identify
+    // themselves; secret access must be requested via a future manifest
+    // permission flag.
     const child = fork(entryPath, [], {
       env: {
-        ...process.env,
+        NODE_ENV: process.env.NODE_ENV || "development",
         PLUGIN_ID: pluginId,
-        NODE_ENV: process.env.NODE_ENV || "development"
       },
       stdio: ["inherit", "inherit", "inherit", "ipc"]
     });

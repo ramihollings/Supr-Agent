@@ -28,10 +28,10 @@ export async function GET(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false;
-      const send = (data: any) => {
+      const send = (eventName: string, data: any) => {
         if (closed) return;
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          controller.enqueue(encoder.encode(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`));
         } catch {
           closed = true;
         }
@@ -58,13 +58,13 @@ export async function GET(req: NextRequest) {
         const initialMission = await fetchProject();
         if (initialMission) {
           lastHash = computeHash(initialMission);
-          send({ type: 'mission', mission: initialMission });
+          send('mission', { type: 'mission', mission: initialMission });
         } else {
-          send({ type: 'no_mission' });
+          send('no_mission', { type: 'no_mission' });
         }
       } catch (error) {
         console.error('SSE initial fetch failed:', error);
-        send({ type: 'error', message: String(error) });
+        send('error', { type: 'error', message: String(error) });
       }
 
       // Subscribe to the bus. If `projectId` is set, only re-fetch when
@@ -80,13 +80,13 @@ export async function GET(req: NextRequest) {
         try {
           const mission = await fetchProject();
           if (!mission) {
-            send({ type: 'no_mission' });
+            send('no_mission', { type: 'no_mission' });
             return;
           }
           const currentHash = computeHash(mission);
           if (currentHash !== lastHash) {
             lastHash = currentHash;
-            send({ type: kind, reason, mission });
+            send('mission', { type: kind, reason, mission });
           }
         } catch (error) {
           console.error('SSE refetch failed:', error);

@@ -111,6 +111,30 @@ test('production boot refuses to serve without APP_PASSWORD and AUTH_SECRET', ()
   assert.match(proxy, /\b503\b/);
 });
 
+test('production auth check caches the result, not just a checked flag', () => {
+  // The previous version of assertProductionAuthEnvironment used a
+  // boolean `productionEnvChecked` and returned `{ ok: true }` after
+  // the first call regardless of outcome. That meant a startup
+  // failure could be silently masked by a later successful call (or
+  // vice-versa). The fix caches the actual result object so a failed
+  // assertion stays failed for the rest of the process lifetime.
+  const auth = readFileSync('lib/auth.ts', 'utf8');
+  // Must not use the old boolean flag.
+  assert.doesNotMatch(auth, /productionEnvChecked/);
+  // Must cache the result object itself.
+  assert.match(auth, /productionEnvResult/);
+  // The early-return must check the cached result, not a boolean.
+  assert.match(auth, /if\s*\(\s*productionEnvResult\s*\)\s*return\s+productionEnvResult/);
+  // The failure path must assign to productionEnvResult (not set a boolean).
+  // The assignment is a ternary: productionEnvResult = missing.length
+  //   ? { ok: false, reason: ... }
+  //   : { ok: true };
+  // No `{` immediately after `=` — the ternary sits between.
+  assert.match(auth, /productionEnvResult\s*=[\s\S]*ok:\s*false/);
+  // Non-production must short-circuit without touching the cache.
+  assert.match(auth, /if\s*\(\s*process\.env\.NODE_ENV\s*!==\s*['"]production['"]\s*\)\s*return\s*\{\s*ok:\s*true\s*\}/);
+});
+
 test('proxy keeps SSRF defenses enabled', () => {
   const proxyRoute = readFileSync('app/api/proxy/route.ts', 'utf8');
   assert.match(proxyRoute, /redirect:\s*'manual'/);

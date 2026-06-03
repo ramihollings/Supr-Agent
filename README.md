@@ -37,7 +37,9 @@ the live health probe.
 ## Stack
 
 - **Framework:** Next.js 16 (App Router, Server Actions, Standalone builds)
-- **Database:** SQLite (`better-sqlite3`, WAL) — or PostgreSQL for multi-instance
+- **Database:** SQLite (`better-sqlite3`, WAL). PostgreSQL is partially
+  supported in `lib/database/db_client.ts` but not production-validated —
+  all governance and runtime paths use the SQLite-backed `dbClient` adapter.
 - **AI:** MiniMax (primary) via `@google/genai`; Gemini, OpenAI, Anthropic,
   xAI, OpenRouter, Groq, Mistral, and DeepSeek also supported
 - **Styling:** Tailwind CSS with 7 layout themes × 15 color palettes

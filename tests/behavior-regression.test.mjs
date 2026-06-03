@@ -699,7 +699,12 @@ test('PermissionEngine loads native rules via dynamic import, not require()', ()
   // The lazy-load helper and the two call sites must use await import().
   assert.match(governance, /await import\(['"]\.\.\/governance\/SafetyRuleEngine['"]\)/);
   assert.match(governance, /await import\(['"]\.\.\/governance\/RuleEngine['"]\)/);
-  assert.match(governance, /await import\(['"]\.\.\/database\/init['"]\)/);
+  // The database access must go through the dbClient adapter (not the
+  // raw getSqliteDb() / db.prepare() SQLite handle, which would tie the
+  // governance layer to SQLite and break any future Postgres migration).
+  assert.match(governance, /import\s+dbClient\s+from\s+['"]@\/lib\/database\/db_client['"]/);
+  assert.match(governance, /dbClient\.queryOne/);
+  assert.match(governance, /dbClient\.execute/);
   // And no require() calls anywhere in governance code (Turbopack rejects them).
   // Match require( followed by a quote so we don't trip on the word in a comment.
   assert.doesNotMatch(governance, /\brequire\(\s*['"]/);

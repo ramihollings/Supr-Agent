@@ -256,29 +256,39 @@ function DashboardContent() {
     }
   };
 
-  const handleDeleteProject = async () => {
-    if (!selectedProject) return;
-    if (!confirm(`Delete ${selectedProject.name} and its project runtime records?`)) return;
-    const res = await deleteMissionAction(selectedProject.id);
+  const handleExportProject = async (projectId?: string) => {
+    const targetId = projectId || selectedProject?.id;
+    if (!targetId) return;
+    const res = await exportMissionBundleAction(targetId);
+    if (res.success) {
+      const projectName = projects.find((p) => p.id === targetId)?.name || 'project';
+      downloadJson(`${projectName.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}-supr-bundle.json`, res.bundle);
+      showToast('Project bundle downloaded');
+    } else {
+      showToast(res.error || 'Project export failed');
+    }
+  };
+
+  const handleDeleteProjectById = async (projectId: string) => {
+    if (!projectId) return;
+    const projectName = projects.find((p) => p.id === projectId)?.name || 'project';
+    if (!confirm(`Delete ${projectName} and its project runtime records?`)) return;
+    const res = await deleteMissionAction(projectId);
     if (res.success) {
       showToast('Project deleted');
-      setSelectedProject(null);
+      if (selectedProject?.id === projectId) {
+        setSelectedProject(null);
+        router.push('/');
+      }
       await loadBaseData();
-      router.push('/');
     } else {
       showToast(res.error || 'Project delete failed');
     }
   };
 
-  const handleExportProject = async () => {
+  const handleDeleteProject = async () => {
     if (!selectedProject) return;
-    const res = await exportMissionBundleAction(selectedProject.id);
-    if (res.success) {
-      downloadJson(`${selectedProject.name.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}-supr-bundle.json`, res.bundle);
-      showToast('Project bundle downloaded');
-    } else {
-      showToast(res.error || 'Project export failed');
-    }
+    await handleDeleteProjectById(selectedProject.id);
   };
 
   const handleObjectAction = async (action: ObjectAction, object: DashboardObject) => {
@@ -290,8 +300,13 @@ function DashboardContent() {
     if (object.type === 'project') {
       if (action.id === 'open') handleProjectSelect(object.id);
       if (action.id === 'edit' && selectedProject?.id === object.id) setEditingProject(true);
-      if (action.id === 'download' || action.id === 'export') await handleExportProject();
-      if (action.id === 'delete' && selectedProject?.id === object.id) await handleDeleteProject();
+      // Export/delete must target the object the user clicked, not
+      // the currently selected project. Previously these called
+      // handleExportProject() / handleDeleteProject() which used
+      // `selectedProject`, so clicking export on Project B while
+      // Project A was selected would export A.
+      if (action.id === 'download' || action.id === 'export') await handleExportProject(object.id);
+      if (action.id === 'delete') await handleDeleteProjectById(object.id);
       if (action.id === 'duplicate') {
         showToast(`Duplicating project: ${object.title}...`);
         const res = await duplicateMissionAction(object.id);
@@ -351,18 +366,26 @@ function DashboardContent() {
   ) => {
     if (!selectedOrFirstProjectId) return;
     setIsFlowBusy(true);
-    const handlers = {
-      start: startProjectFlowAction,
-      run: runProjectFlowAction,
-      pause: pauseProjectFlowAction,
-      resume: resumeProjectFlowAction,
-      retry: retryFailedFlowNodesAction,
-      approveLowRisk: approveLowRiskActionsAction,
-    };
-    const res: any = await handlers[action](selectedOrFirstProjectId);
-    showToast(res.success ? `Project flow ${action} complete` : res.error || `Project flow ${action} failed`);
-    await loadSelectedProject(selectedOrFirstProjectId);
-    setIsFlowBusy(false);
+    try {
+      const handlers = {
+        start: startProjectFlowAction,
+        run: runProjectFlowAction,
+        pause: pauseProjectFlowAction,
+        resume: resumeProjectFlowAction,
+        retry: retryFailedFlowNodesAction,
+        approveLowRisk: approveLowRiskActionsAction,
+      };
+      const res: any = await handlers[action](selectedOrFirstProjectId);
+      showToast(res.success ? `Project flow ${action} complete` : res.error || `Project flow ${action} failed`);
+      await loadSelectedProject(selectedOrFirstProjectId);
+    } catch (error) {
+      // Without this catch, a thrown server action would leave the
+      // "busy" spinner stuck forever because the finally below never
+      // ran on the rejection path.
+      showToast(error instanceof Error ? error.message : 'Project flow failed');
+    } finally {
+      setIsFlowBusy(false);
+    }
   };
 
   const handleSpawnProjectAgent = async (draft: {
@@ -374,14 +397,47 @@ function DashboardContent() {
   }) => {
     if (!selectedOrFirstProjectId) return;
     setIsSpawningAgent(true);
-    const res = await spawnProjectAgentAction({
-      missionId: selectedOrFirstProjectId,
-      ...draft,
-    });
-    showToast(res.success ? 'Agent spawned into project flow' : res.error || 'Agent spawn failed');
-    await refreshAll();
-    setIsSpawningAgent(false);
+    try {
+      const res = await spawnProjectAgentAction({
+        missionId: selectedOrFirstProjectId,
+        ...draft,
+      });
+      showToast(res.success ? 'Agent spawned into project flow' : res.error || 'Agent spawn failed');
+      await refreshAll();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Agent spawn failed');
+    } finally {
+      setIsSpawningAgent(false);
+    }
   };
+
+  // Live updates via Server-Sent Events. The /api/mission/stream route
+  // emits a `mission` event with the refreshed Mission payload whenever
+  // the server detects a state change. We debounce the refresh so a
+  // burst of events coalesces into a single reload, then close the
+  // stream when the selected project changes or the component unmounts.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL('/api/mission/stream', window.location.origin);
+    if (selectedOrFirstProjectId) url.searchParams.set('id', selectedOrFirstProjectId);
+    const source = new EventSource(url.toString());
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleMissionEvent = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        void refreshAll();
+      }, 400);
+    };
+    source.addEventListener('mission', handleMissionEvent);
+    return () => {
+      source.removeEventListener('mission', handleMissionEvent);
+      source.close();
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+    // We intentionally exclude refreshAll from deps to avoid
+    // re-subscribing on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOrFirstProjectId]);
 
   return (
     <div className="flex-1 md:ml-64 min-h-screen bg-surface-container text-on-surface overflow-hidden">

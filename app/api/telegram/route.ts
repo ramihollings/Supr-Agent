@@ -4,6 +4,7 @@ import { serializeChannelPayload } from '@/lib/channel-logging';
 import dbClient from '@/lib/database/db_client';
 import { getActiveMission } from '@/lib/db';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
+import { consume, isChannelDebugEnabled } from '@/lib/route-rate-limit';
 import {
   approveLowRiskActions,
   pauseProjectFlow,
@@ -16,6 +17,9 @@ import {
 import { resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
 
 export const dynamic = 'force-dynamic';
+
+const DISABLED_CHANNEL_MAX = 5;
+const DISABLED_CHANNEL_WINDOW_MS = 60_000;
 
 async function reply(chatId: string, text: string) {
   const token = await getSecretSetting('telegram_token', process.env.TELEGRAM_BOT_TOKEN);
@@ -110,15 +114,21 @@ async function handleCommand(text: string, projectHint?: string | null) {
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_telegram');
   if (enabled !== 'true') {
-    const update = await req.json().catch(() => ({}));
-    const message = update.message || update.edited_message || update.channel_post;
-    const text = String(message?.text || '').trim();
-    const chatId = String(message?.chat?.id || '');
-    await dbClient.execute(
-      `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
-       VALUES (?, 'telegram', ?, ?, 'ignored', ?, ?)`,
-      [`cmd-${crypto.randomUUID()}`, text || '[telegram disabled]', serializeChannelPayload(update), chatId || null, 'Telegram channel disabled; core Supr runtime remains live.'],
-    );
+    if (!consume('telegram:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
+      return Response.json({ ok: true, ignored: true, response: 'Telegram channel is disabled; rate limit reached.' });
+    }
+    const debug = await isChannelDebugEnabled('telegram');
+    if (debug) {
+      const update = await req.json().catch(() => ({}));
+      const message = update.message || update.edited_message || update.channel_post;
+      const text = String(message?.text || '').trim();
+      const chatId = String(message?.chat?.id || '');
+      await dbClient.execute(
+        `INSERT INTO Channel_Commands (id, source, command, payload, status, actor_id, response)
+         VALUES (?, 'telegram', ?, ?, 'ignored', ?, ?)`,
+        [`cmd-${crypto.randomUUID()}`, text || '[telegram disabled]', serializeChannelPayload(update), chatId || null, 'Telegram channel disabled; core Supr runtime remains live.'],
+      );
+    }
     return Response.json({ ok: true, ignored: true, response: 'Telegram channel is disabled; Supr runtime remains live.' });
   }
 
