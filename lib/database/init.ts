@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { applyMigrations, markMigrationApplied, type Migration } from './migrations';
+import { migrations } from './migrations_registry';
 
 const isPostgres = !!(process.env.DATABASE_URL || process.env.PGHOST);
 
@@ -18,15 +20,6 @@ let _initialized = false;
  * process fails loud at startup instead of silently shipping a
  * half-migrated database.
  */
-function isBenignMigrationError(error: { code?: string; message?: string }): boolean {
-  const code = error?.code;
-  if (code === 'SQLITE_ERROR') {
-    const message = String(error?.message || '').toLowerCase();
-    if (message.includes('duplicate column name')) return true;
-    if (message.includes('table') && message.includes('already exists')) return true;
-  }
-  return false;
-}
 
 function getSqliteDb(): any {
   if (isPostgres) {
@@ -252,18 +245,6 @@ export function initDatabase() {
     )
   `);
 
-  try {
-    dbInstance.exec(`ALTER TABLE Cron_Jobs ADD COLUMN assigned_agent_id TEXT`);
-  } catch (e: any) {
-    if (!isBenignMigrationError(e)) throw e;
-  }
-
-  try {
-    dbInstance.exec(`ALTER TABLE Cron_Jobs ADD COLUMN associated_task_id TEXT`);
-  } catch (e: any) {
-    if (!isBenignMigrationError(e)) throw e;
-  }
-
   // 12. Settings Table
   dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS Settings (
@@ -272,6 +253,12 @@ export function initDatabase() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // ---- Schema migrations ----
+  // Apply every registered migration that hasn't been recorded in
+  // _migrations yet. The runner is idempotent: re-running it on a
+  // fully-migrated database is a no-op.
+  applyMigrations(dbInstance, migrations);
 
   // 13. Supr_Chat_Messages Table
   dbInstance.exec(`
@@ -359,30 +346,6 @@ export function initDatabase() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
-  try {
-    dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN pinned INTEGER DEFAULT 0`);
-  } catch (e: any) {
-    if (!isBenignMigrationError(e)) throw e;
-  }
-
-  try {
-    dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN reviewed_at DATETIME`);
-  } catch (e: any) {
-    if (!isBenignMigrationError(e)) throw e;
-  }
-
-  try {
-    dbInstance.exec(`ALTER TABLE Memory_Items ADD COLUMN reason TEXT`);
-  } catch (e: any) {
-    if (!isBenignMigrationError(e)) throw e;
-  }
-
-  try {
-    dbInstance.exec(`ALTER TABLE Approvals ADD COLUMN agent_action_id TEXT`);
-  } catch (e: any) {
-    if (!isBenignMigrationError(e)) throw e;
-  }
 
   // 19. Agent Actions Table - shared runtime queue for all agent/tool work
   dbInstance.exec(`

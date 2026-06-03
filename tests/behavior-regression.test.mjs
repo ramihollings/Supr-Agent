@@ -730,24 +730,21 @@ test('getActiveProvider caches results with a TTL and invalidates on LLM setting
   assert.match(updateBody, /key === ['"]runtime_mode['"]/);
 });
 
-test('SQLite schema migrations only swallow duplicate-column errors, and FK errors are translated', () => {
+test('SQLite schema migrations go through the versioned runner, and FK errors are translated', () => {
   const init = readFileSync('lib/database/init.ts', 'utf8');
   const agentActions = readFileSync('lib/runtime/agent-actions.ts', 'utf8');
 
-  // Migration guard: isBenignMigrationError must exist and only allow the
-  // benign codes (duplicate column, duplicate table).
-  assert.match(init, /isBenignMigrationError/);
-  const guard = init.match(/function isBenignMigrationError\([^)]*\): boolean \{[\s\S]*?\n\}/)?.[0] || '';
-  assert.match(guard, /duplicate column name/);
-  assert.match(guard, /already exists/);
-  // Every ALTER TABLE block must call the guard (not empty catch).
-  const alts = init.match(/ALTER TABLE [A-Za-z_]+ ADD COLUMN [A-Za-z_]+/g) || [];
-  assert.ok(alts.length >= 5, `expected at least 5 ALTER blocks, found ${alts.length}`);
-  for (const _ of alts) {
-    assert.match(init, /isBenignMigrationError\(e\)/);
-  }
-  // The old empty-catch pattern must be gone.
-  assert.doesNotMatch(init, /catch\s*\(\s*e\s*\)\s*\{\s*\}/);
+  // Migration runner: lib/database/init.ts must call applyMigrations()
+  // with the registry. ALTER TABLE ADD COLUMN lives in
+  // lib/database/migrations/ as individual migration modules.
+  assert.match(init, /applyMigrations\(dbInstance, migrations\)/);
+  const migrations = readFileSync('lib/database/migrations.ts', 'utf8');
+  assert.match(migrations, /export function applyMigrations/);
+  assert.match(migrations, /CREATE TABLE IF NOT EXISTS _migrations/);
+  assert.match(migrations, /duplicate column name/);
+  assert.match(migrations, /already exists/);
+  // The old try/catch ALTER pattern must be gone from init.ts.
+  assert.doesNotMatch(init, /try\s*\{[\s\S]*?ALTER TABLE[\s\S]*?\}\s*catch/);
 
   // FK error translation: createAgentAction must wrap its INSERT in a
   // try and translate the error via translateDbConstraintError.
