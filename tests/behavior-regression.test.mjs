@@ -878,6 +878,34 @@ test('settings page broadcasts notifySettingsChanged after a successful save', (
   assert.match(handleBody, /notifySettingsChanged\(\)/);
 });
 
+test('every settings save route in app/settings/page.tsx goes through handleUpdateSetting (so the cross-tab sentinel fires)', () => {
+  const page = readFileSync('app/settings/page.tsx', 'utf8');
+  // No remaining direct call to updateSettingAction in the page --
+  // every save must go through handleUpdateSetting so the chat
+  // re-fetches the snapshot in the same tab as well. We can't
+  // simply count updateSettingAction occurrences because the
+  // helper itself uses it (line 318). So we assert that the only
+  // updateSettingAction usage is inside the handleUpdateSetting
+  // function body and the call sites use handleUpdateSetting.
+  const handleBody = page.match(/const handleUpdateSetting[\s\S]*?\n\s*\};/)?.[0] || '';
+  assert.match(handleBody, /updateSettingAction\(/);
+  // Every other save site must call handleUpdateSetting, not
+  // updateSettingAction directly. Search for callers of the form
+  // `await handleUpdateSetting` or `void handleUpdateSetting` or
+  // `handleUpdateSetting(`. There should be several.
+  const directCalls = page.match(/(?<![A-Za-z])updateSettingAction\(/g) || [];
+  // The single allowed occurrence is the one inside handleUpdateSetting
+  // (already matched above). All other matches would be missed
+  // broadcast sites.
+  const otherCalls = directCalls.length - 1;
+  if (otherCalls !== 0) {
+    throw new Error(
+      `Found ${otherCalls} direct updateSettingAction call(s) outside handleUpdateSetting; ` +
+      `every save must broadcast notifySettingsChanged. Search for "updateSettingAction(" in the page.`
+    );
+  }
+});
+
 test('npm run db:status is a recovery CLI with status, up, down, and lock-v1 commands', () => {
   // The package.json entry must exist so operators can run it.
   const pkg = readFileSync('package.json', 'utf8');

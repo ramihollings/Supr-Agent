@@ -678,11 +678,14 @@ export default function SettingsPage() {
     void handleUpdateSetting(key, value, label);
   };
   const onSaveBackupConfig = async () => {
+    // Going through handleUpdateSetting ensures the cross-tab
+    // settings sentinel is broadcast on every save, so the chat
+    // re-fetches the snapshot in the same tab as well.
     await Promise.all([
-      updateSettingAction('global_backup_name', globalBackupName),
-      updateSettingAction('global_backup_model', globalBackupModel),
-      updateSettingAction('global_backup_url', globalBackupUrl),
-      updateSettingAction('global_backup_key', globalBackupKey),
+      handleUpdateSetting('global_backup_name', globalBackupName),
+      handleUpdateSetting('global_backup_model', globalBackupModel),
+      handleUpdateSetting('global_backup_url', globalBackupUrl),
+      handleUpdateSetting('global_backup_key', globalBackupKey),
     ]);
     showToast('Backup LLM config saved ✓');
   };
@@ -696,10 +699,10 @@ export default function SettingsPage() {
     } as const;
     const r = map[role];
     void Promise.all([
-      updateSettingAction(`llm_provider_${r.prefix}`, r.provider),
-      updateSettingAction(`llm_key_${r.prefix}`, r.key),
-      updateSettingAction(`llm_model_${r.prefix}`, r.model),
-      updateSettingAction(`llm_url_${r.prefix}`, r.url),
+      handleUpdateSetting(`llm_provider_${r.prefix}`, r.provider),
+      handleUpdateSetting(`llm_key_${r.prefix}`, r.key),
+      handleUpdateSetting(`llm_model_${r.prefix}`, r.model),
+      handleUpdateSetting(`llm_url_${r.prefix}`, r.url),
     ]);
     showToast(`${titles[role]} override saved ✓`);
   };
@@ -800,8 +803,10 @@ export default function SettingsPage() {
             permissionBoundary={permissionBoundary}
             onEnforceTier={async (id) => {
               setPermissionBoundary(id);
-              await updateSettingAction('permission_boundary', id);
-              showToast(`Enforced ${id} security tier ✓`);
+              // Going through handleUpdateSetting broadcasts the
+              // cross-tab settings sentinel so the chat picks up
+              // the new tier without a refresh.
+              await handleUpdateSetting('permission_boundary', id, `Enforced ${id} security tier ✓`);
             }}
             dockerAvailable={dockerAvailable}
             dockerLastProbe={dockerLastProbe}
