@@ -992,3 +992,22 @@ test('Settings page uses the extracted StandardsSection component', () => {
   assert.match(comp, /pass_tests/);
   assert.match(comp, /scope_approval/);
 });
+
+test('Settings page uses the extracted PermissionsSection component', () => {
+  const page = readFileSync('app/settings/page.tsx', 'utf8');
+  assert.match(page, /from '@\/components\/settings\/PermissionsSection'/);
+  // The page must not inline the Permissions Hierarchy block.
+  assert.doesNotMatch(page, /Permissions Hierarchy/);
+  // The component file must exist with the right public surface.
+  const comp = readFileSync('components/settings/PermissionsSection.tsx', 'utf8');
+  assert.match(comp, /export function PermissionsSection/);
+  assert.match(comp, /Docker Sandbox/);
+  assert.match(comp, /Remote Execution/);
+  assert.match(comp, /onEnforceTier/);
+  assert.match(comp, /onDockerProbe/);
+  // The 4 tier rows.
+  assert.match(comp, /observe/);
+  assert.match(comp, /governed/);
+  assert.match(comp, /execute/);
+  assert.match(comp, /root/);
+});
