@@ -1011,3 +1011,23 @@ test('Settings page uses the extracted PermissionsSection component', () => {
   assert.match(comp, /execute/);
   assert.match(comp, /root/);
 });
+
+test('Settings page uses the extracted PortabilitySection component', () => {
+  const page = readFileSync('app/settings/page.tsx', 'utf8');
+  assert.match(page, /from '@\/components\/settings\/PortabilitySection'/);
+  // The page must not inline the Portability block.
+  assert.doesNotMatch(page, /Organization Portability/);
+  // The component file must exist with the right public surface.
+  const comp = readFileSync('components/settings/PortabilitySection.tsx', 'utf8');
+  assert.match(comp, /export function PortabilitySection/);
+  assert.match(comp, /Back up workspace/);
+  assert.match(comp, /Import \/ Restore Backup/);
+  assert.match(comp, /Choose JSON Backup File/);
+  assert.match(comp, /Restore Completed/);
+  // All import status strings are typed.
+  assert.match(comp, /ImportStatus = "idle" \| "reading" \| "ready" \| "importing"/);
+  // The component must declare its ref as a real prop, not
+  // useRef() internally, so the page can scroll to it.
+  const propsType = comp.match(/export interface PortabilitySectionProps[\s\S]*?\}/)?.[0] || '';
+  assert.match(propsType, /ref: Ref<HTMLDivElement>/);
+});
