@@ -1047,3 +1047,24 @@ test('Settings page uses the extracted PortabilitySection component', () => {
   const propsType = comp.match(/export interface PortabilitySectionProps[\s\S]*?\}/)?.[0] || '';
   assert.match(propsType, /ref: Ref<HTMLDivElement>/);
 });
+
+test('Settings page uses the extracted LLMConfigSection component', () => {
+  const page = readFileSync('app/settings/page.tsx', 'utf8');
+  assert.match(page, /from '@\/components\/settings\/LLMConfigSection'/);
+  // The component file must exist with the right public surface.
+  const comp = readFileSync('components/settings/LLMConfigSection.tsx', 'utf8');
+  assert.match(comp, /export function LLMConfigSection/);
+  assert.match(comp, /Global Providers &amp; Fallbacks|Global Providers & Fallbacks/);
+  assert.match(comp, /Backup Provider Config/);
+  // The component must declare its ref as a prop.
+  const propsType = comp.match(/export interface LLMConfigSectionProps[\s\S]*?\}/)?.[0] || '';
+  assert.match(propsType, /ref: Ref<HTMLDivElement>/);
+  // The component takes role configs as 4 props (supr/code/research/sub).
+  assert.match(propsType, /supr: LlmRoleConfig/);
+  assert.match(propsType, /code: LlmRoleConfig/);
+  assert.match(propsType, /research: LlmRoleConfig/);
+  assert.match(propsType, /sub: LlmRoleConfig/);
+  // The role override sub-component is internal but its existence
+  // is asserted by the file structure.
+  assert.match(comp, /function RoleOverridesCard/);
+});

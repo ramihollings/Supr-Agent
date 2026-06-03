@@ -6,6 +6,7 @@ import { notifySettingsChanged } from '@/hooks/useSettingsSnapshot';
 import { StandardsSection } from '@/components/settings/StandardsSection';
 import { PermissionsSection } from '@/components/settings/PermissionsSection';
 import { PortabilitySection } from '@/components/settings/PortabilitySection';
+import { LLMConfigSection } from '@/components/settings/LLMConfigSection';
 import {
   fetchSettingsAction,
   updateSettingAction,
@@ -622,6 +623,86 @@ export default function SettingsPage() {
     { label: 'DeepSeek API Key', key: 'global_deepseek_key', value: globalDeepseekKey, setter: setGlobalDeepseekKey, placeholder: 'sk-...' },
   ];
 
+  // LLMConfigSection helpers. The page owns the state and the
+  // setters; the section just dispatches.
+  const onChangeGlobalKey = (key: string, value: string) => {
+    switch (key) {
+      case 'global_minimax_key': setGlobalMinimaxKey(value); break;
+      case 'global_gemini_key': setGlobalGeminiKey(value); break;
+      case 'global_openai_key': setGlobalOpenaiKey(value); break;
+      case 'global_anthropic_key': setGlobalAnthropicKey(value); break;
+      case 'global_xai_key': setGlobalXaiKey(value); break;
+      case 'global_openrouter_key': setGlobalOpenrouterKey(value); break;
+      case 'global_groq_key': setGlobalGroqKey(value); break;
+      case 'global_mistral_key': setGlobalMistralKey(value); break;
+      case 'global_deepseek_key': setGlobalDeepseekKey(value); break;
+    }
+  };
+  const onChangeBackupField = (field: 'name' | 'model' | 'url' | 'key', value: string) => {
+    if (field === 'name') setGlobalBackupName(value);
+    else if (field === 'model') setGlobalBackupModel(value);
+    else if (field === 'url') setGlobalBackupUrl(value);
+    else setGlobalBackupKey(value);
+  };
+  const onChangeRoleField = (role: 'supr' | 'code' | 'research' | 'sub', field: 'provider' | 'key' | 'model' | 'url', value: string) => {
+    if (field === 'provider') {
+      if (role === 'supr') setSuprProvider(value);
+      else if (role === 'code') setCodeProvider(value);
+      else if (role === 'research') setResearchProvider(value);
+      else setSubProvider(value);
+    } else if (field === 'key') {
+      if (role === 'supr') setSuprKey(value);
+      else if (role === 'code') setCodeKey(value);
+      else if (role === 'research') setResearchKey(value);
+      else setSubKey(value);
+    } else if (field === 'model') {
+      if (role === 'supr') setSuprModel(value);
+      else if (role === 'code') setCodeModel(value);
+      else if (role === 'research') setResearchModel(value);
+      else setSubModel(value);
+    } else {
+      if (role === 'supr') setSuprUrl(value);
+      else if (role === 'code') setCodeUrl(value);
+      else if (role === 'research') setResearchUrl(value);
+      else setSubUrl(value);
+    }
+  };
+  const onSelectRoleProvider = (provider: string, role: 'supr' | 'code' | 'research' | 'sub') => {
+    if (role === 'supr') selectRoleProvider(provider, setSuprProvider, setSuprModel);
+    else if (role === 'code') selectRoleProvider(provider, setCodeProvider, setCodeModel);
+    else if (role === 'research') selectRoleProvider(provider, setResearchProvider, setResearchModel);
+    else selectRoleProvider(provider, setSubProvider, setSubModel);
+  };
+  const onSaveGlobalKey = (key: string, value: string, label: string) => {
+    void handleUpdateSetting(key, value, label);
+  };
+  const onSaveBackupConfig = async () => {
+    await Promise.all([
+      updateSettingAction('global_backup_name', globalBackupName),
+      updateSettingAction('global_backup_model', globalBackupModel),
+      updateSettingAction('global_backup_url', globalBackupUrl),
+      updateSettingAction('global_backup_key', globalBackupKey),
+    ]);
+    showToast('Backup LLM config saved ✓');
+  };
+  const onSaveRoleOverride = (role: 'supr' | 'code' | 'research' | 'sub') => {
+    const titles = { supr: 'Supr Orchestrator', code: 'Coding Agent', research: 'Research Agent', sub: 'Sub-agents' } as const;
+    const map = {
+      supr: { provider: suprProvider, key: suprKey, model: suprModel, url: suprUrl, prefix: 'supr' },
+      code: { provider: codeProvider, key: codeKey, model: codeModel, url: codeUrl, prefix: 'code' },
+      research: { provider: researchProvider, key: researchKey, model: researchModel, url: researchUrl, prefix: 'research' },
+      sub: { provider: subProvider, key: subKey, model: subModel, url: subUrl, prefix: 'sub' },
+    } as const;
+    const r = map[role];
+    void Promise.all([
+      updateSettingAction(`llm_provider_${r.prefix}`, r.provider),
+      updateSettingAction(`llm_key_${r.prefix}`, r.key),
+      updateSettingAction(`llm_model_${r.prefix}`, r.model),
+      updateSettingAction(`llm_url_${r.prefix}`, r.url),
+    ]);
+    showToast(`${titles[role]} override saved ✓`);
+  };
+
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Settings" />
@@ -885,430 +966,37 @@ export default function SettingsPage() {
           <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
 
           {/* LLM Configuration Panel */}
-          <div ref={llmRef} className="flex flex-col gap-6">
-            <div className="border-b-4 border-primary pb-4 mb-4">
-              <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">LLM Configuration</h2>
-              <p className="font-body text-on-surface-variant mt-2">Manage API keys, endpoints, and models for Supr and sub-agents on the fly.</p>
-            </div>
-
-            {/* 1. Global API Keys & Defaults */}
-            <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4 relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-32 h-6 bg-primary text-on-primary text-[8px] font-black uppercase flex items-center justify-center rotate-45 translate-x-8 translate-y-3 pointer-events-none select-none tracking-widest shadow-sm">
-                Global Keys
-              </div>
-              <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2 mb-2">
-                <span className="material-symbols-outlined text-primary">key</span> Global Providers & Fallbacks
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">MiniMax API Key</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="password" aria-label="MiniMax API Key"
-                      value={globalMinimaxKey}
-                      onChange={(e) => setGlobalMinimaxKey(e.target.value)}
-                      className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
-                      placeholder="sk-..."
-                    />
-                    <button
-                      onClick={() => handleUpdateSetting('global_minimax_key', globalMinimaxKey, 'Global MiniMax key saved ✓')}
-                      className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
-                    >Save</button>
-                  </div>
-                  <span className="text-[9px] text-on-surface-variant block mt-1">Primary LLM if set. Default model: {DEFAULT_MINIMAX_MODEL}. API: https://api.minimax.io/v1</span>
-                </div>
-
-                <div>
-                  <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">Gemini API Key</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="password" aria-label="Gemini API Key"
-                      value={globalGeminiKey}
-                      onChange={(e) => setGlobalGeminiKey(e.target.value)}
-                      className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
-                      placeholder="AIzaSy..."
-                    />
-                    <button
-                      onClick={() => handleUpdateSetting('global_gemini_key', globalGeminiKey, 'Global Gemini key saved ✓')}
-                      className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
-                    >Save</button>
-                  </div>
-                  <span className="text-[9px] text-on-surface-variant block mt-1">Secondary primary LLM. Used if MiniMax key is missing.</span>
-                </div>
-                {providerKeyControls.map((control) => (
-                  <div key={control.key}>
-                    <label className="block font-headline font-bold uppercase text-primary mb-1 text-xs">{control.label}</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password" aria-label={control.label}
-                        value={control.value}
-                        onChange={(e) => control.setter(e.target.value)}
-                        className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
-                        placeholder={control.placeholder}
-                      />
-                      <button
-                        onClick={() => handleUpdateSetting(control.key, control.value, `${control.label} saved`)}
-                        className="bg-primary text-on-primary font-bold uppercase text-xs px-3 neo-border hover:bg-tertiary transition-colors"
-                      >Save</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="w-full h-0.5 bg-outline-variant my-2"></div>
-
-              <h4 className="font-headline font-bold text-xs uppercase text-primary tracking-wide">Backup Provider Config (OpenAI-Compatible)</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup Name</label>
-                  <input
-                    type="text"
-                    value={globalBackupName}
-                    onChange={(e) => setGlobalBackupName(e.target.value)}
-                    className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-bold"
-                    placeholder="e.g. OpenAI, Groq, Together"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup Model Name</label>
-                  <input
-                    type="text"
-                    value={globalBackupModel}
-                    onChange={(e) => setGlobalBackupModel(e.target.value)}
-                    className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
-                    placeholder="gpt-4o-mini, llama-3.3-70b-versatile"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup API Base URL</label>
-                  <input
-                    type="text"
-                    value={globalBackupUrl}
-                    onChange={(e) => setGlobalBackupUrl(e.target.value)}
-                    className="w-full bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
-                    placeholder="https://api.openai.com/v1"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-[10px] font-bold uppercase text-on-surface-variant mb-1">Backup API Key</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="password" aria-label="Backup API Key"
-                      value={globalBackupKey}
-                      onChange={(e) => setGlobalBackupKey(e.target.value)}
-                      className="flex-1 bg-background neo-border p-2 text-xs focus:outline-none focus:border-tertiary font-mono"
-                      placeholder="sk-..."
-                    />
-                    <button
-                      onClick={async () => {
-                        await Promise.all([
-                          updateSettingAction('global_backup_name', globalBackupName),
-                          updateSettingAction('global_backup_model', globalBackupModel),
-                          updateSettingAction('global_backup_url', globalBackupUrl),
-                          updateSettingAction('global_backup_key', globalBackupKey),
-                        ]);
-                        showToast('Backup LLM config saved ✓');
-                      }}
-                      className="bg-primary text-on-primary font-bold uppercase text-xs px-6 neo-border hover:bg-tertiary transition-colors"
-                    >Save Backup Config</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Custom Role Overrides */}
-            <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-6">
-              <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
-                <span className="material-symbols-outlined text-primary">diversity_3</span> Agent Customization Override
-              </h3>
-
-              <p className="font-body text-xs text-on-surface-variant leading-relaxed">
-                By default, all agents inherit the global priority flow (MiniMax → Gemini → Backup).
-                Override specific agents below to run them on separate providers or custom models on the fly!
-              </p>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                {/* Supr Override */}
-                <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
-                  <div className="flex justify-between items-center border-b border-primary pb-2">
-                    <span className="font-headline font-bold text-xs uppercase text-primary flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-sm">psychology</span> Lead Orchestrator (Supr)
-                    </span>
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-primary-container border border-primary">Active</span>
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
-                    <select
-                      value={suprProvider}
-                      onChange={(e) => selectRoleProvider(e.target.value, setSuprProvider, setSuprModel)}
-                      className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
-                    >
-                      {PROVIDER_OPTIONS.map((provider) => (
-                        <option key={provider.value} value={provider.value}>{provider.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {suprProvider !== 'default' && (
-                    <div className="space-y-2 animate-fadeIn text-[10px]">
-                      <input
-                        type="password" aria-label="Supr API key"
-                        value={suprKey}
-                        onChange={(e) => setSuprKey(e.target.value)}
-                        placeholder="Custom API Key (leave blank to inherit global)"
-                        className="w-full bg-surface neo-border p-1 text-xs font-mono"
-                      />
-                      <input
-                        type="text"
-                        value={suprModel}
-                        onChange={(e) => setSuprModel(e.target.value)}
-                        list={modelOptionsForProvider(suprProvider).length ? 'supr-model-options' : undefined}
-                        placeholder={suprProvider === 'openai_compat' ? 'Custom Model Name Override' : 'Select or enter model'}
-                        className="w-full bg-surface neo-border p-1 text-xs"
-                      />
-                      {modelOptionsForProvider(suprProvider).length > 0 && (
-                        <datalist id="supr-model-options">
-                          {modelOptionsForProvider(suprProvider).map((model) => (
-                            <option key={model.value} value={model.value}>{model.label}</option>
-                          ))}
-                        </datalist>
-                      )}
-                      {suprProvider === 'openai_compat' && (
-                        <input
-                          type="text"
-                          value={suprUrl}
-                          onChange={(e) => setSuprUrl(e.target.value)}
-                          placeholder="Custom Endpoint URL Override"
-                          className="w-full bg-surface neo-border p-1 text-xs font-mono"
-                        />
-                      )}
-                    </div>
-                  )}
-                  <button
-                    onClick={async () => {
-                      await Promise.all([
-                        updateSettingAction('llm_provider_supr', suprProvider),
-                        updateSettingAction('llm_key_supr', suprKey),
-                        updateSettingAction('llm_model_supr', suprModel),
-                        updateSettingAction('llm_url_supr', suprUrl),
-                      ]);
-                      showToast('Supr Orchestrator override saved ✓');
-                    }}
-                    className="mt-auto bg-primary text-on-primary font-bold uppercase text-[10px] py-1.5 neo-border hover:bg-tertiary"
-                  >Apply Override</button>
-                </div>
-
-                {/* Coding Agent Override */}
-                <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
-                  <div className="flex justify-between items-center border-b border-primary pb-2">
-                    <span className="font-headline font-bold text-xs uppercase text-primary flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-sm">code</span> Coding Agent
-                    </span>
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-primary-container border border-primary">Active</span>
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
-                    <select
-                      value={codeProvider}
-                      onChange={(e) => selectRoleProvider(e.target.value, setCodeProvider, setCodeModel)}
-                      className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
-                    >
-                      {PROVIDER_OPTIONS.map((provider) => (
-                        <option key={provider.value} value={provider.value}>{provider.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {codeProvider !== 'default' && (
-                    <div className="space-y-2 animate-fadeIn text-[10px]">
-                      <input
-                        type="password" aria-label="Code agent API key"
-                        value={codeKey}
-                        onChange={(e) => setCodeKey(e.target.value)}
-                        placeholder="Custom API Key (leave blank to inherit global)"
-                        className="w-full bg-surface neo-border p-1 text-xs font-mono"
-                      />
-                      <input
-                        type="text"
-                        value={codeModel}
-                        onChange={(e) => setCodeModel(e.target.value)}
-                        list={modelOptionsForProvider(codeProvider).length ? 'code-model-options' : undefined}
-                        placeholder={codeProvider === 'openai_compat' ? 'Custom Model Name Override' : 'Select or enter model'}
-                        className="w-full bg-surface neo-border p-1 text-xs"
-                      />
-                      {modelOptionsForProvider(codeProvider).length > 0 && (
-                        <datalist id="code-model-options">
-                          {modelOptionsForProvider(codeProvider).map((model) => (
-                            <option key={model.value} value={model.value}>{model.label}</option>
-                          ))}
-                        </datalist>
-                      )}
-                      {codeProvider === 'openai_compat' && (
-                        <input
-                          type="text"
-                          value={codeUrl}
-                          onChange={(e) => setCodeUrl(e.target.value)}
-                          placeholder="Custom Endpoint URL Override"
-                          className="w-full bg-surface neo-border p-1 text-xs font-mono"
-                        />
-                      )}
-                    </div>
-                  )}
-                  <button
-                    onClick={async () => {
-                      await Promise.all([
-                        updateSettingAction('llm_provider_code', codeProvider),
-                        updateSettingAction('llm_key_code', codeKey),
-                        updateSettingAction('llm_model_code', codeModel),
-                        updateSettingAction('llm_url_code', codeUrl),
-                      ]);
-                      showToast('Coding Agent override saved ✓');
-                    }}
-                    className="mt-auto bg-primary text-on-primary font-bold uppercase text-[10px] py-1.5 neo-border hover:bg-tertiary"
-                  >Apply Override</button>
-                </div>
-
-                {/* Research Agent Override */}
-                <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
-                  <div className="flex justify-between items-center border-b border-primary pb-2">
-                    <span className="font-headline font-bold text-xs uppercase text-primary flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-sm">travel_explore</span> Research Agent
-                    </span>
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-primary-container border border-primary">Active</span>
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
-                    <select
-                      value={researchProvider}
-                      onChange={(e) => selectRoleProvider(e.target.value, setResearchProvider, setResearchModel)}
-                      className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
-                    >
-                      {PROVIDER_OPTIONS.map((provider) => (
-                        <option key={provider.value} value={provider.value}>{provider.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {researchProvider !== 'default' && (
-                    <div className="space-y-2 animate-fadeIn text-[10px]">
-                      <input
-                        type="password" aria-label="Research agent API key"
-                        value={researchKey}
-                        onChange={(e) => setResearchKey(e.target.value)}
-                        placeholder="Custom API Key (leave blank to inherit global)"
-                        className="w-full bg-surface neo-border p-1 text-xs font-mono"
-                      />
-                      <input
-                        type="text"
-                        value={researchModel}
-                        onChange={(e) => setResearchModel(e.target.value)}
-                        list={modelOptionsForProvider(researchProvider).length ? 'research-model-options' : undefined}
-                        placeholder={researchProvider === 'openai_compat' ? 'Custom Model Name Override' : 'Select or enter model'}
-                        className="w-full bg-surface neo-border p-1 text-xs"
-                      />
-                      {modelOptionsForProvider(researchProvider).length > 0 && (
-                        <datalist id="research-model-options">
-                          {modelOptionsForProvider(researchProvider).map((model) => (
-                            <option key={model.value} value={model.value}>{model.label}</option>
-                          ))}
-                        </datalist>
-                      )}
-                      {researchProvider === 'openai_compat' && (
-                        <input
-                          type="text"
-                          value={researchUrl}
-                          onChange={(e) => setResearchUrl(e.target.value)}
-                          placeholder="Custom Endpoint URL Override"
-                          className="w-full bg-surface neo-border p-1 text-xs font-mono"
-                        />
-                      )}
-                    </div>
-                  )}
-                  <button
-                    onClick={async () => {
-                      await Promise.all([
-                        updateSettingAction('llm_provider_research', researchProvider),
-                        updateSettingAction('llm_key_research', researchKey),
-                        updateSettingAction('llm_model_research', researchModel),
-                        updateSettingAction('llm_url_research', researchUrl),
-                      ]);
-                      showToast('Research Agent override saved ✓');
-                    }}
-                    className="mt-auto bg-primary text-on-primary font-bold uppercase text-[10px] py-1.5 neo-border hover:bg-tertiary"
-                  >Apply Override</button>
-                </div>
-
-                {/* Sub-agents Override */}
-                <div className="neo-border bg-background p-4 flex flex-col gap-3 relative">
-                  <div className="flex justify-between items-center border-b border-primary pb-2">
-                    <span className="font-headline font-bold text-xs uppercase text-primary flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-sm">group</span> Sub-Agents (General)
-                    </span>
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 bg-primary-container border border-primary">Active</span>
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-bold uppercase text-on-surface-variant mb-1">Select Provider</label>
-                    <select
-                      value={subProvider}
-                      onChange={(e) => selectRoleProvider(e.target.value, setSubProvider, setSubModel)}
-                      className="w-full bg-surface neo-border p-1.5 text-xs font-bold"
-                    >
-                      {PROVIDER_OPTIONS.map((provider) => (
-                        <option key={provider.value} value={provider.value}>{provider.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {subProvider !== 'default' && (
-                    <div className="space-y-2 animate-fadeIn text-[10px]">
-                      <input
-                        type="password" aria-label="Sub-agent API key"
-                        value={subKey}
-                        onChange={(e) => setSubKey(e.target.value)}
-                        placeholder="Custom API Key (leave blank to inherit global)"
-                        className="w-full bg-surface neo-border p-1 text-xs font-mono"
-                      />
-                      <input
-                        type="text"
-                        value={subModel}
-                        onChange={(e) => setSubModel(e.target.value)}
-                        list={modelOptionsForProvider(subProvider).length ? 'sub-model-options' : undefined}
-                        placeholder={subProvider === 'openai_compat' ? 'Custom Model Name Override' : 'Select or enter model'}
-                        className="w-full bg-surface neo-border p-1 text-xs"
-                      />
-                      {modelOptionsForProvider(subProvider).length > 0 && (
-                        <datalist id="sub-model-options">
-                          {modelOptionsForProvider(subProvider).map((model) => (
-                            <option key={model.value} value={model.value}>{model.label}</option>
-                          ))}
-                        </datalist>
-                      )}
-                      {subProvider === 'openai_compat' && (
-                        <input
-                          type="text"
-                          value={subUrl}
-                          onChange={(e) => setSubUrl(e.target.value)}
-                          placeholder="Custom Endpoint URL Override"
-                          className="w-full bg-surface neo-border p-1 text-xs font-mono"
-                        />
-                      )}
-                    </div>
-                  )}
-                  <button
-                    onClick={async () => {
-                      await Promise.all([
-                        updateSettingAction('llm_provider_sub', subProvider),
-                        updateSettingAction('llm_key_sub', subKey),
-                        updateSettingAction('llm_model_sub', subModel),
-                        updateSettingAction('llm_url_sub', subUrl),
-                      ]);
-                      showToast('Sub-agents override saved ✓');
-                    }}
-                    className="mt-auto bg-primary text-on-primary font-bold uppercase text-[10px] py-1.5 neo-border hover:bg-tertiary"
-                  >Apply Override</button>
-                </div>
-
-              </div>
-            </div>
-          </div>
+          <LLMConfigSection
+            ref={llmRef}
+            globalMinimaxKey={globalMinimaxKey}
+            globalGeminiKey={globalGeminiKey}
+            globalOpenaiKey={globalOpenaiKey}
+            globalAnthropicKey={globalAnthropicKey}
+            globalXaiKey={globalXaiKey}
+            globalOpenrouterKey={globalOpenrouterKey}
+            globalGroqKey={globalGroqKey}
+            globalMistralKey={globalMistralKey}
+            globalDeepseekKey={globalDeepseekKey}
+            globalBackupKey={globalBackupKey}
+            globalBackupUrl={globalBackupUrl}
+            globalBackupModel={globalBackupModel}
+            globalBackupName={globalBackupName}
+            supr={{ provider: suprProvider, key: suprKey, model: suprModel, url: suprUrl }}
+            code={{ provider: codeProvider, key: codeKey, model: codeModel, url: codeUrl }}
+            research={{ provider: researchProvider, key: researchKey, model: researchModel, url: researchUrl }}
+            sub={{ provider: subProvider, key: subKey, model: subModel, url: subUrl }}
+            onChangeGlobalKey={onChangeGlobalKey}
+            onChangeBackupField={onChangeBackupField}
+            onChangeRoleField={onChangeRoleField}
+            providerOptions={PROVIDER_OPTIONS}
+            modelOptionsForProvider={modelOptionsForProvider}
+            onSelectRoleProvider={onSelectRoleProvider}
+            onUpdateSetting={handleUpdateSetting}
+            onSaveGlobalKey={onSaveGlobalKey}
+            onSaveBackupConfig={onSaveBackupConfig}
+            onSaveRoleOverride={onSaveRoleOverride}
+            defaultMinimaxModel={DEFAULT_MINIMAX_MODEL}
+          />
 
           <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
 
