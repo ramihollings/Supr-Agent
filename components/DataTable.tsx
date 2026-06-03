@@ -66,7 +66,7 @@ export function DataTable<T>({
     );
   }
 
-  const RowTag = onRowClick ? 'button' : 'div';
+  const RowTag = 'div';
 
   return (
     <div className={`border-2 border-primary bg-surface overflow-x-auto ${className ?? ''}`}>
@@ -100,13 +100,13 @@ export function DataTable<T>({
                       className={`px-3 py-2 align-middle ${c.className ?? ''}`}
                     >
                       {onRowClick ? (
-                        <RowTag
-                          type={onRowClick ? 'button' : undefined}
-                          onClick={onRowClick ? () => onRowClick(row) : undefined}
-                          className={cellClass}
+                        <button
+                          type="button"
+                          onClick={() => onRowClick(row)}
+                          className="w-full text-left hover:bg-surface-container focus:outline-none focus-visible:bg-surface-container"
                         >
                           {value}
-                        </RowTag>
+                        </button>
                       ) : (
                         value
                       )}

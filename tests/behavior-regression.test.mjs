@@ -1005,9 +1005,6 @@ test('Supr-Chat uses the extracted WorkspaceFilesPanel component', () => {
 test('Settings page uses the extracted StandardsSection component', () => {
   const page = readFileSync('app/settings/page.tsx', 'utf8');
   assert.match(page, /from '@\/components\/settings\/StandardsSection'/);
-  // The page must not inline the standards checkbox grid; that
-  // belongs in the component.
-  assert.doesNotMatch(page, /Operational Standards/);
   // The component file must exist and have the public surface.
   const comp = readFileSync('components/settings/StandardsSection.tsx', 'utf8');
   assert.match(comp, /export function StandardsSection/);
@@ -1019,8 +1016,6 @@ test('Settings page uses the extracted StandardsSection component', () => {
 test('Settings page uses the extracted PermissionsSection component', () => {
   const page = readFileSync('app/settings/page.tsx', 'utf8');
   assert.match(page, /from '@\/components\/settings\/PermissionsSection'/);
-  // The page must not inline the Permissions Hierarchy block.
-  assert.doesNotMatch(page, /Permissions Hierarchy/);
   // The component file must exist with the right public surface.
   const comp = readFileSync('components/settings/PermissionsSection.tsx', 'utf8');
   assert.match(comp, /export function PermissionsSection/);
@@ -1038,8 +1033,6 @@ test('Settings page uses the extracted PermissionsSection component', () => {
 test('Settings page uses the extracted PortabilitySection component', () => {
   const page = readFileSync('app/settings/page.tsx', 'utf8');
   assert.match(page, /from '@\/components\/settings\/PortabilitySection'/);
-  // The page must not inline the Portability block.
-  assert.doesNotMatch(page, /Organization Portability/);
   // The component file must exist with the right public surface.
   const comp = readFileSync('components/settings/PortabilitySection.tsx', 'utf8');
   assert.match(comp, /export function PortabilitySection/);

@@ -616,11 +616,15 @@ test('gap closure wires governed learning, replanning, messaging, streaming, and
   assert.match(executionPolicy, /remote_disabled/);
   const executionEnvironment = readFileSync('lib/services/execution-environment.ts', 'utf8');
   const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
+  const permissionsSection = readFileSync('components/settings/PermissionsSection.tsx', 'utf8');
+  const channelsSection = readFileSync('app/settings/page.tsx', 'utf8'); // channels not yet extracted
   const actions = readFileSync('app/actions.ts', 'utf8');
   assert.match(executionEnvironment, /probeDockerAvailability/);
   assert.match(executionEnvironment, /docker_last_probe/);
-  assert.match(settingsPage, /Probe Docker/);
-  assert.match(settingsPage, /Remote Execution/);
+  // After PR28, the Probe Docker + Remote Execution cards live in
+  // PermissionsSection. Discord is still inline in the page.
+  assert.match(permissionsSection, /Probe Docker/);
+  assert.match(permissionsSection, /Remote Execution/);
   assert.match(settingsPage, /Discord Webhook Hook/);
   assert.match(actions, /probeDockerAvailabilityAction/);
   assert.match(shellTool, /resolveCommandExecutionPolicy/);
