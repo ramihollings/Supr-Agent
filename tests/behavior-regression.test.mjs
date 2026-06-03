@@ -854,6 +854,20 @@ test('getDb loads all missions in a fixed number of batched queries, not N+1', (
   assert.doesNotMatch(db, /missions\.map\(m => getMissionById\(m\.id\)\)/);
 });
 
+test('getMissionById has a short-TTL in-process cache to absorb stream-burst reads', () => {
+  const db = readFileSync('lib/db.ts', 'utf8');
+  // Cache map and TTL constant.
+  assert.match(db, /missionCache = new Map/);
+  assert.match(db, /MISSION_CACHE_TTL_MS = 1_000|MISSION_CACHE_TTL_MS\s*=\s*1000/);
+  // Public invalidation helper.
+  assert.match(db, /export function invalidateMissionCache/);
+  // The public function checks the cache first and falls through to
+  // an inner _Uncached worker.
+  const publicBody = db.match(/export async function getMissionById\([^)]*\): Promise<Mission[^>]*> \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(publicBody, /missionCache\.get\(id\)/);
+  assert.match(publicBody, /getMissionByIdUncached\(id\)/);
+});
+
 test('dead field AgentRuntimeRunInput.resumeCursor is removed and the no-provider error is helpful', () => {
   const types = readFileSync('lib/runtime/types.ts', 'utf8');
   const model = readFileSync('lib/providers/model.ts', 'utf8');

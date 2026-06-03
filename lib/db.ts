@@ -181,6 +181,36 @@ function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+/**
+ * In-process TTL cache for getMissionById.
+ *
+ * getMissionById does 7-8 SELECTs per call. The /api/mission/stream
+ * route calls it on its 10s safety-net poll AND on every bus event;
+ * the chat calls it on every loadData() invocation; the actions
+ * router calls it on every fetchMissionByIdAction. Without a cache
+ * a single dashboard with an active stream can drive 5-10
+ * multi-query calls per second.
+ *
+ * The TTL is 1 second -- short enough that a 1s-old read on a fresh
+ * mutation is fine, long enough to absorb the burst pattern of "the
+ * stream hits /api/mission/state, then 100ms later the chat hits it
+ * too." Invalidating on every write is not necessary at this TTL.
+ */
+const MISSION_CACHE_TTL_MS = 1_000;
+interface MissionCacheEntry {
+  mission: Mission | undefined;
+  expiresAt: number;
+}
+const missionCache = new Map<string, MissionCacheEntry>();
+
+export function invalidateMissionCache(missionId?: string): void {
+  if (missionId) {
+    missionCache.delete(missionId);
+  } else {
+    missionCache.clear();
+  }
+}
+
 const PHASE_NAMES = ['Intake', 'Research', 'Build', 'Verify', 'Deliver'] as const;
 
 function phaseListFromStatuses(statuses: Map<string, 'Done' | 'Active' | 'Pending'>): Phase[] {
@@ -238,6 +268,14 @@ export async function derivePhasesFromTasks(missionId: string): Promise<Phase[]>
 }
 
 export async function getMissionById(id: string): Promise<Mission | undefined> {
+  const cached = missionCache.get(id);
+  if (cached && cached.expiresAt > Date.now()) return cached.mission;
+  const result = await getMissionByIdUncached(id);
+  missionCache.set(id, { mission: result, expiresAt: Date.now() + MISSION_CACHE_TTL_MS });
+  return result;
+}
+
+async function getMissionByIdUncached(id: string): Promise<Mission | undefined> {
   const row = await dbClient.queryOne<any>(`SELECT * FROM Missions WHERE id = ?`, [id]);
   if (!row) return undefined;
 
