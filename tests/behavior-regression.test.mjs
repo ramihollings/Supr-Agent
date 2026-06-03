@@ -878,7 +878,7 @@ test('settings page broadcasts notifySettingsChanged after a successful save', (
   assert.match(handleBody, /notifySettingsChanged\(\)/);
 });
 
-test('npm run db:status is a recovery CLI that lists applied migrations', () => {
+test('npm run db:status is a recovery CLI with status, up, down, and lock-v1 commands', () => {
   // The package.json entry must exist so operators can run it.
   const pkg = readFileSync('package.json', 'utf8');
   assert.match(pkg, /"db:status"/);
@@ -889,8 +889,16 @@ test('npm run db:status is a recovery CLI that lists applied migrations', () => 
   assert.match(script, /^#!\/usr\/bin\/env node/);
   assert.match(script, /_migrations/);
   assert.match(script, /SQLITE_DB_PATH/);
-  // It must be a read-only listing, not a mutator.
-  assert.doesNotMatch(script, /applyMigrations|downgradeOne|markMigrationApplied/);
+
+  // All four commands must be routed.
+  assert.match(script, /COMMAND === "status"/);
+  assert.match(script, /COMMAND === "up"/);
+  assert.match(script, /COMMAND === "down"/);
+  assert.match(script, /COMMAND === "lock-v1"/);
+
+  // V1 migrations seeded for pre-migration-tool DBs.
+  assert.match(script, /0001__add_cron_jobs_assigned_agent_id/);
+  assert.match(script, /0006__add_approvals_agent_action_id/);
 });
 
 test('dead field AgentRuntimeRunInput.resumeCursor is removed and the no-provider error is helpful', () => {
