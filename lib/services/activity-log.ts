@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import dbClient from "../../lib/database/db_client";
 
 export interface AuditLogEntry {
@@ -25,7 +26,7 @@ export class ActivityLogService {
    * Records a security, mutation, or privilege audit event in the Audit_Log table.
    */
   async logAudit(entry: AuditLogEntry): Promise<void> {
-    const id = `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const id = `audit-${crypto.randomUUID()}`;
     const metadataJson = JSON.stringify(entry.metadata || {});
 
     await dbClient.execute(
@@ -49,7 +50,7 @@ export class ActivityLogService {
    * Records an orchestration or execution timeline event in the Event_Log table.
    */
   async logEvent(entry: EventLogEntry): Promise<void> {
-    const id = `evt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const id = `evt-${crypto.randomUUID()}`;
     const metadataJson = JSON.stringify(entry.metadata || {});
 
     await dbClient.execute(

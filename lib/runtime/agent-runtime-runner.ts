@@ -372,7 +372,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
             try {
               assertNotCancelled(normalized);
               output = await withRuntimeTimeout(
-                toolRegistry.executeTool(response.toolName, response.arguments, action.agentId, action.missionId),
+                toolRegistry.executeTool(response.toolName, response.arguments, action.agentId, action.missionId, action.id),
                 deadline,
                 `${response.toolName} tool call`,
               );

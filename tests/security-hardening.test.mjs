@@ -557,7 +557,10 @@ test('live runtime is the only active mode and blocks diagnostic mock successes'
   assert.match(runtimeMode, /return false/);
   assert.match(webSearch, /real runtime mode/);
   assert.doesNotMatch(browser, /mock diagnostic|isMockAllowed/);
-  assert.match(composio, /requires COMPOSIO_API_KEY in live runtime/);
+  // The error message must mention BOTH the Settings field and the
+  // env var fallback, so an operator without a Composio key gets a
+  // clear pointer to where to set one.
+  assert.match(composio, /requires integrations_composio in Settings or COMPOSIO_API_KEY in env/);
   assert.match(httpProvider, /EXTERNAL_AGENT_ENDPOINT must point to a live provider in real runtime mode/);
   assert.match(modelProvider, /No model provider is configured\. Set at least one of MINIMAX_API_KEY/);
 });

@@ -115,21 +115,78 @@ function throwIfFailed(result: CommandResult) {
   return result;
 }
 
+/**
+ * Enforce the command execution policy's `approvalRequired` flag.
+ *
+ * Normal agent execution is guarded by the registry and approval flow,
+ * but `shellTool.execute()` itself was previously ignoring
+ * `approvalRequired`, so a direct call (or a future code path that
+ * bypasses the agent registry) could execute a High/Critical-risk
+ * command without any human gate. This helper throws an
+ * `approvalRequired` error carrying the resolved policy so the caller
+ * can route it to the approval UI.
+ */
+/**
+ * Resolve the execution policy up front and throw if the policy
+ * forbids execution (wrong environment, approval required) BEFORE
+ * running anything. The previous version ran the command first and
+ * threw "approval required" afterwards, so a direct/internal call
+ * could already have side effects (writing files, exfiltrating
+ * secrets, etc.) by the time the gate fired.
+ *
+ * When called from the agent registry with a `trustedApprovedActionId`,
+ * the policy is bypassed — the registry has already recorded the
+ * human approval for this specific action and the command is allowed
+ * to run.
+ */
+async function assertExecutionAllowedOrThrow(
+  executionPolicy: { approvalRequired: boolean; selectedEnvironment: string; reason: string },
+  trustedApprovedActionId?: string,
+): Promise<void> {
+  if (trustedApprovedActionId) {
+    // The agent registry routed this call through an approved action;
+    // the human has already signed off on this exact command. Bypass
+    // the approval gate.
+    return;
+  }
+  if (executionPolicy.selectedEnvironment !== "local") {
+    throw new Error(`Command execution blocked by policy: ${executionPolicy.reason}`);
+  }
+  if (executionPolicy.approvalRequired) {
+    const error = new Error(
+      `Command execution requires human approval: ${executionPolicy.reason}`,
+    );
+    (error as any).approvalRequired = true;
+    (error as any).executionPolicy = executionPolicy;
+    throw error;
+  }
+}
+
 export const shellTool: ToolDefinition<ShellParamsType, CommandResult> = {
   name: "execute_command",
   description: "Runs a governed local shell command and records the selected execution policy.",
   parameters: ShellParams,
   requiredTier: "Execute",
   riskLevel: "High",
-  execute: async (params) => {
+  execute: async (params, ctx) => {
     const executionPolicy = await resolveCommandExecutionPolicy({
       command: params.command,
       riskLevel: "High",
       requestedEnvironment: "local",
     });
-    if (executionPolicy.selectedEnvironment !== "local") {
-      throw new Error(`Command execution blocked by policy: ${executionPolicy.reason}`);
-    }
+
+    // Block BEFORE execution. The previous version ran the command
+    // first and then threw "approval required" if the policy gate
+    // fired, which meant a direct/internal call (or a future code
+    // path that bypasses the agent registry) could already have
+    // side effects by the time the gate caught it.
+    //
+    // The agent registry, when it has a recorded human approval for
+    // the calling action, passes a `trustedApprovedActionId` through
+    // the tool context. That key is a defense-in-depth shortcut — the
+    // registry is the normal gatekeeper — but the shell tool must
+    // defend itself in depth.
+    await assertExecutionAllowedOrThrow(executionPolicy, ctx?.trustedApprovedActionId);
 
     try {
       const result = await runLocalCommand(params.command, params.timeoutMs);

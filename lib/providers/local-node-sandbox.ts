@@ -1,10 +1,25 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getSqliteDb } from '../database/init';
 
 const execAsync = promisify(exec);
+
+/**
+ * Strict allowlist for sandbox session / workspace ids. The id is
+ * used as a directory name under `supr_workspaces/`, so it must be a
+ * safe filesystem token. The previous implementation accepted any
+ * string and relied on a `startsWith` check, which is vulnerable to
+ * prefix-sibling bugs (e.g. session "abc" passes containment for
+ * sessionDir "abc-evil"). A regex allowlist makes that impossible.
+ */
+const SANDBOX_ID_PATTERN = /^[a-zA-Z0-9._-]{1,128}$/;
+
+export function isValidSessionId(id: unknown): id is string {
+  return typeof id === 'string' && SANDBOX_ID_PATTERN.test(id);
+}
 
 export abstract class AbstractSandboxProvider {
   abstract createSession(workspaceId: string): Promise<string>;
@@ -30,17 +45,54 @@ export class LocalNodeSandbox extends AbstractSandboxProvider {
   }
 
   private resolveAndValidatePath(sessionId: string, targetPath: string): string {
+    // Validate the session id itself before doing any path math. The
+    // id is used to derive a directory name, so it must be a safe
+    // filesystem token.
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`Security Exception: Invalid session id '${sessionId}'.`);
+    }
     const sessionDir = this.getSessionPath(sessionId);
     const absoluteTargetPath = path.resolve(sessionDir, targetPath);
-    if (!absoluteTargetPath.startsWith(sessionDir)) {
-      throw new Error(`Security Exception: Path traversal attempt detected. Access denied to ${targetPath}`);
+    // Use path.relative to verify containment: relative path must not
+    // start with `..` and must not be an absolute path. The previous
+    // `startsWith` check was vulnerable to prefix-sibling bugs (e.g.
+    // session "abc" would pass containment for sessionDir "abc-evil").
+    const rel = path.relative(sessionDir, absoluteTargetPath);
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+      return absoluteTargetPath;
     }
-    return absoluteTargetPath;
+    throw new Error(`Security Exception: Path traversal attempt detected. Access denied to ${targetPath}`);
+  }
+
+  /**
+   * Validate a sessionId and return the session directory.
+   *
+   * `resolveAndValidatePath` checks the *sessionId* format and uses
+   * `path.relative` to verify the *target path* stays inside the
+   * session, but it doesn't help for paths that *are* the session
+   * root (executeCommand mounts it into Docker, destroySession does a
+   * recursive rm). This helper centralizes the sessionId allowlist
+   * check and the path.relative containment against baseSandboxDir so
+   * the two "use the session as a whole" paths can reuse it.
+   */
+  private getValidatedSessionDir(sessionId: string): string {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`Security Exception: Invalid session id '${sessionId}'.`);
+    }
+    const sessionDir = path.resolve(this.baseSandboxDir, sessionId);
+    const rel = path.relative(this.baseSandboxDir, sessionDir);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(`Security Exception: Session '${sessionId}' escapes the sandbox directory.`);
+    }
+    return sessionDir;
   }
 
   async createSession(workspaceId: string): Promise<string> {
-    const sessionId = `sbx-${workspaceId}-${Date.now()}`;
-    const sessionDir = this.getSessionPath(sessionId);
+    if (!isValidSessionId(workspaceId)) {
+      throw new Error(`Invalid workspace id '${workspaceId}'.`);
+    }
+    const sessionId = `sbx-${workspaceId}-${crypto.randomUUID()}`;
+    const sessionDir = this.getValidatedSessionDir(sessionId);
     if (!fs.existsSync(sessionDir)) {
       fs.mkdirSync(sessionDir, { recursive: true });
     }
@@ -48,7 +100,13 @@ export class LocalNodeSandbox extends AbstractSandboxProvider {
   }
 
   async executeCommand(sessionId: string, command: string) {
-    const sessionDir = this.getSessionPath(sessionId);
+    // Validate the sessionId and resolve the session directory through
+    // the central containment helper. The previous version called
+    // getSessionPath() directly, so a hostile id like
+    // `../../etc/supr_workspaces_admin` would have been used as-is
+    // and then mounted into Docker as the workspace — letting the
+    // container read or overwrite files outside the sandbox.
+    const sessionDir = this.getValidatedSessionDir(sessionId);
     if (!fs.existsSync(sessionDir)) {
       throw new Error(`Session ${sessionId} does not exist.`);
     }
@@ -137,7 +195,11 @@ export class LocalNodeSandbox extends AbstractSandboxProvider {
   }
 
   async destroySession(sessionId: string): Promise<void> {
-    const sessionDir = this.getSessionPath(sessionId);
+    // Validate the sessionId before doing a recursive rm. Without
+    // this check, a hostile id like `../../etc` would resolve to a
+    // directory outside the sandbox and `rmSync(..., { recursive:
+    // true, force: true })` would happily delete it.
+    const sessionDir = this.getValidatedSessionDir(sessionId);
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true, force: true });
     }

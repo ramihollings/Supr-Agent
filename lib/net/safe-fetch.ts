@@ -27,7 +27,7 @@
  */
 import dns from 'node:dns/promises';
 import net from 'node:net';
-import { Agent, fetch as undiciFetch, type RequestInit } from 'undici';
+import { Agent, fetch as undiciFetch, Response as UndiciResponse, type RequestInit } from 'undici';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -122,7 +122,7 @@ export interface SafeFetchOptions {
   headers?: Record<string, string>;
 }
 
-export async function safeFetch(url: string, options: SafeFetchOptions = {}): Promise<Response> {
+export async function safeFetch(url: string, options: SafeFetchOptions = {}): Promise<UndiciResponse> {
   const maxBytes = options.maxBytes ?? MAX_BYTES;
   const timeoutMs = options.timeoutMs ?? FETCH_TIMEOUT_MS;
 
@@ -146,7 +146,7 @@ export async function safeFetch(url: string, options: SafeFetchOptions = {}): Pr
       signal: AbortSignal.timeout(timeoutMs),
       dispatcher: agent,
     };
-    let response: Response;
+    let response: UndiciResponse;
     try {
       response = await undiciFetch(currentUrl, init);
     } finally {
@@ -174,7 +174,7 @@ export async function safeFetch(url: string, options: SafeFetchOptions = {}): Pr
       throw new Error('Target response is too large.');
     }
     if (!response.body) {
-      return new Response(new Uint8Array(), { headers: response.headers, status: response.status });
+      return new UndiciResponse(new Uint8Array(), { headers: response.headers, status: response.status });
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -196,7 +196,7 @@ export async function safeFetch(url: string, options: SafeFetchOptions = {}): Pr
       merged.set(chunk, offset);
       offset += chunk.length;
     }
-    return new Response(merged, { headers: response.headers, status: response.status });
+    return new UndiciResponse(merged, { headers: response.headers, status: response.status });
   }
   throw new Error('Too many redirects.');
 }
@@ -206,5 +206,6 @@ export async function safeFetchText(url: string, options: SafeFetchOptions = {})
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
   }
+  // undiciResponse.text() is the right way to read the body.
   return await response.text();
 }

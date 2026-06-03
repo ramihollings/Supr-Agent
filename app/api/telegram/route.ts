@@ -21,6 +21,22 @@ export const dynamic = 'force-dynamic';
 const DISABLED_CHANNEL_MAX = 5;
 const DISABLED_CHANNEL_WINDOW_MS = 60_000;
 
+/**
+ * Constant-time string comparison. Used to validate the Telegram
+ * webhook secret token so a timing-attack can't be used to recover it.
+ * The two inputs may differ in length, in which case we still do a
+ * full pass over the longer input but always compare against the
+ * shorter one padded to that length.
+ */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 async function reply(chatId: string, text: string) {
   const token = await getSecretSetting('telegram_token', process.env.TELEGRAM_BOT_TOKEN);
   if (!token) return;
@@ -130,6 +146,29 @@ export async function POST(req: NextRequest) {
       );
     }
     return Response.json({ ok: true, ignored: true, response: 'Telegram channel is disabled; Supr runtime remains live.' });
+  }
+
+  // Telegram's bot API supports an optional secret token that is sent
+  // in the `X-Telegram-Bot-Api-Secret-Token` header on every webhook
+  // delivery. Without it, an attacker who knows (or guesses) the chat
+  // id can forge POSTs to this endpoint and run privileged commands
+  // like `/start_flow`, `/pause`, `/approve`, `/approve_low_risk`.
+  // We require the header to match the stored secret BEFORE parsing
+  // the body, so a forged request is rejected before any command
+  // dispatch can run.
+  const configuredSecret = await getSecretSetting('telegram_webhook_secret', process.env.TELEGRAM_WEBHOOK_SECRET);
+  if (!configuredSecret) {
+    // Operator has not configured a webhook secret. Refuse to dispatch
+    // commands rather than fall back to the chat-id-only check, which
+    // is forgeable.
+    return Response.json(
+      { ok: false, error: 'Telegram webhook secret is not configured. Set telegram_webhook_secret in settings or TELEGRAM_WEBHOOK_SECRET in the environment.' },
+      { status: 503 },
+    );
+  }
+  const providedSecret = req.headers.get('x-telegram-bot-api-secret-token') || '';
+  if (!providedSecret || !safeEqual(providedSecret, configuredSecret)) {
+    return Response.json({ ok: false, error: 'Unauthorized Telegram webhook.' }, { status: 401 });
   }
 
   const configured = await configuredChatId();

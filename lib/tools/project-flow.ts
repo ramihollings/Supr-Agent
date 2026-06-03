@@ -5,6 +5,7 @@ import { z } from 'zod';
 import dbClient from '../../lib/database/db_client';
 import { toolRegistry, type ToolDefinition } from '../../lib/tools/registry';
 import { getRuntimeMode } from '../../lib/runtime/runtime-mode';
+import { safeFetchText } from '../../lib/net/safe-fetch';
 
 function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -277,12 +278,19 @@ const webScrapeTool: ToolDefinition<z.infer<typeof WebScrapeParams>, any> = {
   execute: async (params) => {
     const mode = await getRuntimeMode();
     if (params.url) {
-      const response = await fetch(params.url, { signal: AbortSignal.timeout(10000) });
-      if (!response.ok) throw new Error(`Source fetch failed: ${response.status}`);
-      const text = await response.text();
+      // Route the user-controlled URL through the shared SSRF
+      // defense: protocol check, private-IP block, DNS pinning,
+      // redirect re-validation, hard size cap. The previous
+      // implementation called fetch(params.url) directly, so an
+      // agent could use this tool to hit cloud metadata services
+      // (169.254.169.254) or local services (127.0.0.0/8).
+      const text = await safeFetchText(params.url, { maxBytes: 12_000, timeoutMs: 10_000 });
       return { url: params.url, content: text.slice(0, 12000), evidence: { sources: [params.url] } };
     }
     if (!params.query) throw new Error('web_scrape requires either url or query.');
+    // DuckDuckGo is a fixed external endpoint hardcoded by us, not
+    // user-controlled, so it doesn't need the full SSRF defense —
+    // but it still benefits from the shared size cap and timeout.
     const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(params.query)}&format=json&no_redirect=1&no_html=1`, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`Source search failed: ${response.status}`);
     const data = await response.json();

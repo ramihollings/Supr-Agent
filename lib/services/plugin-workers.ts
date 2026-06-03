@@ -65,6 +65,31 @@ export class PluginWorkerManager {
       throw new Error(`Entrypoint not found for plugin '${pluginId}' at path: ${entryPath}`);
     }
 
+    // Symlink containment: a manifest could place a symlink inside
+    // plugins/<id> that points to /etc/passwd or any other host file.
+    // Lexical containment (entryPath.startsWith(pluginRoot)) does NOT
+    // catch this — Node's child_process.fork follows symlinks before
+    // exec. Resolve every path through realpath and re-verify
+    // containment using the resolved (symlink-free) path. This is
+    // belt-and-suspenders: the loader also rejects `..` segments, but
+    // a symlink is invisible to that check.
+    let realPluginsDir: string;
+    let realPluginRoot: string;
+    let realEntryPath: string;
+    try {
+      realPluginsDir = fs.realpathSync(pluginsDir);
+      realPluginRoot = fs.realpathSync(pluginRoot);
+      realEntryPath = fs.realpathSync(entryPath);
+    } catch (err: any) {
+      throw new Error(`Plugin '${pluginId}' path resolution failed: ${err.message}`);
+    }
+    if (!realPluginRoot.startsWith(realPluginsDir + path.sep) && realPluginRoot !== realPluginsDir) {
+      throw new Error(`Plugin '${pluginId}' root resolves outside the plugins directory.`);
+    }
+    if (!realEntryPath.startsWith(realPluginRoot + path.sep) && realEntryPath !== realPluginRoot) {
+      throw new Error(`Plugin '${pluginId}' entrypoint resolves outside the plugin directory (symlink escape?).`);
+    }
+
     console.log(`[PluginWorkers] Starting worker for plugin '${pluginId}' (entrypoint: ${entrypoint})...`);
 
     // Fork the worker process with a *scoped* environment. The previous
@@ -73,7 +98,9 @@ export class PluginWorkerManager {
     // host secrets. Plugins now get only the two vars they need to identify
     // themselves; secret access must be requested via a future manifest
     // permission flag.
-    const child = fork(entryPath, [], {
+    // Use the realpath-resolved entryPath to ensure symlinks are
+    // followed and any containment violation has been ruled out.
+    const child = fork(realEntryPath, [], {
       env: {
         NODE_ENV: process.env.NODE_ENV || "development",
         PLUGIN_ID: pluginId,

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import dbClient from "../../lib/database/db_client";
 import { pluginEventBus } from "./plugin-events";
 import { pluginWorkerManager } from "./plugin-workers";
@@ -99,7 +100,7 @@ export class PluginHost {
     targetId?: string,
     metadata?: any
   ): Promise<void> {
-    const id = `audit-plugin-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const id = `audit-plugin-${crypto.randomUUID()}`;
     await dbClient.execute(
       `INSERT INTO Audit_Log (id, actor_type, actor_id, action, target_type, target_id, metadata)
        VALUES (?, 'plugin', ?, ?, ?, ?, ?)`,

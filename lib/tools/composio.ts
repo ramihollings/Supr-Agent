@@ -2,11 +2,22 @@ import { z } from 'zod';
 import { ToolDefinition, toolRegistry } from './registry';
 // @ts-ignore - The types might be missing or incomplete depending on version
 import { Composio } from 'composio-core';
+import { getSecretSetting } from '@/lib/secrets';
 
-let composioClient: Composio | null = null;
-
-if (process.env.COMPOSIO_API_KEY) {
-  composioClient = new Composio({ apiKey: process.env.COMPOSIO_API_KEY });
+// Resolve the Composio key + client lazily and re-resolve on every
+// execution, not at module load. The previous implementations:
+//   (a) read process.env.COMPOSIO_API_KEY once at import, so the
+//       Settings page's `integrations_composio` field could not
+//       power Composio tools; and
+//   (b) cached the client forever after the first call, so a
+//       Settings-side key rotation (add/remove/change) would not
+//       take effect until process restart.
+// The new path re-reads the key on every call, which is cheap
+// (single SELECT) and gives operators immediate rotation.
+async function getComposioClient(): Promise<Composio | null> {
+  const apiKey = await getSecretSetting('integrations_composio', process.env.COMPOSIO_API_KEY);
+  if (!apiKey) return null;
+  return new Composio({ apiKey });
 }
 
 /**
@@ -25,12 +36,13 @@ export async function registerComposioTool(actionName: string, riskLevel: 'Low' 
     requiredTier: 'External_Act',
     riskLevel: riskLevel,
     execute: async (params) => {
-      if (!composioClient) {
-        throw new Error(`Composio action '${actionName}' requires COMPOSIO_API_KEY in live runtime.`);
+      const client = await getComposioClient();
+      if (!client) {
+        throw new Error(`Composio action '${actionName}' requires integrations_composio in Settings or COMPOSIO_API_KEY in env.`);
       }
 
       try {
-        const response = await (composioClient as any).executeAction(actionName, params);
+        const response = await (client as any).executeAction(actionName, params);
         return JSON.stringify(response);
       } catch (error: any) {
         throw new Error(`Composio Execution Failed: ${error.message}`);

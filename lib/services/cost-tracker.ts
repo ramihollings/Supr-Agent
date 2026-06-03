@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import dbClient from "../../lib/database/db_client";
 import { budgetEngine } from "./budget-engine";
 
@@ -58,7 +59,7 @@ export class CostTracker {
   }): Promise<number> {
     const pricing = this.getPricing(data.model);
     const costCents = (data.inputTokens * pricing.inputRate) + (data.outputTokens * pricing.outputRate);
-    const id = `cost-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    const id = `cost-${crypto.randomUUID()}`;
 
     await dbClient.execute(
       `INSERT INTO Cost_Events 

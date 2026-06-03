@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { z } from "zod";
 import { ToolDefinition, toolRegistry } from "../../lib/tools/registry";
 import dbClient from "../../lib/database/db_client";
@@ -36,7 +37,7 @@ export const todoTool: ToolDefinition<TodoParamsType, string> = {
       if (!params.title) {
         throw new Error("Title is required when adding a task.");
       }
-      const taskId = `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const taskId = `task-${crypto.randomUUID()}`;
       const status = params.status || "Pending";
       
       await dbClient.execute(
