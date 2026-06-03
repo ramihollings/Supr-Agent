@@ -987,6 +987,21 @@ test('DataTable component is a generic neobrutalist list table for shared use', 
   assert.match(tbl, /render\?\: \(row: T\) => ReactNode/);
 });
 
+test('Supr-Chat uses the extracted WorkspaceFilesPanel component', () => {
+  const page = readFileSync('app/supr-chat/page.tsx', 'utf8');
+  assert.match(page, /from '@\/components\/WorkspaceFilesPanel'/);
+  // The page must not inline the file-list block.
+  assert.doesNotMatch(page, /Local Sandbox Directory/);
+  // The component file must exist and have the public surface.
+  const comp = readFileSync('components/WorkspaceFilesPanel.tsx', 'utf8');
+  assert.match(comp, /export function WorkspaceFilesPanel/);
+  assert.match(comp, /onCreateNewFile/);
+  assert.match(comp, /onOpenFile/);
+  assert.match(comp, /onDeleteFile/);
+  // Empty state copy.
+  assert.match(comp, /Workspace directory is currently empty/);
+});
+
 test('Settings page uses the extracted StandardsSection component', () => {
   const page = readFileSync('app/settings/page.tsx', 'utf8');
   assert.match(page, /from '@\/components\/settings\/StandardsSection'/);
