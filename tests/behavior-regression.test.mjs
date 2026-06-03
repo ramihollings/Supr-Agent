@@ -868,6 +868,16 @@ test('getMissionById has a short-TTL in-process cache to absorb stream-burst rea
   assert.match(publicBody, /getMissionByIdUncached\(id\)/);
 });
 
+test('settings page broadcasts notifySettingsChanged after a successful save', () => {
+  const page = readFileSync('app/settings/page.tsx', 'utf8');
+  // The hook helper must be imported in the settings page.
+  assert.match(page, /notifySettingsChanged/);
+  // The central save helper (handleUpdateSetting) must call it on
+  // success so the chat picks up the change without a refresh.
+  const handleBody = page.match(/const handleUpdateSetting[\s\S]*?\n\s*\};/)?.[0] || '';
+  assert.match(handleBody, /notifySettingsChanged\(\)/);
+});
+
 test('npm run db:status is a recovery CLI that lists applied migrations', () => {
   // The package.json entry must exist so operators can run it.
   const pkg = readFileSync('package.json', 'utf8');

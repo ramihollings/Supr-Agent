@@ -2,6 +2,7 @@
 
 import { TopNav } from '@/components/TopNav';
 import { useState, useEffect, useRef } from 'react';
+import { notifySettingsChanged } from '@/hooks/useSettingsSnapshot';
 import {
   fetchSettingsAction,
   updateSettingAction,
@@ -310,8 +311,12 @@ export default function SettingsPage() {
 
   const handleUpdateSetting = async (key: string, value: string, toastMsg?: string) => {
     const res = await updateSettingAction(key, value);
-    if (res.success && toastMsg) {
-      showToast(toastMsg);
+    if (res.success) {
+      // Broadcast to other tabs (and the in-tab chat) so they
+      // re-fetch the snapshot. This is the sentinel that
+      // useSettingsSnapshot listens for via the 'storage' event.
+      notifySettingsChanged();
+      if (toastMsg) showToast(toastMsg);
     }
   };
 
