@@ -5,6 +5,8 @@ import { useState, useEffect, useRef } from 'react';
 import { TopNav } from '@/components/TopNav';
 import { useSettingsSnapshot } from '@/hooks/useSettingsSnapshot';
 import { WorkspaceFilesPanel } from '@/components/WorkspaceFilesPanel';
+import { CanvasEditorPanel } from '@/components/CanvasEditorPanel';
+import { CanvasRunPanel } from '@/components/CanvasRunPanel';
 import { 
   fetchChatMessagesAction, 
   updateChatMessageAction,
@@ -745,94 +747,19 @@ How can I assist you today? You can query data, ask me to draft/run code files i
 
             {/* Document / Code Editor Preview */}
             {canvasTab === 'preview' && (
-              <div className="flex-1 flex flex-col space-y-4">
-                {canvasFile ? (
-                  <div className="flex-1 flex flex-col space-y-3">
-                    <div className="flex justify-between items-center border-b border-primary pb-1">
-                      <span className="font-mono text-[10px] font-bold text-primary">{canvasFile.filename}</span>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={handleSaveFile}
-                          className="px-2 py-0.5 border border-primary bg-surface font-bold uppercase text-[9px] hover:bg-primary hover:text-on-primary"
-                        >
-                          Save Changes
-                        </button>
-                        <button 
-                          onClick={handleRunFile}
-                          className="px-2 py-0.5 border border-primary bg-primary text-on-primary font-bold uppercase text-[9px] hover:bg-tertiary"
-                        >
-                          Execute Code
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <textarea 
-                      value={canvasFile.content}
-                      onChange={(e) => setCanvasFile(prev => prev ? { ...prev, content: e.target.value } : null)}
-                      className="flex-1 bg-black text-green-400 font-mono text-[11px] leading-relaxed p-4 neo-border focus:outline-none custom-scrollbar resize-none"
-                    />
-                  </div>
-                ) : (
-                  <p className="text-on-surface-variant text-[10px] italic text-center p-6 bg-background border border-dashed border-primary">
-                    Select a document from Sandbox Files to view or edit its contents.
-                  </p>
-                )}
-              </div>
+              <CanvasEditorPanel
+                file={canvasFile}
+                onChangeContent={(next) =>
+                  setCanvasFile((prev) => (prev ? { ...prev, content: next } : null))
+                }
+                onSave={handleSaveFile}
+                onRun={handleRunFile}
+              />
             )}
 
             {/* Shell Execution Output */}
             {canvasTab === 'run' && (
-              <div className="flex-1 flex flex-col space-y-4">
-                <div className="border-b border-primary pb-1">
-                  <span className="font-headline font-black uppercase text-xs text-primary">Terminal Execution Logs</span>
-                </div>
-                
-                {runLoading ? (
-                  <div className="p-6 bg-black text-amber-500 font-mono text-xs flex items-center gap-2 neo-border">
-                    <span className="material-symbols-outlined animate-spin text-sm">sync</span>
-                    Executing script inside sandbox...
-                  </div>
-                ) : runOutput ? (
-                  <div className="flex-1 bg-black text-white font-mono text-[11px] p-4 neo-border overflow-y-auto custom-scrollbar flex flex-col gap-3">
-                    {runOutput.success ? (
-                      <div className="text-green-500 font-bold uppercase text-[9px] flex items-center gap-1 border-b border-green-950 pb-1">
-                        <span className="material-symbols-outlined text-xs">check_circle</span>
-                        Execution Succeeded
-                      </div>
-                    ) : (
-                      <div className="text-red-500 font-bold uppercase text-[9px] flex items-center gap-1 border-b border-red-955 pb-1">
-                        <span className="material-symbols-outlined text-xs">error</span>
-                        Execution Failed (Code {runOutput.error ? 1 : 0})
-                      </div>
-                    )}
-                    
-                    {runOutput.stdout && (
-                      <div>
-                        <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">STDOUT:</span>
-                        <pre className="text-green-400 whitespace-pre-wrap">{runOutput.stdout}</pre>
-                      </div>
-                    )}
-
-                    {runOutput.stderr && (
-                      <div>
-                        <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">STDERR:</span>
-                        <pre className="text-red-400 whitespace-pre-wrap">{runOutput.stderr}</pre>
-                      </div>
-                    )}
-
-                    {runOutput.error && (
-                      <div>
-                        <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">SYSTEM EXCEPTION:</span>
-                        <pre className="text-red-500 whitespace-pre-wrap">{runOutput.error}</pre>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-on-surface-variant text-[10px] italic text-center p-6 bg-background border border-dashed border-primary">
-                    No active script execution has been initialized. Run a script inside Editor Preview!
-                  </p>
-                )}
-              </div>
+              <CanvasRunPanel loading={runLoading} output={runOutput} />
             )}
           </div>
         </aside>

@@ -1002,6 +1002,24 @@ test('Supr-Chat uses the extracted WorkspaceFilesPanel component', () => {
   assert.match(comp, /Workspace directory is currently empty/);
 });
 
+test('Supr-Chat uses extracted CanvasEditorPanel and CanvasRunPanel components', () => {
+  const page = readFileSync('app/supr-chat/page.tsx', 'utf8');
+  assert.match(page, /from '@\/components\/CanvasEditorPanel'/);
+  assert.match(page, /from '@\/components\/CanvasRunPanel'/);
+  // The component files must exist with the right public surface.
+  const editor = readFileSync('components/CanvasEditorPanel.tsx', 'utf8');
+  assert.match(editor, /export function CanvasEditorPanel/);
+  assert.match(editor, /Save Changes/);
+  assert.match(editor, /Execute Code/);
+  assert.match(editor, /Select a document from Sandbox Files/);
+  const run = readFileSync('components/CanvasRunPanel.tsx', 'utf8');
+  assert.match(run, /export function CanvasRunPanel/);
+  assert.match(run, /Terminal Execution Logs/);
+  assert.match(run, /Executing script inside sandbox/);
+  assert.match(run, /STDOUT/);
+  assert.match(run, /STDERR/);
+});
+
 test('Settings page uses the extracted StandardsSection component', () => {
   const page = readFileSync('app/settings/page.tsx', 'utf8');
   assert.match(page, /from '@\/components\/settings\/StandardsSection'/);
