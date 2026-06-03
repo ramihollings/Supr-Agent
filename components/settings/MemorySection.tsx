@@ -58,10 +58,10 @@ const BANK_META: BankMeta[] = [
   { name: "Mission", icon: "radar", type: "Ephemeral", bg: "bg-surface-variant", border: "border-l-outline-variant", danger: true },
 ];
 
-export function MemorySection(props: MemorySectionProps) {
+export function MemorySection({ ref, ...props }: MemorySectionProps) {
   return (
     <>
-      <div ref={props.ref} className="flex flex-col gap-6">
+      <div ref={ref} className="flex flex-col gap-6">
         <div className="border-b-4 border-primary pb-4 mb-4 flex justify-between items-end">
           <div>
             <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">Memory Banks</h2>
@@ -107,12 +107,16 @@ export function MemorySection(props: MemorySectionProps) {
         </div>
       </div>
 
-      {props.showMemoryModal && <MemoryInspectorModal {...props} />}
+      {props.showMemoryModal && <MemoryInspectorModal {...(props as MemoryModalProps)} />}
     </>
   );
 }
 
-function MemoryInspectorModal(props: MemorySectionProps) {
+// The modal renders inside a portal, not into the section's ref'd
+// element, so it doesn't need the ref. Narrow the type.
+type MemoryModalProps = Omit<MemorySectionProps, "ref">;
+
+function MemoryInspectorModal(props: MemoryModalProps) {
   return (
     <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-background neo-border max-w-2xl w-full max-h-[85vh] flex flex-col neo-shadow-lg">

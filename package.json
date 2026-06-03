@@ -10,7 +10,7 @@
     "clean": "next clean",
     "smoke": "node scripts/smoke.mjs",
     "db:status": "node scripts/recover.mjs",
-    "test:security": "node --test tests/security-hardening.test.mjs tests/behavior-regression.test.mjs tests/telemetry.test.mjs",
+    "test:security": "node --test tests/security-hardening.test.mjs tests/behavior-regression.test.mjs tests/telemetry.test.mjs tests/project-flow-structure.test.mjs",
     "test:e2e": "playwright test",
     "test:prod": "npm run lint && npm run test:security && npm run build && npm run smoke && npm run test:e2e"
   },

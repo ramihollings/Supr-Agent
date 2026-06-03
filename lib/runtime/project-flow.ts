@@ -654,6 +654,8 @@ export async function startProjectFlow(projectId: string, source = 'project_flow
     'Started Project Flow',
     `Supr decomposed the project with ${projectPlan.plannerSource} planner in ${projectPlan.mode} mode and queued ${projectPlan.plan.length} agent-owned work item(s).`,
   );
+  // Notify the bus so the mission stream and chat both update.
+  notifyMissionChanged(projectId, 'flow_started');
   return { success: true, flowRunId };
 }
 
@@ -823,6 +825,7 @@ export async function runProjectFlow(projectId: string) {
     });
   }
   await logFlowEvent(projectId, 'supr_decision', 'Supr', 'Project Flow heartbeat finished', `${completed} completed, ${gated} waiting for approval, ${failed} failed.`);
+  notifyMissionChanged(projectId, status === 'completed' ? 'flow_completed' : 'mission_updated');
   return { success: true, flowRunId: flowRun.id, completed, gated, failed, status };
 }
 
@@ -830,6 +833,7 @@ export async function pauseProjectFlow(projectId: string) {
   const flowRun = await getOrCreateFlowRun(projectId);
   await dbClient.execute(`UPDATE Flow_Runs SET status = 'paused', paused_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [flowRun.id]);
   await logFlowEvent(projectId, 'supr_decision', 'Supr', 'Paused Project Flow', 'Queue execution is paused. Current work state is preserved.');
+  notifyMissionChanged(projectId, 'flow_paused');
   return { success: true, flowRunId: flowRun.id };
 }
 
@@ -837,6 +841,7 @@ export async function resumeProjectFlow(projectId: string) {
   const flowRun = await getOrCreateFlowRun(projectId);
   await dbClient.execute(`UPDATE Flow_Runs SET status = 'running', paused_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [flowRun.id]);
   await logFlowEvent(projectId, 'supr_decision', 'Supr', 'Resumed Project Flow', 'Autonomous queue processing resumed.');
+  notifyMissionChanged(projectId, 'flow_resumed');
   return runProjectFlow(projectId);
 }
 
@@ -851,6 +856,7 @@ export async function retryFailedFlowNodes(projectId: string) {
     );
   }
   await logFlowEvent(projectId, 'escalation', 'Supr', 'Retried failed work', `${failed.length} failed action(s) returned to the work queue.`);
+  notifyMissionChanged(projectId, 'flow_resumed');
   return { success: true, retried: failed.length, flowRunId: flowRun.id };
 }
 
@@ -866,6 +872,7 @@ export async function approveLowRiskActions(projectId: string) {
   const flowRun = await getOrCreateFlowRun(projectId);
   await syncFlowNodes(flowRun.id, projectId);
   await logFlowEvent(projectId, 'approval', 'Supr', 'Approved low-risk work', `${approvals.length} low/medium-risk approval(s) cleared.`);
+  notifyMissionChanged(projectId, 'approval_decision');
   return { success: true, approved: approvals.length, flowRunId: flowRun.id };
 }
 
@@ -877,7 +884,10 @@ export async function routeIntakeToProjectFlow(input: {
   attachments?: unknown[];
 }) {
   const mission = input.projectId ? await getMissionById(input.projectId) : await getActiveMission();
-  if (!mission) return { success: false, error: 'No active project is available for intake.' };
+  if (!mission) {
+    notifyMissionChanged(null, 'intake_routed');
+    return { success: false, error: 'No active project is available for intake.' };
+  }
   const commandId = id('cmd');
   await dbClient.execute(
     `INSERT INTO Channel_Commands (id, source, mission_id, command, payload, status, actor_id)
@@ -903,6 +913,7 @@ export async function routeIntakeToProjectFlow(input: {
       response,
       commandId,
     ]);
+    notifyMissionChanged(mission.id, 'intake_routed');
     return { success: start.success, commandId, missionId: mission.id, response, flowRunId: start.flowRunId };
   } catch (error: any) {
     const response = `Unable to route Project Flow request: ${error.message || String(error)}`;

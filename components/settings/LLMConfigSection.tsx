@@ -60,9 +60,9 @@ const ROLE_META: Record<
   sub: { title: "Sub-Agents (General)", icon: "group", settingPrefix: "sub" },
 };
 
-export function LLMConfigSection(props: LlmConfigSectionProps) {
+export function LLMConfigSection({ ref, ...props }: LlmConfigSectionProps) {
   return (
-    <div ref={props.ref} className="flex flex-col gap-6">
+    <div ref={ref} className="flex flex-col gap-6">
       <div className="border-b-4 border-primary pb-4 mb-4">
         <h2 className="font-headline text-3xl font-black uppercase tracking-tighter">LLM Configuration</h2>
         <p className="font-body text-on-surface-variant mt-2">Manage API keys, endpoints, and models for Supr and sub-agents on the fly.</p>
@@ -77,15 +77,56 @@ export function LLMConfigSection(props: LlmConfigSectionProps) {
   );
 }
 
-function GlobalProvidersCard(props: LlmConfigSectionProps) {
-  const providerKeyControls = [
-    { label: 'OpenAI API Key', key: 'global_openai_key', value: props.globalOpenaiKey, onChange: props.onChangeGlobalKey, placeholder: 'sk-...' },
-    { label: 'Anthropic API Key', key: 'global_anthropic_key', value: props.globalAnthropicKey, onChange: props.onChangeGlobalKey, placeholder: 'sk-ant-...' },
-    { label: 'xAI API Key', key: 'global_xai_key', value: props.globalXaiKey, onChange: props.onChangeGlobalKey, placeholder: 'xai-...' },
-    { label: 'OpenRouter API Key', key: 'global_openrouter_key', value: props.globalOpenrouterKey, onChange: props.onChangeGlobalKey, placeholder: 'sk-or-...' },
-    { label: 'Groq API Key', key: 'global_groq_key', value: props.globalGroqKey, onChange: props.onChangeGlobalKey, placeholder: 'gsk_...' },
-    { label: 'Mistral API Key', key: 'global_mistral_key', value: props.globalMistralKey, onChange: props.onChangeGlobalKey, placeholder: '...' },
-    { label: 'DeepSeek API Key', key: 'global_deepseek_key', value: props.globalDeepseekKey, onChange: props.onChangeGlobalKey, placeholder: 'sk-...' },
+// GlobalProvidersCard and RoleOverridesCard are internal
+// sub-components of LLMConfigSection. Each takes a narrower
+// type that omits the fields it does not need (no `ref`, no role
+// overrides for GlobalProviders, no global keys for
+// RoleOverrides). The narrow types keep the call site free of
+// unused props and make the data flow between parent and child
+// explicit.
+
+type GlobalProviderProps = Omit<
+  LlmConfigSectionProps,
+  "ref" | "supr" | "code" | "research" | "sub" | "onChangeRoleField" | "onSelectRoleProvider" | "onSaveRoleOverride"
+>;
+
+type RoleOverridesProps = Omit<
+  LlmConfigSectionProps,
+  | "ref"
+  | "globalMinimaxKey"
+  | "globalGeminiKey"
+  | "globalOpenaiKey"
+  | "globalAnthropicKey"
+  | "globalXaiKey"
+  | "globalOpenrouterKey"
+  | "globalGroqKey"
+  | "globalMistralKey"
+  | "globalDeepseekKey"
+  | "globalBackupKey"
+  | "globalBackupUrl"
+  | "globalBackupModel"
+  | "globalBackupName"
+  | "onChangeGlobalKey"
+  | "onChangeBackupField"
+  | "onSaveGlobalKey"
+  | "onSaveBackupConfig"
+>;
+
+function GlobalProvidersCard(props: GlobalProviderProps) {
+  const providerKeyControls: Array<{
+    label: string;
+    key: string;
+    value: string;
+    onChange: (value: string) => void;
+    placeholder: string;
+  }> = [
+    { label: "OpenAI API Key", key: "global_openai_key", value: props.globalOpenaiKey, onChange: (v) => props.onChangeGlobalKey("global_openai_key", v), placeholder: "sk-..." },
+    { label: "Anthropic API Key", key: "global_anthropic_key", value: props.globalAnthropicKey, onChange: (v) => props.onChangeGlobalKey("global_anthropic_key", v), placeholder: "sk-ant-..." },
+    { label: "xAI API Key", key: "global_xai_key", value: props.globalXaiKey, onChange: (v) => props.onChangeGlobalKey("global_xai_key", v), placeholder: "xai-..." },
+    { label: "OpenRouter API Key", key: "global_openrouter_key", value: props.globalOpenrouterKey, onChange: (v) => props.onChangeGlobalKey("global_openrouter_key", v), placeholder: "sk-or-..." },
+    { label: "Groq API Key", key: "global_groq_key", value: props.globalGroqKey, onChange: (v) => props.onChangeGlobalKey("global_groq_key", v), placeholder: "gsk_..." },
+    { label: "Mistral API Key", key: "global_mistral_key", value: props.globalMistralKey, onChange: (v) => props.onChangeGlobalKey("global_mistral_key", v), placeholder: "..." },
+    { label: "DeepSeek API Key", key: "global_deepseek_key", value: props.globalDeepseekKey, onChange: (v) => props.onChangeGlobalKey("global_deepseek_key", v), placeholder: "sk-..." },
   ];
 
   return (
@@ -141,7 +182,7 @@ function GlobalProvidersCard(props: LlmConfigSectionProps) {
               <input
                 type="password" aria-label={control.label}
                 value={control.value}
-                onChange={(e) => control.onChange(control.key, e.target.value)}
+                onChange={(e) => control.onChange(e.target.value)}
                 className="flex-1 bg-background neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
                 placeholder={control.placeholder}
               />
@@ -209,7 +250,7 @@ function GlobalProvidersCard(props: LlmConfigSectionProps) {
   );
 }
 
-function RoleOverridesCard(props: LlmConfigSectionProps) {
+function RoleOverridesCard(props: RoleOverridesProps) {
   return (
     <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-6">
       <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
