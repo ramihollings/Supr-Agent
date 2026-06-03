@@ -1068,3 +1068,21 @@ test('Settings page uses the extracted LLMConfigSection component', () => {
   // is asserted by the file structure.
   assert.match(comp, /function RoleOverridesCard/);
 });
+
+test('Settings page uses the extracted MemorySection component (with the inspector modal inside)', () => {
+  const page = readFileSync('app/settings/page.tsx', 'utf8');
+  assert.match(page, /from '@\/components\/settings\/MemorySection'/);
+  // The inline modal block must be gone.
+  assert.doesNotMatch(page, /Memory Banks Interactive Modal/);
+  // The component file must exist with the right public surface.
+  const comp = readFileSync('components/settings/MemorySection.tsx', 'utf8');
+  assert.match(comp, /export function MemorySection/);
+  assert.match(comp, /Memory Inspector/);
+  assert.match(comp, /Inject Custom Memory Entry/);
+  assert.match(comp, /function MemoryInspectorModal/);
+  // The 3 bank tiles.
+  assert.match(comp, /User/);
+  assert.match(comp, /Workspace/);
+  assert.match(comp, /Mission/);
+});
+
