@@ -868,6 +868,21 @@ test('getMissionById has a short-TTL in-process cache to absorb stream-burst rea
   assert.match(publicBody, /getMissionByIdUncached\(id\)/);
 });
 
+test('npm run db:status is a recovery CLI that lists applied migrations', () => {
+  // The package.json entry must exist so operators can run it.
+  const pkg = readFileSync('package.json', 'utf8');
+  assert.match(pkg, /"db:status"/);
+  assert.match(pkg, /scripts\/recover\.mjs/);
+
+  // The script must be a real CLI (shebang + imports).
+  const script = readFileSync('scripts/recover.mjs', 'utf8');
+  assert.match(script, /^#!\/usr\/bin\/env node/);
+  assert.match(script, /_migrations/);
+  assert.match(script, /SQLITE_DB_PATH/);
+  // It must be a read-only listing, not a mutator.
+  assert.doesNotMatch(script, /applyMigrations|downgradeOne|markMigrationApplied/);
+});
+
 test('dead field AgentRuntimeRunInput.resumeCursor is removed and the no-provider error is helpful', () => {
   const types = readFileSync('lib/runtime/types.ts', 'utf8');
   const model = readFileSync('lib/providers/model.ts', 'utf8');
