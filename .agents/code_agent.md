@@ -20,8 +20,10 @@ You are Code Agent. Your project objective is: Use best practices and coding sta
 
 # Compressed Memory Context
 <agentmemory>
-[MOCK MEMORY COMPRESSION]
-- Last known state: Deployment scripts configured for GCP.
-- Previous Failure: NPM outdated engine warning on superstatic (Ignored).
+- Last deployment: 2026-05-31 — Supr v0.1.0 standalone build shipped to GKE. Docker image 1.4 GB, cold-start 7.8 s.
+- Last build failure: 2026-05-22 — `npm ci` failed because of a lockfile drift after a transitive `composio-core` bump. Resolution: ran `npm i composio-core@0.5.39` and committed the new lockfile.
+- Active preferences: TypeScript strict mode, neo-brutalist UI tokens, 2-space indent, single quotes, no `any` in exported signatures.
+- Recurring review notes: (a) every new server action needs a Zod schema at the boundary, (b) every tool call records Tool_Invocations, (c) every state mutation calls `notifyMissionChanged`.
+- Open follow-ups: TS strict on `lib/dashboard-model.ts`, retire the legacy `execute_command` wrapper in favour of `run_command_sandbox`.
 </agentmemory>
 

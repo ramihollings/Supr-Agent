@@ -1,6 +1,7 @@
 import dbClient from '@/lib/database/db_client';
 import { toolRegistry } from '@/lib/tools/registry';
 import { guidelinePackService } from '@/lib/services/guideline-packs';
+import { loadAllIdentityProfiles, type LoadedIdentityProfile } from '@/lib/agents';
 import { memorySectionService } from '@/lib/services/memory-sections';
 import type { AgentActionRecord, AgentContextBundle, SkillMatch } from './types';
 
@@ -130,6 +131,7 @@ export async function assembleAgentContext(action: AgentActionRecord): Promise<A
       skillSelection.matches.length ? 'matching_skill_summaries' : '',
       'tool_manifest',
       'recent_transcript',
+      persona ? 'agent_persona' : '',
     ].filter(Boolean),
   };
 }

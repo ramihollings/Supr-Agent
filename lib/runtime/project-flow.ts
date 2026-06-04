@@ -51,6 +51,125 @@ function safeJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Glidepath templates — Phase 3A.
+// ---------------------------------------------------------------------------
+
+export interface GlidepathPhase {
+  id: string;
+  name: string;
+  requiredAgents: string[];
+  approvalGate: boolean;
+  maxRetries?: number;
+  escalateOnFailure?: boolean;
+  outputs: string[];
+}
+
+export interface GlidepathTemplate {
+  templateId: string;
+  name: string;
+  description: string;
+  phases: GlidepathPhase[];
+  failurePolicy: { maxRetriesPerTask: number; escalationTarget: string; onEscalation: string };
+}
+
+/**
+ * Load a single glidepath template by id from
+ * `agent-config/glidepath_templates/`. Returns null if the file is
+ * missing or malformed so callers can fall back to the hard-coded
+ * preset plan.
+ */
+export function loadGlidepathTemplate(templateId: string): GlidepathTemplate | null {
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const filePath = path.resolve(process.cwd(), 'agent-config', 'glidepath_templates', `${templateId}.json`);
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw) as GlidepathTemplate;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Heuristic: pick the best template for a given objective. The
+ * `feature_development` template wins for objectives that mention
+ * "feature", "implement", "build a", "develop"; otherwise the
+ * `default_mission` template wins. Returning null lets the planner
+ * fall back to the hard-coded preset if no template matches.
+ */
+export function selectGlidepathTemplateForObjective(objective: string): GlidepathTemplate | null {
+  const lower = (objective || '').toLowerCase();
+  if (/\b(feature|implement|build a|develop|new feature|add a)\b/.test(lower)) {
+    return loadGlidepathTemplate('feature_development');
+  }
+  return loadGlidepathTemplate('default_mission');
+}
+
+/**
+ * Convert a GlidepathTemplate into the PlannedWork[] shape that
+ * buildModelProjectPlan consumes. The mapping is:
+ *   `requiredAgents: ['research']`   -> `capability: 'web_scrape'`
+ *   `requiredAgents: ['planner']`     -> `capability: 'delivery_package'`
+ *   `requiredAgents: ['code']`        -> `capability: 'workspace_write_artifact'`
+ *   `requiredAgents: ['qa_critic']`   -> `capability: 'workspace_validate_outputs'`
+ *   `requiredAgents: ['security']`    -> `capability: 'governance_review'`
+ *   `requiredAgents: ['supr']`        -> `capability: 'delivery_package'`
+ * Unknown agents get `workspace_write_artifact` as a safe default.
+ * Approval-gated phases get a higher risk level so the runtime
+ * prompts the operator before executing.
+ */
+const PHASE_AGENT_TO_CAPABILITY: Record<string, string> = {
+  research: 'web_scrape',
+  planner: 'delivery_package',
+  code: 'workspace_write_artifact',
+  qa_critic: 'workspace_validate_outputs',
+  security: 'governance_review',
+  supr: 'delivery_package',
+};
+
+const PHASE_AGENT_TO_ROLE: Record<string, string> = {
+  research: 'Research',
+  planner: 'Planner',
+  code: 'Code',
+  qa_critic: 'QA',
+  security: 'Security',
+  supr: 'Writer',
+};
+
+const PHASE_AGENT_TO_TIER: Record<string, string> = {
+  research: 'Observe',
+  planner: 'Draft',
+  code: 'Edit',
+  qa_critic: 'Draft',
+  security: 'Edit',
+  supr: 'Draft',
+};
+
+export function glidepathToPlan(template: GlidepathTemplate, objective: string): PlannedWork[] {
+  return template.phases.map((phase) => {
+    const agentKey = phase.requiredAgents[0] || 'code';
+    return {
+      role: PHASE_AGENT_TO_ROLE[agentKey] || 'Code',
+      agentName: `${PHASE_AGENT_TO_ROLE[agentKey] || 'Code'} Agent`,
+      capability: PHASE_AGENT_TO_CAPABILITY[agentKey] || 'workspace_write_artifact',
+      permissionTier: (PHASE_AGENT_TO_TIER[agentKey] || 'Edit') as any,
+      riskLevel: phase.approvalGate ? 'High' : 'Medium',
+      phase: phase.name,
+      title: `${phase.name}: ${objective}`.slice(0, 240),
+      inputs: {
+        objective,
+        phaseId: phase.id,
+        requiredOutputs: phase.outputs,
+        approvalGate: phase.approvalGate,
+      },
+      plannerSource: 'glidepath_template' as const,
+    } satisfies PlannedWork;
+  });
+}
+
+
 async function logFlowEvent(missionId: string, eventType: string, actor: string, summary: string, detail = '') {
   await addActivityLog(missionId, {
     eventType: eventType as any,

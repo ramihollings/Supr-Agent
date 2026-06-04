@@ -41,6 +41,16 @@ function safeJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
+/**
+ * Phase 4E: exponential backoff for transient tool-call failures.
+ * 1s on the first retry, 2s on the second, 4s on the third. We
+ * never sleep more than 8 seconds to keep the runtime responsive.
+ */
+async function backoffSleepMs(attempt: number): Promise<void> {
+  const base = Math.min(8000, 1000 * Math.pow(2, attempt));
+  await new Promise((resolve) => setTimeout(resolve, base));
+}
+
 function summarize(value: unknown, max = 8000) {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return text.length > max ? `${text.slice(0, max)}...` : text;
@@ -290,6 +300,23 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
         }), deadline, 'model response');
         const response = parseModelToolResponse(raw);
 
+        // Phase 2C: record a heartbeat step so the chat UI can show
+        // `step N of M, currently calling tool X`. We capture the
+        // raw model step count from `step` plus the response kind.
+        try {
+          await appendAgentRunStep({
+            runId,
+            step,
+            event: response.type === 'final' ? 'final' : response.type === 'message' ? 'model_thinking' : 'model_thinking',
+            detail: {
+              kind: response.type,
+              modelChars: raw.length,
+            },
+          });
+        } catch {
+          // Heartbeat writes are best-effort; never fail a run.
+        }
+
         if (response.type === 'invalid') {
           transcriptIds.push(await recordStep({
             missionId: action.missionId,
@@ -348,6 +375,32 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
             injectedSections: context.injectedSections,
           };
           await updateAgentRun(runId, 'completed', result, undefined, logs);
+
+          // Phase 1D: persist a short Memory_Section so the next
+          // session/iteration of this mission sees what was decided.
+          // We do this best-effort: a failure to write memory must
+          // not fail the run, so we wrap in try/catch. The section
+          // title is the action capability, the body is the
+          // final summary plus the durable evidence ids so a later
+          // session can audit what was done.
+          try {
+            await memorySectionService.upsert({
+              missionId: action.missionId,
+              title: `Run ${action.id.slice(0, 8)}: ${action.capability}`,
+              content: [
+                `Summary: ${response.summary}`,
+                `Evidence: artifacts=${(evidence.artifacts || []).length} toolCalls=${(evidence.toolCalls || []).length} events=${(evidence.events || []).length}`,
+                `Mode: ${mode}`,
+              ].join('\n'),
+              provenance: 'agent',
+              injectionStatus: 'active',
+            });
+          } catch (memoryError: any) {
+            telemetry.warn('runtime.memory_persist_failed', {
+              actionId: action.id,
+              reason: memoryError?.message || String(memoryError),
+            });
+          }
           const learnedSkillDraft = await skillLearningService.evaluateCompletedRun(runId);
           if (learnedSkillDraft?.status === 'draft') {
             await skillLearningService.requestSecurityReview(learnedSkillDraft.id);
@@ -372,6 +425,17 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           summary: `Calling ${response.toolName}`,
           metadata: { step, rationale: response.rationale },
         }));
+        // Phase 2C: bump the heartbeat for tool_called so the
+        // chat UI's in-flight tool strip can show which tool is
+        // currently running.
+        try {
+          await appendAgentRunStep({
+            runId,
+            step,
+            event: 'tool_calling',
+            detail: { toolName: response.toolName },
+          });
+        } catch {}
         // Phase 1B: notify session bus that a tool call is starting.
         sessionEventBus.emitEvent({
           sessionId: '',
@@ -423,9 +487,14 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
                 agentId: action.agentId,
                 runId,
                 eventType: 'runtime_warning',
-                summary: `${response.toolName} failed attempt ${attempt + 1}; retrying.`,
+                summary: `${response.toolName} failed attempt ${attempt + 1}; retrying after backoff.`,
                 metadata: { step, attempt: attempt + 1, retryLimit, reason: error.message || String(error) },
               }));
+              // Phase 4E: exponential backoff between retries. This is
+              // best-effort; the runtime honors the deadline at the
+              // top of the loop so a long backoff won't extend past
+              // the budgeted runtime.
+              await backoffSleepMs(attempt);
             }
           }
           if (output === undefined) throw lastError || new Error(`${response.toolName} produced no output.`);
@@ -443,6 +512,34 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
             at: new Date().toISOString(),
             data: { agentId: action.agentId, toolName: response.toolName, invocationId, hasOutput: output !== undefined },
           });
+          // Phase 4D: record the cost event and let the budget
+          // engine evaluate. We do this best-effort: a hard-stop
+          // violation throws a typed error so the calling code can
+          // surface it as a failure.
+          try {
+            await costTracker.record({
+              missionId: action.missionId,
+              agentId: action.agentId,
+              taskId: action.taskId,
+              agentRunId: runId,
+              provider: 'tool',
+              model: response.toolName,
+              inputTokens: 0,
+              outputTokens: 0,
+              costCents: 1, // 1 cent per tool call as a baseline; the
+                              // provider's real cost is recorded by
+                              // the LLM call branch below.
+            });
+            await budgetEngine.evaluateCostEvent(1, action.missionId, action.agentId);
+          } catch (budgetError: any) {
+            // The budget engine throws a typed error when a hard
+            // stop is crossed. We bubble it up so the runtime marks
+            // the run as failed with a clear reason.
+            if (budgetError?.code === 'budget_exceeded') {
+              throw budgetError;
+            }
+            telemetry.warn('runtime.budget_eval_failed', { reason: budgetError?.message || String(budgetError) });
+          }
           const metric = await operationalMetrics.record({
             missionId: action.missionId,
             agentId: action.agentId,

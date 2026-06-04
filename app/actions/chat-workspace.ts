@@ -1544,6 +1544,27 @@ export async function fetchAgentStatuses() {
         const m = await dbClient.queryOne<any>(`SELECT title FROM Missions WHERE id = ?`, [task.mission_id]);
         missionName = m?.title || '';
       }
+      // Phase 2C: pull the latest Agent_Runs.logs entry for this
+      // agent so the chat UI can render "step N/M, currently
+      // calling tool X" instead of a binary Working/Idle.
+      let detail: { step?: number; toolName?: string; lastEventAt?: string } | null = null;
+      try {
+        const runRows = await dbClient.query<any>(
+          `SELECT logs, heartbeat, updated_at FROM Agent_Runs
+           WHERE agent_id = ? AND status = 'running'
+           ORDER BY updated_at DESC LIMIT 1`,
+          [a.id],
+        );
+        const lastLog = runRows[0]?.logs ? safeJson<any[]>(runRows[0].logs, []).slice(-1)[0] : null;
+        if (lastLog && (lastLog.toolName || lastLog.kind)) {
+          detail = {
+            step: typeof lastLog.step === 'number' ? lastLog.step : undefined,
+            toolName: typeof lastLog.toolName === 'string' ? lastLog.toolName : (lastLog.kind === 'tool_call' ? lastLog.toolName : undefined),
+            lastEventAt: lastLog.at,
+          };
+        }
+      } catch {}
+
       return {
         id: a.id,
         name: a.name,
@@ -1553,6 +1574,7 @@ export async function fetchAgentStatuses() {
         currentTask: task?.title || null,
         currentProject: missionName || null,
         status: task ? 'Working' : 'Idle',
+        detail,
       };
     }));
   } catch (error) {
