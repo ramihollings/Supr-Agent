@@ -37,7 +37,7 @@ export default function MissionPacketPage() {
       const hasArtifacts = !!(data.artifacts && data.artifacts.length > 0);
       setChecklist({
         sandboxVerified: hasArtifacts, // Only verified if it produced artifacts
-        memorySynced: data.memoryItems && data.memoryItems.length > 0,
+        memorySynced: !!(data.memoryItems && data.memoryItems.length > 0),
         zeroFailures: (data.failures?.filter(f => !f.resolved).length || 0) === 0,
         readinessMet: (data.readinessScore || 0) >= 80,
         gvisorEnforced: true, // Environmental constant

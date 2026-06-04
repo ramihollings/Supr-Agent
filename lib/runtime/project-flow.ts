@@ -24,7 +24,7 @@ type Preset = {
 type PlannedWork = Preset & {
   title: string;
   inputs: Record<string, unknown>;
-  plannerSource: 'model' | 'preset_fallback';
+  plannerSource: 'model' | 'preset_fallback' | 'glidepath_template';
 };
 
 const AGENT_PRESETS: Preset[] = [

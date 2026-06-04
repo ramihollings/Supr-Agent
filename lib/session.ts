@@ -85,6 +85,19 @@ export function setSessionCookie(response: NextResponse, token: string, request:
   });
 }
 
+export function clearSessionCookie(response: NextResponse): void {
+  const sameSite = (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax';
+  response.cookies.set({
+    name: SESSION_COOKIE,
+    value: '',
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite,
+    path: '/',
+    maxAge: 0,
+  });
+}
+
 export function readSessionCookie(request: Request) {
   const cookieHeader = request.headers.get('cookie') || '';
   return cookieHeader

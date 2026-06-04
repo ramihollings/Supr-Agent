@@ -131,7 +131,7 @@ export async function assembleAgentContext(action: AgentActionRecord): Promise<A
       skillSelection.matches.length ? 'matching_skill_summaries' : '',
       'tool_manifest',
       'recent_transcript',
-      persona ? 'agent_persona' : '',
+      agent?.persona ? 'agent_persona' : '',
     ].filter(Boolean),
   };
 }

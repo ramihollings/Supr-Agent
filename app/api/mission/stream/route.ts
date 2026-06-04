@@ -125,7 +125,7 @@ export async function GET(req: NextRequest) {
         clearInterval(interval);
         clearInterval(keepalive);
         missionEventBus.off('change', onChange);
-        sessionEventBus.offEvent(onSessionEvent);
+        sessionEventBus.off('event', onSessionEvent);
         try {
           controller.close();
         } catch {

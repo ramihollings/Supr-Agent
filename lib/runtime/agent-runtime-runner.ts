@@ -27,6 +27,10 @@ import type {
   RuntimeMode,
 } from './types';
 import { sessionEventBus } from './agent-session';
+import { memorySectionService } from '@/lib/services/memory-sections';
+import { costTracker } from '@/lib/services/cost-tracker';
+import { budgetEngine } from '@/lib/services/budget-engine';
+import { telemetry } from '@/lib/telemetry';
 
 function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -196,6 +200,11 @@ async function updateAgentRun(runId: string, status: string, result?: unknown, e
      WHERE id = ?`,
     [status, result ? summarize(result) : null, error || null, JSON.stringify(logs), runId],
   );
+}
+
+async function appendAgentRunStep(input: { runId: string, step: number, event: string, detail: any }) {
+  // best-effort heartbeat update
+  await dbClient.execute(`UPDATE Agent_Runs SET heartbeat = ? WHERE id = ?`, [input.step, input.runId]);
 }
 
 async function recordToolInvocation(input: {
@@ -517,18 +526,15 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           // violation throws a typed error so the calling code can
           // surface it as a failure.
           try {
-            await costTracker.record({
-              missionId: action.missionId,
-              agentId: action.agentId,
-              taskId: action.taskId,
-              agentRunId: runId,
+            await costTracker.recordCostEvent({
+              missionId: action.missionId || undefined,
+              agentId: action.agentId || undefined,
+              taskId: action.taskId || undefined,
+              agentRunId: runId || undefined,
               provider: 'tool',
               model: response.toolName,
-              inputTokens: 0,
+              inputTokens: 10000, // Equates to ~1 cent using default cost
               outputTokens: 0,
-              costCents: 1, // 1 cent per tool call as a baseline; the
-                              // provider's real cost is recorded by
-                              // the LLM call branch below.
             });
             await budgetEngine.evaluateCostEvent(1, action.missionId, action.agentId);
           } catch (budgetError: any) {
