@@ -227,12 +227,13 @@ export const remoteShellTool: ToolDefinition<ShellParamsType, CommandResult> = {
   parameters: ShellParams,
   requiredTier: "External_Act",
   riskLevel: "Critical",
-  execute: async (params) => {
+  execute: async (params, ctx) => {
     const executionPolicy = await resolveCommandExecutionPolicy({
       command: params.command,
       riskLevel: "Critical",
       requestedEnvironment: "remote",
     });
+    await assertExecutionAllowedOrThrow(executionPolicy, ctx?.trustedApprovedActionId);
     if (executionPolicy.selectedEnvironment !== "remote") {
       throw new Error(`Remote execution blocked by policy: ${executionPolicy.reason}`);
     }
