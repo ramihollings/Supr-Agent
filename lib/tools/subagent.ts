@@ -4,6 +4,7 @@ import { ToolDefinition, toolRegistry } from "../../lib/tools/registry";
 import { AgentLifecycleManager } from "../services/agent-lifecycle";
 import { getActiveProvider } from "../../lib/providers/model";
 import { assembleSubagentContext } from "../context/budget";
+import { routeIntent, listRoutes, getConfidenceThreshold } from "../routing/semantic";
 
 /**
  * Two-phase commit workflow for subagent execution.
@@ -144,8 +145,23 @@ export const subagentTool: ToolDefinition<SubagentParamsType, string> = {
     const missionId = params.missionId || `m-ephemeral-${Date.now()}`;
     const agentId = `subagent-${params.name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
 
+    // Per Blueprint 5.0 Part 3.3, use semantic routing to pick
+    // the right role if the caller didn't supply one. This
+    // avoids the expensive "ask the LLM which agent should
+    // handle this" round-trip on the hot path.
+    let resolvedRole = params.role;
+    if (!resolvedRole || resolvedRole.trim().length === 0) {
+      const routed = routeIntent(params.task);
+      if (routed) {
+        resolvedRole = routed.route.role;
+        console.log(`[SubagentTool] Semantic routing picked role '${resolvedRole}' (score=${routed.score.toFixed(3)}) for task.`);
+      } else {
+        resolvedRole = 'Generalist';
+      }
+    }
+
     // Phase 1: build the intent.
-    const intent = buildIntent(params, missionId);
+    const intent = buildIntent({ ...params, role: resolvedRole }, missionId);
     console.log(`[SubagentTool] Phase 1: intent ${intent.id} checksum=${intent.checksum.slice(0, 12)}`);
 
     // Phase 2: audit. If the intent fails any rule, refuse to

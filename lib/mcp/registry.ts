@@ -168,9 +168,17 @@ async function serverOwnsTool(server: McpServerEntry, toolName: string): Promise
       return false;
     }
   }
-  // For http servers, the registry could pre-list the
-  // tools or we could query the server via JSON-RPC. For now,
-  // http servers return false.
+  if (server.transport === 'http' && server.enabled) {
+    const { getOrStartHttpSession } = await import('./http');
+    try {
+      const session = await getOrStartHttpSession(server);
+      const tools = await session.listTools();
+      return tools.some((t) => t.name === toolName);
+    } catch {
+      return false;
+    }
+  }
+  // For any other transport, return false.
   return false;
 }
 
@@ -285,6 +293,23 @@ export async function listAllTools(): Promise<McpToolDescriptor[]> {
       } catch (err: any) {
         console.warn(`[MCP] Failed to list tools for stdio server '${server.id}': ${err.message}`);
       }
+    } else if (server.transport === 'http') {
+      try {
+        const { getOrStartHttpSession } = await import('./http');
+        const session = await getOrStartHttpSession(server);
+        const tools = await session.listTools();
+        for (const t of tools) {
+          out.push({
+            name: t.name,
+            description: t.description || `MCP tool from ${server.name}`,
+            required_tier: server.required_tier,
+            server_id: server.id,
+            server_name: server.name,
+          });
+        }
+      } catch (err: any) {
+        console.warn(`[MCP] Failed to list tools for http server '${server.id}': ${err.message}`);
+      }
     }
   }
   return out;
@@ -292,7 +317,7 @@ export async function listAllTools(): Promise<McpToolDescriptor[]> {
 
 /**
  * Forward a tool call to a non-internal MCP server (currently
- * just stdio). The in-process server is handled by the
+ * stdio and http). The in-process server is handled by the
  * toolRegistry directly.
  */
 export async function forwardToMcpServer(
@@ -300,15 +325,25 @@ export async function forwardToMcpServer(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  if (server.transport !== 'stdio') {
-    throw new Error(`Server '${server.id}' is not a forwardable transport.`);
+  if (server.transport === 'stdio') {
+    const { getOrStartSession } = await import('./stdio');
+    const session = await getOrStartSession(server);
+    const result = await session.callTool(toolName, args);
+    if ((result as any)?.isError) {
+      const text = (result as any).content?.[0]?.text || 'MCP tool returned an error.';
+      throw new Error(text);
+    }
+    return result;
   }
-  const { getOrStartSession } = await import('./stdio');
-  const session = await getOrStartSession(server);
-  const result = await session.callTool(toolName, args);
-  if ((result as any)?.isError) {
-    const text = (result as any).content?.[0]?.text || 'MCP tool returned an error.';
-    throw new Error(text);
+  if (server.transport === 'http') {
+    const { getOrStartHttpSession } = await import('./http');
+    const session = await getOrStartHttpSession(server);
+    const result = await session.callTool(toolName, args);
+    if ((result as any)?.isError) {
+      const text = (result as any).content?.[0]?.text || 'MCP tool returned an error.';
+      throw new Error(text);
+    }
+    return result;
   }
-  return result;
+  throw new Error(`Server '${server.id}' is not a forwardable transport.`);
 }
