@@ -28,6 +28,9 @@ export interface ObjectsRailProps {
   onCreateProject: () => void;
   onRefresh: () => void;
   onInspectObject: (object: DashboardObject) => void;
+  bulkSelectedObjects: Set<string>;
+  onToggleBulkSelection: (id: string) => void;
+  onBulkDelete: () => void;
 }
 
 export function ObjectsRail({
@@ -42,6 +45,9 @@ export function ObjectsRail({
   onCreateProject,
   onRefresh,
   onInspectObject,
+  bulkSelectedObjects,
+  onToggleBulkSelection,
+  onBulkDelete,
 }: ObjectsRailProps) {
   return (
     <aside
@@ -208,7 +214,19 @@ export function ObjectsRail({
                 className="w-full text-left bg-surface border border-outline-variant p-2 rounded hover:border-primary hover:bg-surface-container transition-colors"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-body text-xs font-semibold truncate">{object.title}</span>
+                  <div className="flex items-center gap-2 truncate">
+                    {(object.type === 'project' || object.type === 'file') && (
+                      <input
+                        type="checkbox"
+                        checked={bulkSelectedObjects.has(object.id)}
+                        onChange={() => onToggleBulkSelection(object.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="accent-primary"
+                        aria-label={`Select ${object.title}`}
+                      />
+                    )}
+                    <span className="font-body text-xs font-semibold truncate">{object.title}</span>
+                  </div>
                   <span className="font-mono text-[9px] uppercase text-on-surface-variant">{object.type}</span>
                 </div>
                 <p className="font-body text-[10px] text-on-surface-variant truncate">
@@ -219,6 +237,22 @@ export function ObjectsRail({
           )}
         </div>
       </section>
+
+      {bulkSelectedObjects.size > 0 && (
+        <div className="sticky bottom-0 p-4 border-t-4 border-primary bg-primary-container z-10 shrink-0">
+          <div className="flex justify-between items-center">
+            <span className="font-headline font-black text-xs uppercase text-primary">
+              {bulkSelectedObjects.size} Selected
+            </span>
+            <button
+              onClick={onBulkDelete}
+              className="bg-error text-on-error px-3 py-1.5 border-2 border-error hover:bg-error/90 transition-colors font-headline font-bold text-xs uppercase shadow-sm"
+            >
+              Delete Selected
+            </button>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

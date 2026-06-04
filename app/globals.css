@@ -62,6 +62,70 @@
 
   --font-headline: var(--font-headline);
   --font-body: var(--font-body);
+@import "tailwindcss";
+
+:root {
+  /* Default: Neo-Brutalist structural variables */
+  --border-radius-base: 0px;
+  --border-style-base: 3px solid var(--color-primary);
+  --shadow-base: 4px 4px 0px 0px var(--color-primary);
+  --shadow-lg-base: 6px 6px 0px 0px var(--color-primary);
+  --font-headline: var(--font-space-grotesk), sans-serif;
+  --font-body: var(--font-inter), sans-serif;
+  --crt-glow: 0px 0px 0px transparent;
+}
+
+@theme {
+  --color-primary: var(--color-primary-val, #1a1a1a);
+  --color-primary-fixed: var(--color-primary-fixed-val, #ffcc00);
+  --color-primary-fixed-dim: var(--color-primary-fixed-dim-val, #e6b800);
+  --color-primary-container: var(--color-primary-container-val, #ffcc00);
+  --color-on-primary: var(--color-on-primary-val, #ffffff);
+  --color-on-primary-container: var(--color-on-primary-container-val, #1a1a1a);
+
+  --color-secondary: var(--color-secondary-val, #e63b2e);
+  --color-secondary-fixed: var(--color-secondary-fixed-val, #ffdad6);
+  --color-secondary-fixed-dim: var(--color-secondary-fixed-dim-val, #ffb3ab);
+  --color-secondary-container: var(--color-secondary-container-val, #ffdad6);
+  --color-on-secondary: var(--color-on-secondary-val, #ffffff);
+  --color-on-secondary-container: var(--color-on-secondary-container-val, #1a1a1a);
+
+  --color-tertiary: var(--color-tertiary-val, #0055ff);
+  --color-tertiary-fixed: var(--color-tertiary-fixed-val, #d6e3ff);
+  --color-tertiary-fixed-dim: var(--color-tertiary-fixed-dim-val, #a8c6ff);
+  --color-tertiary-container: var(--color-tertiary-container-val, #d6e3ff);
+  --color-on-tertiary: var(--color-on-tertiary-val, #ffffff);
+  --color-on-tertiary-container: var(--color-on-tertiary-container-val, #1a1a1a);
+
+  --color-error: #cc0000;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
+  --color-on-error-container: #93000a;
+
+  --color-background: var(--color-background-val, #f5f0e8);
+  --color-on-background: var(--color-on-background-val, #1a1a1a);
+
+  --color-surface: var(--color-surface-val, #f5f0e8);
+  --color-on-surface: var(--color-on-surface-val, #1a1a1a);
+  --color-surface-variant: var(--color-surface-variant-val, #e8e3da);
+  --color-on-surface-variant: var(--color-on-surface-variant-val, #4a4a4a);
+  --color-surface-container: var(--color-surface-container-val, #eee9e0);
+  --color-surface-container-high: var(--color-surface-container-high-val, #e8e3da);
+  --color-surface-container-low: var(--color-surface-container-low-val, #f2ede5);
+  --color-surface-container-lowest: var(--color-surface-container-lowest-val, #ffffff);
+  --color-surface-container-highest: var(--color-surface-container-highest-val, #e2ddd4);
+  --color-surface-dim: var(--color-surface-dim-val, #d6d1c9);
+  --color-surface-bright: var(--color-surface-bright-val, #faf7f2);
+  --color-surface-tint: var(--color-primary-val, #1a1a1a);
+
+  --color-outline: var(--color-primary-val, #1a1a1a);
+  --color-outline-variant: var(--color-outline-variant-val, #d0cbc3);
+  --color-inverse-surface: var(--color-primary-val, #1a1a1a);
+  --color-inverse-on-surface: var(--color-background-val, #f5f0e8);
+  --color-inverse-primary: var(--color-background-val, #f5f0e8);
+
+  --font-headline: var(--font-headline);
+  --font-body: var(--font-body);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -69,7 +133,7 @@
    ───────────────────────────────────────────────────────────────────────────── */
 
 /* Theme 1: Classic Neo-Brutalist (Default) */
-.theme-neobrutalist {
+.theme-neo-brutalist {
   --border-radius-base: 0px;
   --border-style-base: 3px solid var(--color-primary);
   --shadow-base: 4px 4px 0px 0px var(--color-primary);
@@ -97,7 +161,7 @@
 }
 
 /* Theme 3: Hermes Agent (Techy dashboard) */
-.theme-hermes {
+.theme-dark-saas-hero-with-liquid-glass {
   --border-radius-base: 6px;
   --border-style-base: 1px solid rgba(0, 255, 255, 0.2);
   --shadow-base: 0 4px 12px rgba(0,0,0,0.5), 0 0 8px rgba(0, 255, 255, 0.08);
@@ -128,7 +192,7 @@
 }
 
 /* Theme 5: Retro CRT Terminal */
-.theme-crt {
+.theme-8-bit-retro-terminal {
   --border-radius-base: 0px;
   --border-style-base: 2px solid var(--color-primary);
   --shadow-base: 0 0 10px var(--color-primary);
@@ -144,7 +208,7 @@
 }
 
 /* Theme 6: Cyberpunk City */
-.theme-cyberpunk {
+.theme-cyber-tribal {
   --border-radius-base: 4px;
   --border-style-base: 2px solid var(--color-primary);
   --shadow-base: 3px 3px 0px 0px var(--color-secondary), 0 0 8px var(--color-primary);
@@ -155,7 +219,7 @@
 }
 
 /* Theme 7: Minimalist Clean */
-.theme-minimalist {
+.theme-minimalist-clean {
   --border-radius-base: 12px;
   --border-style-base: 1px solid var(--color-outline-variant);
   --shadow-base: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03);
@@ -704,7 +768,7 @@ button, input, select, textarea, div.neo-border, nav, aside {
 }
 
 /* CRT Screen Curve Overlay for OpenClaw/CRT Terminal themes */
-.theme-crt::before, .theme-openclaw::before {
+.theme-8-bit-retro-terminal::before, .theme-openclaw::before {
   content: " ";
   display: block;
   position: fixed;

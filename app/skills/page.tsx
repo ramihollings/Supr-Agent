@@ -59,15 +59,17 @@ function SkillsPageContent() {
     rawTools: 'tool_name_1, tool_name_2'
   });
 
-  const loadSkills = async () => {
-    setIsLoading(true);
+  const loadSkills = async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
     const data = await fetchSkillsState();
     if (data) setSkills(data);
-    setIsLoading(false);
+    if (showLoading) setIsLoading(false);
   };
 
   useEffect(() => {
-    loadSkills();
+    loadSkills(true);
+    const interval = setInterval(() => loadSkills(false), 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const { showToast } = useToast();

@@ -19,7 +19,7 @@ const navItems = [
 ];
 
 const bottomItems = [
-  { href: '/mission-packet', icon: 'inventory_2', label: 'Project Report', minMode: 'pro' },
+  { href: '/project-report', icon: 'inventory_2', label: 'Project Report', minMode: 'pro' },
   { href: '/code', icon: 'code', label: 'Code', minMode: 'dev' },
   { href: '/research', icon: 'travel_explore', label: 'Research', minMode: 'dev' },
   { href: '/library', icon: 'folder_open', label: 'Library', minMode: 'dev' },

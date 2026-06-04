@@ -63,16 +63,18 @@ interface ConnectorHealth {
 }
 
 const ALLOWED_THEMES = new Set([
-  'neobrutalist',
+  'neo-brutalist',
   'openclaw',
-  'hermes',
-  'google-neural',
-  'crt',
-  'cyberpunk',
-  'minimalist',
-  'design-notion',
-  'design-verge',
-  'design-carbon',
+  'dark-saas-hero-with-liquid-glass',
+  'aurora-ui',
+  'futuristic-ui-glassmorphism',
+  '8-bit-retro-terminal',
+  'cyber-tribal',
+  'minimalist-clean',
+  'notion',
+  'thevge',
+  'ibm-carbon-enterprise',
+  'supr-clean'
 ]);
 
 const ALLOWED_PALETTES = new Set([
@@ -96,7 +98,7 @@ const ALLOWED_PALETTES = new Set([
 ]);
 
 function sanitizeTheme(theme: string) {
-  return ALLOWED_THEMES.has(theme) ? theme : 'neobrutalist';
+  return ALLOWED_THEMES.has(theme) ? theme : 'neo-brutalist';
 }
 
 function sanitizePalette(palette: string) {
@@ -198,7 +200,7 @@ export default function SettingsPage() {
   const [existingAgents, setExistingAgents] = useState<any[]>([]);
 
   // Theme & Appearance States
-  const [currentTheme, setCurrentTheme] = useState('neobrutalist');
+  const [currentTheme, setCurrentTheme] = useState('neo-brutalist');
   const [currentPalette, setCurrentPalette] = useState('classic');
   const [activeDesignProfile, setActiveDesignProfile] = useState('');
   const [designProfiles, setDesignProfiles] = useState<DesignProfile[]>([]);
@@ -911,17 +913,22 @@ export default function SettingsPage() {
             {/* Layout Themes */}
             <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
               <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2 border-b-2 border-primary pb-2">
-                <span className="material-symbols-outlined text-primary">layers</span> Structural Layout Styles (7 Themes)
+                <span className="material-symbols-outlined text-primary">layers</span> Structural Layout Styles (12 Themes)
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {[
-                  { id: 'neobrutalist', name: 'Neo-Brutalist', desc: 'Thick black borders, solid fills, and offset drop shadows. (Default)', icon: 'grid_view' },
+                  { id: 'neo-brutalist', name: 'Neo-Brutalist', desc: 'Thick black borders, solid fills, and offset drop shadows. (Default)', icon: 'grid_view' },
                   { id: 'openclaw', name: 'OpenClaw Terminal', desc: 'Retro developer monospace hacker layout with scanlines and green font glows.', icon: 'terminal' },
-                  { id: 'hermes', name: 'Hermes Cybernetic', desc: 'Clean dark cyber dashboard with compact borders and subtle cyan tech halos.', icon: 'developer_board' },
-                  { id: 'google-neural', name: 'Google Neural', desc: 'Pastel glassmorphic card layers, deep backdrop blurs, and soft radial color clouds.', icon: 'lens_blur' },
-                  { id: 'crt', name: 'Phosphor CRT', desc: 'Monochrome glowing green grid layout with curved cathode screen flicker.', icon: 'monitor' },
-                  { id: 'cyberpunk', name: 'Neon Cyberpunk', desc: 'Deep purple canvas with hot pink highlights and heavy glowing neon bevels.', icon: 'palette' },
-                  { id: 'minimalist', name: 'Minimalist Clean', desc: 'Sleek professional white space design with extremely soft card borders.', icon: 'space_dashboard' },
+                  { id: 'dark-saas-hero-with-liquid-glass', name: 'Hermes Cybernetic', desc: 'Clean dark cyber dashboard with compact borders and subtle cyan tech halos.', icon: 'developer_board' },
+                  { id: 'aurora-ui', name: 'Aurora UI', desc: 'Ethereal glowing layout with mesh gradients and vibrant northern light aesthetics.', icon: 'lens_blur' },
+                  { id: 'futuristic-ui-glassmorphism', name: 'Futuristic Glass', desc: 'Deep background blur layers, bright cyan highlights, and pure dark depths.', icon: 'blur_on' },
+                  { id: '8-bit-retro-terminal', name: 'Phosphor CRT', desc: 'Monochrome glowing green grid layout with curved cathode screen flicker.', icon: 'monitor' },
+                  { id: 'cyber-tribal', name: 'Neon Cyberpunk', desc: 'Deep purple canvas with hot pink highlights and heavy glowing neon bevels.', icon: 'palette' },
+                  { id: 'minimalist-clean', name: 'Minimalist Clean', desc: 'Sleek professional white space design with extremely soft card borders.', icon: 'space_dashboard' },
+                  { id: 'notion', name: 'Notion Minimal', desc: 'Hyper-minimal workspace inspired by Notion.', icon: 'description' },
+                  { id: 'thevge', name: 'The Verge Aesthetic', desc: 'Bold, brutalist modern magazine style.', icon: 'newspaper' },
+                  { id: 'ibm-carbon-enterprise', name: 'IBM Carbon', desc: 'Strict, grid-based enterprise aesthetic.', icon: 'corporate_fare' },
+                  { id: 'supr-clean', name: 'Supr Clean', desc: 'Friendly default interface with balanced curves and gentle contrasts.', icon: 'cleaning_services' },
                 ].map(theme => (
                   <div
                     key={theme.id}

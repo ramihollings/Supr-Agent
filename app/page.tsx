@@ -49,6 +49,7 @@ import {
   duplicateMissionAction,
   archiveAgentAction,
   deleteAgentAction,
+  deleteWorkspaceFileAction,
 } from '@/app/actions';
 import { Mission } from '@/types';
 import type { DashboardObject, ObjectAction } from '@/types';
@@ -110,6 +111,7 @@ function DashboardContent() {
   const [projectDraft, setProjectDraft] = useState({ name: '', objective: '', status: 'Active' as Mission['status'] });
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('work');
   const [selectedObject, setSelectedObject] = useState<DashboardObject | null>(null);
+  const [bulkSelectedObjects, setBulkSelectedObjects] = useState<Set<string>>(new Set());
   const { showToast } = useToast();
 
   const selectedOrFirstProjectId = selectedProjectId || projects[0]?.id || null;
@@ -289,6 +291,36 @@ function DashboardContent() {
   const handleDeleteProject = async () => {
     if (!selectedProject) return;
     await handleDeleteProjectById(selectedProject.id);
+  };
+
+  const handleToggleBulkSelection = (id: string) => {
+    const newSet = new Set(bulkSelectedObjects);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setBulkSelectedObjects(newSet);
+  };
+
+  const handleBulkDelete = async () => {
+    if (bulkSelectedObjects.size === 0) return;
+    if (!confirm(`Are you sure you want to delete ${bulkSelectedObjects.size} selected items?`)) return;
+
+    let deletedCount = 0;
+    for (const id of Array.from(bulkSelectedObjects)) {
+      const obj = dashboardObjects.find(o => o.id === id);
+      if (!obj) continue;
+      
+      if (obj.type === 'project') {
+        const res = await deleteMissionAction(id);
+        if (res.success) deletedCount++;
+      } else if (obj.type === 'file') {
+        const res = await deleteWorkspaceFileAction(id);
+        if (res.success) deletedCount++;
+      }
+    }
+
+    showToast(`Successfully deleted ${deletedCount} item(s)`);
+    setBulkSelectedObjects(new Set());
+    await refreshAll();
   };
 
   const handleObjectAction = async (action: ObjectAction, object: DashboardObject) => {
@@ -483,6 +515,9 @@ function DashboardContent() {
           onCreateProject={() => setShowWizard(true)}
           onRefresh={refreshAll}
           onInspectObject={setSelectedObject}
+          bulkSelectedObjects={bulkSelectedObjects}
+          onToggleBulkSelection={handleToggleBulkSelection}
+          onBulkDelete={handleBulkDelete}
         />
 
         <WorkPanel

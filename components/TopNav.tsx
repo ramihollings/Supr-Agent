@@ -134,7 +134,7 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
                   { href: '/code', label: 'Code', minMode: 'dev', isBottom: true },
                   { href: '/research', label: 'Research', minMode: 'dev', isBottom: true },
                   { href: '/library', label: 'Library', minMode: 'dev', isBottom: true },
-                  { href: '/mission-packet', label: 'Project Report', minMode: 'pro', isBottom: true },
+                  { href: '/project-report', label: 'Project Report', minMode: 'pro', isBottom: true },
                   { href: '/help', label: 'Help', minMode: 'mobile', isBottom: true },
                 ].filter(item => {
                    const weights: Record<string, number> = { mobile: 1, pro: 2, dev: 3 };

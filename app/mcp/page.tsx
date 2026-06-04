@@ -42,8 +42,9 @@ export default function McpPage() {
   const [error, setError] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
 
-  const loadStatus = async () => {
+  const loadStatus = async (showLoading = true) => {
     try {
+      if (showLoading) setLoading(true);
       const res = await fetch('/api/mcp/status');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -52,11 +53,15 @@ export default function McpPage() {
     } catch (err: any) {
       setError(err.message || 'Failed to load MCP status');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
-  useEffect(() => { loadStatus(); }, []);
+  useEffect(() => { 
+    loadStatus(true); 
+    const interval = setInterval(() => loadStatus(false), 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const toggleServer = async (id: string, enabled: boolean) => {
     setToggling(id);
