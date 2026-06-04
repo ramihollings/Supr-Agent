@@ -124,6 +124,7 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
                 {[
                   { href: '/', label: 'Dashboard', minMode: 'mobile' },
                   { href: '/supr-chat', label: 'Supr-Chat', minMode: 'mobile' },
+                  { href: '/mcp', label: 'MCP', minMode: 'pro' },
                   { href: '/orchestration', label: 'Observability', minMode: 'pro' },
                   { href: '/supervisor', label: 'Supervisor', minMode: 'pro' },
                   { href: '/agents', label: 'Agents', minMode: 'pro' },

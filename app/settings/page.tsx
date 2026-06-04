@@ -1239,7 +1239,14 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-between items-center mt-4 flex-wrap gap-4">
-                  <p className="font-body text-xs text-on-surface-variant max-w-md">Provides real-time project logs, approval gate alerts, and command logs straight to your private Telegram channel.</p>
+                  <p className="font-body text-xs text-on-surface-variant max-w-md">
+                    Inbound: Supr rejects any POST that does not include the matching
+                    <code className="mx-1 font-mono text-primary">X-Telegram-Bot-Api-Secret-Token</code>
+                    header. Generate the secret in BotFather and paste the same value here.
+                    Outbound: messages are currently queued locally (the Telegram
+                    send adapter is planned; check the README "Telegram outbound"
+                    note for the current ship status).
+                  </p>
                 </div>
               </div>
 
@@ -1249,13 +1256,16 @@ export default function SettingsPage() {
                   <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">share</span> Twitter / X Broadcast Connection
                   </h3>
+                  {/* Toggle is disabled: the X/Twitter integration is
+                      planned but not yet implemented. Showing a clickable
+                      "Connected" toggle would be a false claim. */}
                   <button
-                    onClick={() => handleToggleChannel('social', socialEnabled, 'X/Twitter Broadcast')}
-                    className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary transition-all ${
-                      socialEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
-                    }`}
+                    disabled
+                    aria-disabled="true"
+                    title="X/Twitter integration is planned; the toggle is disabled until the delivery adapter ships."
+                    className="text-xs font-bold uppercase px-3 py-1 border-2 border-primary bg-surface-dim text-on-surface-variant opacity-60 cursor-not-allowed"
                   >
-                    {socialEnabled ? 'Connected ✓' : 'Disabled (Coming Soon)'}
+                    Coming Soon
                   </button>
                 </div>
 
@@ -1284,13 +1294,16 @@ export default function SettingsPage() {
                   <h3 className="font-headline text-xl font-bold uppercase tracking-tight flex items-center gap-2">
                     <span className="material-symbols-outlined text-primary">mail</span> Email Alerts Hook
                   </h3>
+                  {/* Toggle disabled: the email delivery adapter is
+                      planned but not implemented. Surfacing an "Active"
+                      toggle would misrepresent the feature. */}
                   <button
-                    onClick={() => handleToggleChannel('email', emailEnabled, 'Email Notifications')}
-                    className={`text-xs font-bold uppercase px-3 py-1 border-2 border-primary transition-all ${
-                      emailEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
-                    }`}
+                    disabled
+                    aria-disabled="true"
+                    title="Email delivery is planned; the toggle is disabled until the SMTP/send adapter ships."
+                    className="text-xs font-bold uppercase px-3 py-1 border-2 border-primary bg-surface-dim text-on-surface-variant opacity-60 cursor-not-allowed"
                   >
-                    {emailEnabled ? 'Active ✓' : 'Inactive (Coming Soon)'}
+                    Coming Soon
                   </button>
                 </div>
                 <p className="font-body text-xs text-on-surface-variant">Sends automated daily executive brief summaries, critical diagnostic console alerts, and QA report handoffs directly to key stakeholders. (Coming Soon)</p>

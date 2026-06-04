@@ -1,0 +1,66 @@
+{
+  "$schema": "https://supr.local/schemas/mcp-server-registry.json",
+  "version": 1,
+  "description": "MCP server registry. Subagents must use the unified /api/mcp/* routes to talk to these servers — direct connections bypass governance.",
+  "servers": [
+    {
+      "id": "supr-internal",
+      "name": "Supr Internal Tools",
+      "transport": "in-process",
+      "description": "Built-in Supr tool registry (shell, web_search, project_flow, web_scrape, etc.). Always available.",
+      "required_tier": "Observe",
+      "tools": "auto:lib/tools/register",
+      "resources": "auto:lib/db:tables",
+      "enabled": true
+    },
+    {
+      "id": "supr-skills",
+      "name": "Supr Skill Catalog",
+      "transport": "in-process",
+      "description": "Structured skill catalog under .agents/skills/. Each skill exposes a trigger list and a system-prompt override.",
+      "required_tier": "Observe",
+      "resources": "auto:.agents/skills:*.md",
+      "enabled": true
+    },
+    {
+      "id": "supr-memory",
+      "name": "Supr Memory Bank",
+      "transport": "in-process",
+      "description": "Long-term memory sections and per-mission memory items. Read/write gated by Draft tier.",
+      "required_tier": "Draft",
+      "resources": "auto:lib/memory:items",
+      "enabled": true
+    },
+    {
+      "id": "supr-composio",
+      "name": "Supr Composio Bridge",
+      "transport": "in-process",
+      "description": "Bridges to third-party SaaS apps (GitHub, Slack, Notion, Gmail, etc.) via the Composio API. The composioBridge resolves the API key from Settings on every call.",
+      "required_tier": "External_Act",
+      "tools": "auto:composio",
+      "enabled": true
+    },
+    {
+      "id": "github-mcp",
+      "name": "GitHub (planned)",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "required_tier": "Edit",
+      "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+      "description": "Standard MCP server for GitHub. Will pull repos, create issues, and manage task branches.",
+      "enabled": false
+    },
+    {
+      "id": "postgres-mcp",
+      "name": "PostgreSQL (planned)",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres"],
+      "required_tier": "Edit",
+      "env_keys": ["POSTGRES_CONNECTION_STRING"],
+      "description": "Standard MCP server for PostgreSQL. Lets agents query the database schema and run read-only SQL.",
+      "enabled": false
+    }
+  ]
+}
