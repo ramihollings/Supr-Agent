@@ -26,6 +26,14 @@ export abstract class ModelProvider {
   /** Generates a complete text response for a given prompt. */
   abstract generateContent(prompt: string, options?: ModelOptions): Promise<string>;
 
+  /**
+   * Optional: generate an embedding vector for the given text.
+   * Providers that do not support embeddings can leave this
+   * undefined; the semantic router will fall back to a
+   * deterministic hash embedding.
+   */
+  embedContent?(text: string): Promise<Float32Array>;
+
   /** Streams the response for a given prompt. */
   abstract streamContent(prompt: string, options?: ModelOptions): AsyncGenerator<string>;
 }

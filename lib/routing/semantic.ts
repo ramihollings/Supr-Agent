@@ -154,6 +154,36 @@ function embedText(text: string): Float32Array {
   return hashEmbed(text);
 }
 
+/**
+ * Best-effort real embedding. Tries the active model
+ * provider's optional embedContent() method. If unavailable
+ * or it throws, falls back to the hash embed.
+ *
+ * Callers that want guaranteed-fast routing should use
+ * `embedText()` directly; this helper is for callers that
+ * prefer semantic accuracy when available.
+ */
+export async function embedTextAsync(text: string): Promise<Float32Array> {
+  try {
+    const { getActiveProvider } = await import('../providers/model');
+    const provider = await getActiveProvider('sub');
+    if (typeof provider.embedContent === 'function') {
+      const vec = await provider.embedContent(text);
+      if (vec && vec.length > 0) {
+        // L2-normalize so cosine similarity is just the dot product.
+        let sumSq = 0;
+        for (let i = 0; i < vec.length; i += 1) sumSq += vec[i] * vec[i];
+        const n = Math.sqrt(sumSq) || 1;
+        for (let i = 0; i < vec.length; i += 1) vec[i] /= n;
+        return vec;
+      }
+    }
+  } catch {
+    // Fall through to the hash embed.
+  }
+  return embedText(text);
+}
+
 function ensureExamplesEmbedded(route: Route): Float32Array[] {
   const vectors: Float32Array[] = [];
   for (const ex of route.examples) {

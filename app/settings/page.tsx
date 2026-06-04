@@ -8,6 +8,8 @@ import { PermissionsSection } from '@/components/settings/PermissionsSection';
 import { PortabilitySection } from '@/components/settings/PortabilitySection';
 import { LLMConfigSection } from '@/components/settings/LLMConfigSection';
 import { MemorySection } from '@/components/settings/MemorySection';
+import { SkillsLessonsPanel } from '@/components/SkillsLessonsPanel';
+import { CompactionPanel } from '@/components/CompactionPanel';
 import {
   fetchSettingsAction,
   updateSettingAction,
@@ -1372,6 +1374,35 @@ export default function SettingsPage() {
             onClearSummary={() => setImportSummary(null)}
             onConfirmOverwriteChange={setConfirmOverwrite}
           />
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
+          {/* Skill Lessons — self-improving feedback loop */}
+          <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
+            <div className="flex justify-between items-center border-b-2 border-primary pb-3">
+              <h2 className="font-headline text-xl font-bold uppercase tracking-tight">
+                Skill Lessons (.lessons.md)
+              </h2>
+            </div>
+            <p className="font-body text-xs text-on-surface-variant">
+              Every skill invocation records a lesson at <code className="font-mono">.agents/skills/&lt;name&gt;/.lessons.md</code>.
+              Past lessons are injected into the next invocation&apos;s prompt so the agent
+              adapts its behavior based on prior runs. Pinned entries survive garbage collection.
+            </p>
+            <SkillsLessonsPanel />
+          </div>
+
+          <div className="w-full h-4 bg-primary opacity-20" style={{ backgroundImage: "repeating-linear-gradient(45deg, transparent, transparent 10px, #1a1a1a 10px, #1a1a1a 20px)" }}></div>
+
+          {/* Context Compaction tuning */}
+          <div className="border-4 border-primary p-6 bg-surface flex flex-col gap-4">
+            <div className="flex justify-between items-center border-b-2 border-primary pb-3">
+              <h2 className="font-headline text-xl font-bold uppercase tracking-tight">
+                Context Compaction
+              </h2>
+            </div>
+            <CompactionPanel />
+          </div>
 
         </section>
       </main>

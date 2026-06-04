@@ -1,5 +1,6 @@
 "use server"
 
+import dbClient from '@/lib/database/db_client';
 import {
   getActiveMission,
   getAgents,
@@ -741,128 +742,21 @@ export async function extendAgentAction(agentId: string) {
 
 // ----------------------------------------------------
 // ENTERPRISE SKILLS & CRON AUTOMATION ACTIONS
+// (moved to app/actions/skills.ts)
 // ----------------------------------------------------
-import dbClient from '@/lib/database/db_client';
-
-export async function fetchSkillsState() {
-  try {
-    const rows = await dbClient.query(`SELECT * FROM Skills ORDER BY created_at DESC`);
-    return rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      provider: r.provider,
-      tools: JSON.parse(r.tools || '[]')
-    }));
-  } catch (error) {
-    console.error("Failed to fetch skills:", error);
-    return [];
-  }
-}
-
-export async function createSkillAction(skill: { name: string, description: string, provider: string, tools: string[] }) {
-  try {
-    const id = newId('sk');
-    const sql = `
-      INSERT INTO Skills (id, name, description, provider, tools)
-      VALUES (?, ?, ?, ?, ?)
-    `;
-    await dbClient.execute(sql, [id, skill.name, skill.description, skill.provider, JSON.stringify(skill.tools)]);
-    return { success: true, id };
-  } catch (error) {
-    console.error("Failed to create skill:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function deleteSkillAction(id: string) {
-  try {
-    await dbClient.execute(`DELETE FROM Skills WHERE id = ?`, [id]);
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to delete skill:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function fetchCronJobsState() {
-  try {
-    const rows = await dbClient.query(`SELECT * FROM Cron_Jobs ORDER BY created_at DESC`);
-    return rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      interval: r.interval,
-      targetAction: r.target_action,
-      lastRun: r.last_run,
-      status: r.status,
-      assignedAgentId: r.assigned_agent_id || null,
-      associatedTaskId: r.associated_task_id || null
-    }));
-  } catch (error) {
-    console.error("Failed to fetch cron jobs:", error);
-    return [];
-  }
-}
-
-export async function toggleCronJobAction(id: string, currentStatus: string) {
-  try {
-    const newStatus = currentStatus === 'Active' ? 'Paused' : 'Active';
-    await dbClient.execute(`UPDATE Cron_Jobs SET status = ? WHERE id = ?`, [newStatus, id]);
-    return { success: true, newStatus };
-  } catch (error) {
-    console.error("Failed to toggle cron job:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function triggerCronJobAction(id: string) {
-  try {
-    const timeNow = new Date().toISOString();
-    await dbClient.execute(`UPDATE Cron_Jobs SET last_run = ? WHERE id = ?`, [timeNow, id]);
-    return { success: true, lastRun: timeNow };
-  } catch (error) {
-    console.error("Failed to trigger cron job:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function createCronJobAction(data: { name: string; interval: string; targetAction: string; assignedAgentId?: string; associatedTaskId?: string }) {
-  try {
-    const id = newId('cr');
-    const sql = `
-      INSERT INTO Cron_Jobs (id, name, interval, target_action, last_run, status, assigned_agent_id, associated_task_id)
-      VALUES (?, ?, ?, ?, NULL, 'Active', ?, ?)
-    `;
-    await dbClient.execute(sql, [id, data.name, data.interval, data.targetAction, data.assignedAgentId || null, data.associatedTaskId || null]);
-    return { success: true, id };
-  } catch (error) {
-    console.error("Failed to create cron job:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function updateCronJobAction(id: string, data: { name: string; interval: string; targetAction: string; assignedAgentId?: string; associatedTaskId?: string }) {
-  try {
-    const sql = `
-      UPDATE Cron_Jobs SET name = ?, interval = ?, target_action = ?, assigned_agent_id = ?, associated_task_id = ? WHERE id = ?
-    `;
-    await dbClient.execute(sql, [data.name, data.interval, data.targetAction, data.assignedAgentId || null, data.associatedTaskId || null, id]);
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to update cron job:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function deleteCronJobAction(id: string) {
-  try {
-    await dbClient.execute(`DELETE FROM Cron_Jobs WHERE id = ?`, [id]);
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to delete cron job:", error);
-    return { success: false, error: String(error) };
-  }
-}
+// Re-export wrappers — `use server` files can only export async
+// functions, so each domain action is wrapped in a pass-through
+// async function. The implementations live in app/actions/skills.ts.
+import * as skills from './actions/skills';
+export const fetchSkillsState = skills.fetchSkillsState;
+export const createSkillAction = skills.createSkillAction;
+export const deleteSkillAction = skills.deleteSkillAction;
+export const fetchCronJobsState = skills.fetchCronJobsState;
+export const toggleCronJobAction = skills.toggleCronJobAction;
+export const triggerCronJobAction = skills.triggerCronJobAction;
+export const createCronJobAction = skills.createCronJobAction;
+export const updateCronJobAction = skills.updateCronJobAction;
+export const deleteCronJobAction = skills.deleteCronJobAction;
 
 // ----------------------------------------------------
 // ORCHESTRATION HUB ACTIONS
@@ -926,301 +820,29 @@ export async function fetchAgentStatuses() {
 
 // ----------------------------------------------------
 // SETTINGS ACTIONS
+// (moved to app/actions/settings.ts)
 // ----------------------------------------------------
-
-export async function fetchSettingsAction() {
-  try {
-    const rows = await dbClient.query(`SELECT * FROM Settings`);
-    return redactSettings(rows);
-  } catch (error) {
-    console.error("Failed to fetch settings:", error);
-    return {};
-  }
-}
-
-/**
- * Resolve whether the SetupWizard still needs to be shown.
- *
- * The wizard should only force itself when there is real work to do:
- *   - the user has never completed the wizard before, AND
- *   - there is no live LLM provider available from env or stored keys.
- *
- * Previously the gate only looked at `global_minimax_key_configured`, which
- * missed valid VPS deployments where `MINIMAX_API_KEY` (or any other
- * provider key) is set via env. That kept the wizard popping up even
- * though the runtime was healthy.
- */
-export async function fetchBootstrapStateAction(): Promise<{
-  wizardRequired: boolean;
-  hasProvider: boolean;
-  wizardCompleted: boolean;
-  reason: string;
-}> {
-  const [rows, hasProvider] = await Promise.all([
-    dbClient.query<{ key: string; value: string }>(`SELECT * FROM Settings`).catch(() => [] as { key: string; value: string }[]),
-    hasConfiguredModelProvider().catch(() => false),
-  ]);
-
-  const settings: Record<string, string> = {};
-  for (const row of rows) settings[row.key] = row.value;
-  const wizardCompleted = settings.has_completed_wizard === 'true';
-  const wizardRequired = !wizardCompleted && !hasProvider;
-
-  let reason: string;
-  if (wizardRequired) {
-    reason = 'No live LLM provider is configured and the bootstrap wizard has not been completed yet.';
-  } else if (!wizardCompleted) {
-    reason = 'A live LLM provider is already configured; the bootstrap wizard can be skipped.';
-  } else {
-    reason = 'Bootstrap wizard has been completed.';
-  }
-
-  return { wizardRequired, hasProvider, wizardCompleted, reason };
-}
-
-export async function updateSettingAction(key: string, value: string) {
-  try {
-    z.string().min(1).max(128).regex(/^[a-z0-9_]+$/i).parse(key);
-    z.string().max(isSecretSettingKey(key) ? 8192 : 2048).parse(value);
-
-    if (key.endsWith('_configured')) {
-      return { success: false, error: 'Configured flags are read-only.' };
-    }
-
-    if (isSecretSettingKey(key) && value.trim() === '') {
-      return { success: true, unchanged: true };
-    }
-
-    const sql = `
-      INSERT INTO Settings (key, value, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    `;
-    await dbClient.execute(sql, [key, value]);
-    // Any LLM or runtime mode change must invalidate the provider cache
-    // so the next getActiveProvider() call re-resolves from settings.
-    if (key.startsWith('llm_') || key.startsWith('global_') || key === 'runtime_mode' || key === 'operating_mode') {
-      invalidateProviderCache();
-    }
-    return { success: true };
-  } catch (error) {
-    console.error(`Failed to update setting ${key}:`, error);
-    return { success: false, error: String(error) };
-  }
-}
-
-const LIVE_MODEL_PROVIDER_KEYS: Record<string, { setting: string; env?: string }> = {
-  minimax: { setting: 'global_minimax_key', env: process.env.MINIMAX_API_KEY },
-  openai: { setting: 'global_openai_key', env: process.env.OPENAI_API_KEY },
-  anthropic: { setting: 'global_anthropic_key', env: process.env.ANTHROPIC_API_KEY },
-  xai: { setting: 'global_xai_key', env: process.env.XAI_API_KEY },
-  openrouter: { setting: 'global_openrouter_key', env: process.env.OPENROUTER_API_KEY },
-  groq: { setting: 'global_groq_key', env: process.env.GROQ_API_KEY },
-  mistral: { setting: 'global_mistral_key', env: process.env.MISTRAL_API_KEY },
-  deepseek: { setting: 'global_deepseek_key', env: process.env.DEEPSEEK_API_KEY },
-};
-
-function normalizeModelRows(data: any): { label: string; value: string }[] {
-  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
-  return rows
-    .map((row: any) => {
-      const id = String(row?.id || row?.name || '').replace(/^models\//, '').trim();
-      return id ? { label: id, value: id } : null;
-    })
-    .filter(Boolean)
-    .slice(0, 80) as { label: string; value: string }[];
-}
-
-export async function fetchLiveProviderModelsAction(provider: string): Promise<{ success: boolean; models: { label: string; value: string }[]; error?: string }> {
-  try {
-    const providerId = z.string().min(1).max(40).parse(provider);
-    if (providerId === 'default' || providerId === 'openai_compat') return { success: true, models: [] };
-
-    if (providerId === 'gemini') {
-      const apiKey = await getSecretSetting('global_gemini_key', process.env.GEMINI_API_KEY);
-      if (!apiKey) return { success: false, models: [], error: 'Gemini API key is not configured.' };
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`, {
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-      });
-      if (!response.ok) return { success: false, models: [], error: `Gemini models request failed: ${response.status}` };
-      return { success: true, models: normalizeModelRows(await response.json()) };
-    }
-
-    if (providerId === 'anthropic') {
-      const apiKey = await getSecretSetting('global_anthropic_key', process.env.ANTHROPIC_API_KEY);
-      if (!apiKey) return { success: false, models: [], error: 'Anthropic API key is not configured.' };
-      const response = await fetch('https://api.anthropic.com/v1/models', {
-        headers: { Accept: 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        cache: 'no-store',
-      });
-      if (!response.ok) return { success: false, models: [], error: `Anthropic models request failed: ${response.status}` };
-      return { success: true, models: normalizeModelRows(await response.json()) };
-    }
-
-    const keySpec = LIVE_MODEL_PROVIDER_KEYS[providerId];
-    const baseUrl = providerId === 'groq' ? 'https://api.groq.com/openai/v1' : OPENAI_COMPATIBLE_BASE_URLS[providerId];
-    if (!keySpec || !baseUrl) return { success: false, models: [], error: `Live model refresh is not configured for ${providerId}.` };
-
-    const apiKey = await getSecretSetting(keySpec.setting, keySpec.env);
-    if (!apiKey) return { success: false, models: [], error: `${providerId} API key is not configured.` };
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/models`, {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
-      cache: 'no-store',
-    });
-    if (!response.ok) return { success: false, models: [], error: `${providerId} models request failed: ${response.status}` };
-    return { success: true, models: normalizeModelRows(await response.json()) };
-  } catch (error: any) {
-    return { success: false, models: [], error: error.message || String(error) };
-  }
-}
-
-export async function checkShadowModeAction(): Promise<{ active: boolean; expiresAt: string | null }> {
-  try {
-    const rows = await dbClient.query(`SELECT * FROM Settings WHERE key IN ('shadow_mode_active', 'shadow_mode_expires_at')`);
-    const settings: Record<string, string> = {};
-    for (const r of rows) {
-      settings[r.key] = r.value;
-    }
-    const active = settings.shadow_mode_active === 'true';
-    const expiresAt = settings.shadow_mode_expires_at || null;
-
-    if (active && expiresAt) {
-      if (new Date().getTime() > new Date(expiresAt).getTime()) {
-        // Expired! Auto-deactivate
-        await updateSettingAction('shadow_mode_active', 'false');
-        return { active: false, expiresAt: null };
-      }
-      return { active: true, expiresAt };
-    }
-    return { active: false, expiresAt: null };
-  } catch (error) {
-    console.error("Failed to check shadow mode:", error);
-    return { active: false, expiresAt: null };
-  }
-}
-
-export async function toggleShadowModeAction(active: boolean, durationMinutes: number = 5) {
-  try {
-    if (active) {
-      const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
-      await Promise.all([
-        updateSettingAction('shadow_mode_active', 'true'),
-        updateSettingAction('shadow_mode_expires_at', expiresAt)
-      ]);
-      return { success: true, active: true, expiresAt };
-    } else {
-      await Promise.all([
-        updateSettingAction('shadow_mode_active', 'false'),
-        updateSettingAction('shadow_mode_expires_at', '')
-      ]);
-      return { success: true, active: false, expiresAt: null };
-    }
-  } catch (error) {
-    console.error("Failed to toggle shadow mode:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function updateGlidepathAction(missionId: string, phases: Phase[], tasks: Task[]) {
-  try {
-    const shadow = await checkShadowModeAction();
-    if (shadow.active) return { success: true };
-    const sql = `UPDATE Glidepaths SET phases = ?, tasks = ? WHERE mission_id = ?`;
-    await dbClient.execute(sql, [JSON.stringify(phases), JSON.stringify(tasks), missionId]);
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to update glidepath:", error);
-    return { success: false, error: String(error) };
-  }
-}
+import * as settings from './actions/settings';
+export const fetchSettingsAction = settings.fetchSettingsAction;
+export const fetchBootstrapStateAction = settings.fetchBootstrapStateAction;
+export const updateSettingAction = settings.updateSettingAction;
+export const fetchLiveProviderModelsAction = settings.fetchLiveProviderModelsAction;
+export const checkShadowModeAction = settings.checkShadowModeAction;
+export const toggleShadowModeAction = settings.toggleShadowModeAction;
+export const updateGlidepathAction = settings.updateGlidepathAction;
 
 // ----------------------------------------------------
 // MEMORY BANK ACTIONS
+// (moved to app/actions/memory.ts)
 // ----------------------------------------------------
-
-export async function fetchMemoryItemsAction() {
-  try {
-    const rows = await dbClient.query(`SELECT * FROM Memory_Items ORDER BY created_at DESC`);
-    return rows.map(r => {
-      let key = r.scope || 'General';
-      let value = r.content || '';
-      try {
-        const parsed = JSON.parse(r.content);
-        if (parsed.key) key = parsed.key;
-        if (parsed.value) value = parsed.value;
-      } catch (e) {}
-      return {
-        id: r.id,
-        key,
-        value,
-        type: r.type || 'semantic',
-        scope: r.scope || 'General',
-        importance: r.importance >= 0.8 ? 'High' : r.importance >= 0.4 ? 'Medium' : 'Low',
-        pinned: r.pinned === 1,
-        reason: r.reason || `Used when ${r.scope || 'General'} context is active.`,
-        reviewedAt: r.reviewed_at,
-        stale: !r.reviewed_at && new Date(r.created_at).getTime() < Date.now() - 1000 * 60 * 60 * 24 * 30,
-        createdAt: r.created_at,
-      };
-    });
-  } catch (error) {
-    console.error("Failed to fetch memory items:", error);
-    return [];
-  }
-}
-
-export async function purgeMemoryItemsAction(scope: string) {
-  try {
-    if (scope === 'all') {
-      await dbClient.execute(`DELETE FROM Memory_Items`);
-    } else {
-      await dbClient.execute(`DELETE FROM Memory_Items WHERE scope = ? OR type = ?`, [scope, scope.toLowerCase()]);
-    }
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to purge memory items:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function addGlobalMemoryItemAction(key: string, value: string, importance: string, scope: string = 'User') {
-  try {
-    const sql = `
-      INSERT INTO Memory_Items (id, scope, type, content, importance, reason)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `;
-    const impVal = importance === 'High' ? 0.8 : importance === 'Medium' ? 0.5 : 0.2;
-    await dbClient.execute(sql, [
-      `mem-${crypto.randomUUID()}`,
-      scope,
-      'semantic',
-      JSON.stringify({ key, value }),
-      impVal,
-      `Manual ${scope} memory added from Settings.`
-    ]);
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to add memory item:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function updateMemoryReviewAction(id: string, updates: { pinned?: boolean; reviewed?: boolean }) {
-  try {
-    z.string().min(1).parse(id);
-    if (typeof updates.pinned === 'boolean') {
-      await dbClient.execute(`UPDATE Memory_Items SET pinned = ? WHERE id = ?`, [updates.pinned ? 1 : 0, id]);
-    }
-    if (updates.reviewed) {
-      await dbClient.execute(`UPDATE Memory_Items SET reviewed_at = ? WHERE id = ?`, [new Date().toISOString(), id]);
-    }
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to update memory review:", error);
-    return { success: false, error: String(error) };
-  }
-}
+// MEMORY BANK ACTIONS
+// (moved to app/actions/memory.ts)
+// ----------------------------------------------------
+import * as memory from './actions/memory';
+export const fetchMemoryItemsAction = memory.fetchMemoryItemsAction;
+export const purgeMemoryItemsAction = memory.purgeMemoryItemsAction;
+export const addGlobalMemoryItemAction = memory.addGlobalMemoryItemAction;
+export const updateMemoryReviewAction = memory.updateMemoryReviewAction;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SUPR-CHAT & WORKSPACE FILE SYSTEM ACTIONS

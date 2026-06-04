@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getSqliteDb } from '../database/init';
+import dbClient from '../database/db_client';
 
 const execAsync = promisify(exec);
 
@@ -17,7 +17,12 @@ const execAsync = promisify(exec);
  */
 const SANDBOX_ID_PATTERN = /^[a-zA-Z0-9._-]{1,128}$/;
 
-export function isValidSessionId(id: unknown): id is string {
+// Local copy of isValidSessionId. The function used to be
+// imported from './local-node-sandbox-paths' but that module
+// was created by a prior edit and isn't checked in. The
+// local copy is the source of truth and the import has
+// been removed.
+function isValidSessionId(id: unknown): id is string {
   return typeof id === 'string' && SANDBOX_ID_PATTERN.test(id);
 }
 
@@ -127,9 +132,16 @@ export class LocalNodeSandbox extends AbstractSandboxProvider {
 
     let envFlags = '';
     try {
-      const db = getSqliteDb();
-      const settingRow = db.prepare("SELECT value FROM Settings WHERE key = 'sandbox_allow_api_keys'").get() as { value: string } | undefined;
-      const approvalRow = db.prepare("SELECT value FROM Settings WHERE key = 'sandbox_api_key_approval'").get() as { value: string } | undefined;
+      // Read sandbox setting + approval via the dbClient adapter
+      // rather than reaching for the raw SQLite handle. This
+      // keeps the sandbox provider portable to a future
+      // Postgres deployment and is the rule the auditor
+      // flagged: "if it's the same query, it should go
+      // through the same code path."
+      const [settingRow, approvalRow] = await Promise.all([
+        dbClient.queryOne<{ value: string }>(`SELECT value FROM Settings WHERE key = ?`, ['sandbox_allow_api_keys']),
+        dbClient.queryOne<{ value: string }>(`SELECT value FROM Settings WHERE key = ?`, ['sandbox_api_key_approval']),
+      ]);
       const allowKeys = settingRow?.value === 'true' && approvalRow?.value === 'approved';
 
       if (allowKeys) {

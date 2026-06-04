@@ -716,7 +716,10 @@ test('PermissionEngine loads native rules via dynamic import, not require()', ()
 
 test('getActiveProvider caches results with a TTL and invalidates on LLM setting changes', () => {
   const model = readFileSync('lib/providers/model.ts', 'utf8');
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, the invalidate call now lives
+  // in app/actions/settings.ts. Read both so the assertion
+  // survives the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/settings.ts', 'utf8');
   assert.match(model, /providerCache/);
   assert.match(model, /PROVIDER_CACHE_TTL_MS/);
   assert.match(model, /invalidateProviderCache/);

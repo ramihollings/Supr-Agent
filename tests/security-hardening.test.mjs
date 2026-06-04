@@ -694,7 +694,10 @@ test('model JSON parsing tolerates provider thinking preambles', () => {
 
 test('llm provider catalog exposes current model choices and live refresh action', () => {
   const catalog = readFileSync('lib/providers/catalog.ts', 'utf8');
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, model-fetch code lives in
+  // app/actions/settings.ts. Read both so the assertion
+  // survives the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/settings.ts', 'utf8');
   const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
   const chatPage = readFileSync('app/supr-chat/page.tsx', 'utf8');
 
