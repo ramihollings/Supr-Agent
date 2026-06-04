@@ -55,7 +55,7 @@ the live health probe.
 | `npm run build` | Production build |
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint |
-| `npm run test:security` | 115+ server/security regression tests |
+| `npm run test:security` | 215+ server/security regression tests |
 | `npm run smoke` | Boots the prod build and probes `/login`, `/api/auth/status`, `/api/health/production` |
 | `npm run test:prod` | `lint` + `test:security` + `build` + `smoke` (full pre-deploy gate) |
 

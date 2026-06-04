@@ -209,7 +209,10 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
   const dashboardModel = readFileSync('lib/dashboard-model.ts', 'utf8');
   const transcriptView = readFileSync('components/RunTranscriptView.tsx', 'utf8');
   const workflowCanvas = readFileSync('components/ProjectWorkflowCanvas.tsx', 'utf8');
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, the timeline/agent-action code lives
+  // in app/actions/chat-workspace.ts. Read both so the assertion
+  // survives the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/chat-workspace.ts', 'utf8');
   const codeRoute = readFileSync('app/api/code-agent/route.ts', 'utf8');
   const codePage = readFileSync('app/code/page.tsx', 'utf8');
   const researchRoute = readFileSync('app/api/research/route.ts', 'utf8');
@@ -290,7 +293,10 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
 });
 
 test('timeline, approvals, and connector health read runtime state', () => {
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, the connector-health helpers
+  // (recordProviderSuccess/Failure) live in app/actions/chat-workspace.ts.
+  // Read both so the assertion survives the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/chat-workspace.ts', 'utf8');
 
   assert.match(actions, /fetchAgentActionsForMission/);
   assert.match(actions, /resumeAgentActionFromApproval/);
@@ -300,7 +306,11 @@ test('timeline, approvals, and connector health read runtime state', () => {
 });
 
 test('project flow runtime exposes controls, intake routing, and telegram commands', () => {
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, the project-flow action implementations
+  // (startProjectFlowAction, routeIntakeToProjectFlowAction, etc.) live
+  // in app/actions/chat-workspace.ts. Read both so the assertion
+  // survives the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/chat-workspace.ts', 'utf8');
   const initSql = readFileSync('lib/database/init.ts', 'utf8');
   const runtime = readFileSync('lib/runtime/project-flow.ts', 'utf8');
   const governance = readFileSync('lib/services/governance.ts', 'utf8');
@@ -388,7 +398,15 @@ test('docker build context and runtime image avoid common secret leaks', () => {
 
 test('front page defaults to live agent orchestration instead of fake glidepath telemetry', () => {
   const page = readFileSync('app/page.tsx', 'utf8');
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, fetchProjectOperatingGraphAction and the
+  // PROJECT_FLOW_CAPABILITIES list live in app/actions/chat-workspace.ts,
+  // and the bootstrap-state check (has_completed_wizard) lives in
+  // app/actions/settings.ts. Read all three so the assertion survives
+  // the refactor.
+  const actions =
+    readFileSync('app/actions.ts', 'utf8') +
+    readFileSync('app/actions/chat-workspace.ts', 'utf8') +
+    readFileSync('app/actions/settings.ts', 'utf8');
   const workflowCanvas = readFileSync('components/ProjectWorkflowCanvas.tsx', 'utf8');
   const setupWizard = readFileSync('components/SetupWizard.tsx', 'utf8');
   const orchestrationPage = readFileSync('app/orchestration/page.tsx', 'utf8');
@@ -524,7 +542,10 @@ test('planned native skills are discoverable by matching folder and skill names'
 });
 
 test('organization import requires server-side overwrite confirmation', () => {
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, importOrganizationAction lives in
+  // app/actions/chat-workspace.ts. Read both so the assertion survives
+  // the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/chat-workspace.ts', 'utf8');
   const portability = readFileSync('lib/services/portability.ts', 'utf8');
   const settings = readFileSync('app/settings/page.tsx', 'utf8');
 
@@ -727,7 +748,11 @@ test('LLM entry routes delegate to thinking-tolerant structured parsers', () => 
   const slackRoute = readFileSync('app/api/slack/route.ts', 'utf8');
   const discordRoute = readFileSync('app/api/discord/route.ts', 'utf8');
   const telegramRoute = readFileSync('app/api/telegram/route.ts', 'utf8');
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, the thinking-tolerant parser call
+  // (`stripModelThinking(response).trim()`) lives in
+  // app/actions/chat-workspace.ts. Read both so the assertion survives
+  // the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/chat-workspace.ts', 'utf8');
   const skillLearning = readFileSync('lib/services/skill-learning.ts', 'utf8');
 
   assert.match(agentRoute, /routeIntakeToProjectFlow/);
@@ -767,7 +792,11 @@ test('activity log event ids are collision resistant under rapid chat routing', 
 });
 
 test('supr chat only routes explicit work requests into project flow', () => {
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, the shouldRouteSuprChatToProjectFlow /
+  // buildDirectSuprChatResponse helpers and their hasConfiguredModelProvider
+  // call live in app/actions/chat-workspace.ts. Read both so the
+  // assertion survives the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/chat-workspace.ts', 'utf8');
 
   assert.match(actions, /function shouldRouteSuprChatToProjectFlow/);
   assert.match(actions, /function buildDirectSuprChatResponse/);
@@ -783,7 +812,10 @@ test('supr chat only routes explicit work requests into project flow', () => {
 });
 
 test('code workspace falls back to governed local execution when Docker is unavailable', () => {
-  const actions = readFileSync('app/actions.ts', 'utf8');
+  // After the actions.ts split, the code-workspace + runbook
+  // helpers live in app/actions/chat-workspace.ts. Read both
+  // so the assertion survives the refactor.
+  const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/chat-workspace.ts', 'utf8');
 
   assert.match(actions, /const dockerAvailable = settings\.docker_available === 'true'/);
   assert.match(actions, /const runLocal = async \(\) =>/);

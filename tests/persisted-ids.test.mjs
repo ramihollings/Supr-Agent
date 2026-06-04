@@ -4,14 +4,17 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 const REPO_ROOT = join(import.meta.dirname, '..');
-// After the actions.ts split, time-math and ID-generation code
-// is spread across the facade and its domain files. Read all of
-// them so the test assertions survive the refactor.
+// After the actions.ts splits (skills/settings/memory in
+// earlier turns, chat-workspace in the most recent), time-math
+// and ID-generation code is spread across the facade and its
+// domain files. Read all of them so the test assertions
+// survive the refactor.
 const ACTIONS_SOURCE =
   readFileSync(join(REPO_ROOT, 'app/actions.ts'), 'utf8') +
   readFileSync(join(REPO_ROOT, 'app/actions/skills.ts'), 'utf8') +
   readFileSync(join(REPO_ROOT, 'app/actions/settings.ts'), 'utf8') +
-  readFileSync(join(REPO_ROOT, 'app/actions/memory.ts'), 'utf8');
+  readFileSync(join(REPO_ROOT, 'app/actions/memory.ts'), 'utf8') +
+  readFileSync(join(REPO_ROOT, 'app/actions/chat-workspace.ts'), 'utf8');
 const BUDGET_SOURCE = readFileSync(join(REPO_ROOT, 'lib/services/budget-engine.ts'), 'utf8');
 const DB_SOURCE = readFileSync(join(REPO_ROOT, 'lib/db.ts'), 'utf8');
 

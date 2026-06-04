@@ -38,6 +38,47 @@ interface PendingRequest {
 const REPO_ROOT = process.cwd();
 const TSX_BIN = join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
 
+/**
+ * Env vars that every spawned MCP server gets, regardless of
+ * its `env_keys` declaration. PATH is required for the OS to
+ * resolve binaries; HOME/USER/TMPDIR are required by many
+ * stdlib and SDK initialization paths (e.g. ~/.npmrc,
+ * ~/.config, /tmp scratch files).
+ */
+const ALWAYS_ALLOWED = new Set(['PATH', 'HOME', 'USER', 'TMPDIR']);
+
+/**
+ * Build the scoped environment for a child MCP server.
+ *
+ * The host's full `process.env` is intentionally NOT passed
+ * through. Only:
+ *   1. The `ALWAYS_ALLOWED` keys (PATH, HOME, USER, TMPDIR)
+ *   2. The keys explicitly listed in `server.env_keys`
+ *
+ * Without this scoping, a malicious or careless server could
+ * exfiltrate `OPENAI_API_KEY`, `AUTH_SECRET`, `APP_PASSWORD`,
+ * or any other host secret just by reading `process.env`.
+ *
+ * Exported as a pure function so tests can assert the scoping
+ * without spawning an actual child process.
+ */
+export function buildScopedEnv(
+  server: McpServerEntry,
+  hostEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  // Start with a non-empty object so TS doesn't infer the
+  // empty-object-literal type and reject later assignments to
+  // optional ProcessEnv keys (e.g. NODE_ENV).
+  const out: NodeJS.ProcessEnv = { ...hostEnv };
+  const allowedKeys = new Set(server.env_keys || []);
+  for (const key of Object.keys(hostEnv)) {
+    if (!ALWAYS_ALLOWED.has(key) && !allowedKeys.has(key)) {
+      delete out[key];
+    }
+  }
+  return out;
+}
+
 export class StdioMcpSession {
   private child: ChildProcessWithoutNullStreams | null = null;
   private pending = new Map<string | number, PendingRequest>();
@@ -70,24 +111,7 @@ export class StdioMcpSession {
     if (!this.server.command) {
       throw new Error(`Server '${this.server.id}' has no command configured.`);
     }
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    // The env_keys allowlist: only inject the env vars the
-    // server's manifest declares. This is defense-in-depth —
-    // we never want to leak unrelated secrets to a child
-    // process.
-    if (this.server.env_keys) {
-      for (const key of this.server.env_keys) {
-        if (process.env[key]) env[key] = process.env[key];
-      }
-    }
-    // Drop any env vars that aren't in the allowlist. This is
-    // the inverse of the plugin-worker env scoping — we start
-    // from a minimal set and only add back the declared keys.
-    const allowedKeys = new Set(this.server.env_keys || []);
-    for (const key of Object.keys(env)) {
-      if (key === 'PATH' || key === 'HOME' || key === 'USER' || key === 'TMPDIR') continue;
-      if (!allowedKeys.has(key)) delete env[key];
-    }
+    const env = buildScopedEnv(this.server);
     // If tsx is required (e.g. for a TypeScript MCP server), use
     // it. Otherwise the command is invoked directly.
     const needsTsx = (this.server.args || []).some((a) => a.endsWith('.ts'));

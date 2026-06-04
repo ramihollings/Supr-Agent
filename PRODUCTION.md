@@ -14,7 +14,11 @@ MINIMAX_API_KEY=<real MiniMax key>
 Optional:
 
 ```env
-DATABASE_URL=<postgres connection string>
+# DATABASE_URL is not currently honored. SQLite is the only
+# production-supported database. See README → "Stack" for the
+# rationale. The variable is reserved so a future Postgres
+# adapter can wire in without a config-file rewrite.
+# DATABASE_URL=<postgres connection string — not yet supported>
 PORT=3001
 TELEGRAM_BOT_TOKEN=<telegram bot token>
 TELEGRAM_CHAT_ID=<private chat id>
@@ -49,7 +53,12 @@ curl -f "https://<host>/api/health/production?probe=model"
 2. Configure Cloud Run service environment variables.
 3. Set `NODE_ENV=production`.
 4. Store secrets in Secret Manager where possible.
-5. Use Cloud SQL/Postgres for durable production database state if the service must scale or survive container replacement.
+5. Use a persistent volume for the SQLite database file
+   (`/data/supr.db` is the default). PostgreSQL is **not** a
+   supported production target as of this release — the
+   schema, migrations, and adapter are SQLite-specific. If you
+   need horizontal scaling or container replacement, snapshot
+   `/data/supr.db` to a GCS bucket and restore on boot.
 6. Deploy with HTTPS enabled by Cloud Run.
 
 Required Cloud Run notes:

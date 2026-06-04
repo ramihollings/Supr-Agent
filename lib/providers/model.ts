@@ -79,6 +79,32 @@ export class GeminiProvider extends ModelProvider {
       if (chunk.text) yield chunk.text;
     }
   }
+
+  /**
+   * Real embedding via the Gemini embedding API. Returns a
+   * Float32Array so the semantic router can compute cosine
+   * similarity directly. When the API call fails (e.g. no
+   * API key, network error) we throw — the router falls back
+   * to the hash embed in that case.
+   *
+   * We use `text-embedding-004` because it is the current
+   * default Gemini embedding model with 768 dimensions and
+   * strong semantic performance for short English text.
+   * Callers that need a different dimension can override by
+   * calling the underlying client directly.
+   */
+  async embedContent(text: string): Promise<Float32Array> {
+    const response = await this.ai.models.embedContent({
+      model: 'text-embedding-004',
+      contents: text,
+    });
+    const embeddings = (response as any).embeddings;
+    if (!embeddings || embeddings.length === 0) {
+      throw new Error('Gemini returned no embeddings for the given text.');
+    }
+    const values: number[] = embeddings[0].values || [];
+    return new Float32Array(values);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
