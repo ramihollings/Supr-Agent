@@ -26,6 +26,7 @@ import type {
   AgentRuntimeRunResult,
   RuntimeMode,
 } from './types';
+import { sessionEventBus } from './agent-session';
 
 function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -144,6 +145,22 @@ async function getModelResponse(input: {
           summary: chunk.slice(0, 500),
           metadata: { provider: provider.name, role },
         }));
+        // Phase 1B: forward each chunk to the session bus so the chat
+        // UI can render a live "thinking…" typewriter. The sessionId
+        // field is left blank on per-action runs -- the SSE route
+        // will derive the active session from the action's missionId.
+        sessionEventBus.emitEvent({
+          sessionId: '',
+          missionId: input.action.missionId,
+          kind: 'model_chunk',
+          at: new Date().toISOString(),
+          data: {
+            agentId: input.action.agentId,
+            chunk,
+            provider: provider.name,
+            role,
+          },
+        });
       }
     }
     return streamed;
@@ -355,6 +372,14 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           summary: `Calling ${response.toolName}`,
           metadata: { step, rationale: response.rationale },
         }));
+        // Phase 1B: notify session bus that a tool call is starting.
+        sessionEventBus.emitEvent({
+          sessionId: '',
+          missionId: action.missionId,
+          kind: 'tool_called',
+          at: new Date().toISOString(),
+          data: { agentId: action.agentId, toolName: response.toolName, args: response.arguments, step },
+        });
 
         const invocationId = await recordToolInvocation({
           missionId: action.missionId,
@@ -410,6 +435,14 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           const parsedOutput = typeof output === 'string' ? safeJson<Record<string, any>>(output, {}) : output as Record<string, any>;
           if (parsedOutput?.evidence) mergeEvidence(evidence, parsedOutput.evidence);
           logs.push(`${response.toolName} completed`);
+          // Phase 1B: notify session bus that a tool call has finished.
+          sessionEventBus.emitEvent({
+            sessionId: '',
+            missionId: action.missionId,
+            kind: 'tool_completed',
+            at: new Date().toISOString(),
+            data: { agentId: action.agentId, toolName: response.toolName, invocationId, hasOutput: output !== undefined },
+          });
           const metric = await operationalMetrics.record({
             missionId: action.missionId,
             agentId: action.agentId,

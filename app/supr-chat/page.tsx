@@ -59,6 +59,11 @@ export default function SuprChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  // Phase 1B: streaming model chunks accumulate here keyed by agent id,
+  // rendered as a typewriter line above the final bubble.
+  const [streamingByAgent, setStreamingByAgent] = useState<Record<string, string>>({});
+  // Phase 1B: in-flight tool call strip cleared when matching tool_completed arrives.
+  const [activeToolCalls, setActiveToolCalls] = useState<Array<{ agentId: string; toolName: string; args: unknown; startedAt: string }>>([]);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageText, setEditingMessageText] = useState('');
 
@@ -102,6 +107,48 @@ export default function SuprChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Phase 1B: while the chat is orchestrating, subscribe to the
+  // mission-scoped SSE stream and consume the new session event kind.
+  // Model chunks become a typewriter; tool_called/tool_completed become
+  // an activity strip so the user can see what sub-agents are doing.
+  useEffect(() => {
+    if (!chatLoading || typeof window === 'undefined') return;
+    const url = new URL('/api/mission/stream', window.location.origin);
+    const source = new EventSource(url.toString());
+    const handleSession = (e: MessageEvent) => {
+      try {
+        const event = JSON.parse(e.data);
+        if (event.kind === 'model_chunk') {
+          const agentId = String(event.data?.agentId || '');
+          if (!agentId) return;
+          const chunk = String(event.data?.chunk || '');
+          setStreamingByAgent((prev) => ({ ...prev, [agentId]: (prev[agentId] || '') + chunk }));
+        } else if (event.kind === 'tool_called') {
+          setActiveToolCalls((prev) => [
+            ...prev,
+            {
+              agentId: String(event.data?.agentId || ''),
+              toolName: String(event.data?.toolName || ''),
+              args: event.data?.args,
+              startedAt: event.at || new Date().toISOString(),
+            },
+          ]);
+        } else if (event.kind === 'tool_completed') {
+          setActiveToolCalls((prev) => prev.slice(0, -1));
+        } else if (event.kind === 'session_completed' || event.kind === 'session_failed') {
+          setStreamingByAgent({});
+        }
+      } catch {
+        // Ignore malformed session events; the SSE stream stays open.
+      }
+    };
+    source.addEventListener('session', handleSession);
+    return () => {
+      source.removeEventListener('session', handleSession);
+      source.close();
+    };
+  }, [chatLoading]);
 
   const settingsSnapshot = useSettingsSnapshot();
 

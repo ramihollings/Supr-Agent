@@ -3,6 +3,7 @@ import { getActiveMission, getMissionById } from '@/lib/db';
 import { Mission } from '@/types';
 import { requireApiAuth } from '@/lib/auth';
 import { missionEventBus, type MissionChangeEvent } from '@/lib/events/bus';
+import { sessionEventBus, type SessionEvent } from '@/lib/runtime/agent-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,6 +76,21 @@ export async function GET(req: NextRequest) {
       };
       missionEventBus.onChange(onChange);
 
+      // Phase 1B: subscribe to the session bus so the chat UI can
+      // stream model chunks, tool calls, and reflection events as
+      // they happen. We don't filter by projectId here because the
+      // session bus is mission-scoped already, and the chat already
+      // discards events for missions it isn't viewing.
+      const onSessionEvent = (event: SessionEvent) => {
+        if (projectId && event.missionId && event.missionId !== projectId) return;
+        try {
+          controller.enqueue(encoder.encode(`event: session\ndata: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      sessionEventBus.onEvent(onSessionEvent);
+
       const refetchAndSend = async (kind: 'event' | 'poll', reason: string) => {
         if (closed) return;
         try {
@@ -109,6 +125,7 @@ export async function GET(req: NextRequest) {
         clearInterval(interval);
         clearInterval(keepalive);
         missionEventBus.off('change', onChange);
+        sessionEventBus.offEvent(onSessionEvent);
         try {
           controller.close();
         } catch {
