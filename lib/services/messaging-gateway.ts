@@ -116,8 +116,33 @@ export const telegramGatewayAdapter: MessagingGatewayAdapter = {
     attachments: payload?.message?.document ? [payload.message.document] : [],
   }),
   send: async (input) => {
-    const deliveryId = await storeOutbound({ ...input, source: "telegram", status: "queued" });
-    return { ok: true, deliveryId };
+    const token = await getSecretSetting("telegram_token", process.env.TELEGRAM_BOT_TOKEN);
+    if (!token) return { ok: false, error: "Telegram token not configured." };
+
+    const chatId = input.actorId || await getSettingValue("telegram_chat_id") || process.env.TELEGRAM_CHAT_ID;
+    if (!chatId) return { ok: false, error: "No chat ID available." };
+
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: input.text }),
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (!response.ok) {
+        const error = `Telegram webhook returned ${response.status}.`;
+        const deliveryId = await storeOutbound({ ...input, source: "telegram", status: "failed", error });
+        return { ok: false, deliveryId, error };
+      }
+
+      const deliveryId = await storeOutbound({ ...input, source: "telegram", status: "sent" });
+      return { ok: true, deliveryId };
+    } catch (error: any) {
+      const message = error?.message || String(error);
+      const deliveryId = await storeOutbound({ ...input, source: "telegram", status: "failed", error: message });
+      return { ok: false, deliveryId, error: message };
+    }
   },
 };
 

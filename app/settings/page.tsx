@@ -160,6 +160,7 @@ export default function SettingsPage() {
   const [remoteExecutionHost, setRemoteExecutionHost] = useState('');
 
   const [telegramToken, setTelegramToken] = useState('718290382:AAFlk1829aB...');
+  const [telegramWebhookSecret, setTelegramWebhookSecret] = useState('');
   const [telegramChatId, setTelegramChatId] = useState('-100192830182');
   const [twitterHandle, setTwitterHandle] = useState('@supr_orchestrator');
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
@@ -243,7 +244,7 @@ export default function SettingsPage() {
       if (settings.integrations_slack) setIntegrationSlack(settings.integrations_slack);
       if (settings.integrations_discord) setIntegrationDiscord(settings.integrations_discord);
       if (settings.integrations_gmail) setIntegrationGmail(settings.integrations_gmail);
-
+      if (settings.telegram_webhook_secret) setTelegramWebhookSecret(settings.telegram_webhook_secret);
       if (settings.operating_mode) setOperatingMode(settings.operating_mode);
       if (settings.permission_boundary) setPermissionBoundary(settings.permission_boundary);
 
@@ -1059,7 +1060,7 @@ export default function SettingsPage() {
                     className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
                   >Save</button>
                 </div>
-                <span className="text-[9px] text-on-surface-variant block mt-1">Clearance token enabling Supr to pull repos, create issues, and manage task branches.</span>
+                <span className="text-[9px] text-on-surface-variant block mt-1">Clearance token enabling Supr to pull repos, create issues, and manage task branches. (Coming Soon)</span>
               </div>
 
               {/* Slack */}
@@ -1125,7 +1126,7 @@ export default function SettingsPage() {
                     className="bg-primary text-on-primary font-bold uppercase text-xs px-4 neo-border hover:bg-tertiary transition-colors"
                   >Save</button>
                 </div>
-                <span className="text-[9px] text-on-surface-variant block mt-1">Required App Password enabling direct SMTP/IMAP scans for pulling messages and automated notifications.</span>
+                <span className="text-[9px] text-on-surface-variant block mt-1">Required App Password enabling direct SMTP/IMAP scans for pulling messages and automated notifications. (Coming Soon)</span>
               </div>
 
             </div>
@@ -1222,6 +1223,19 @@ export default function SettingsPage() {
                       placeholder="e.g. -100123456789"
                     />
                   </div>
+                  <div>
+                    <label className="block font-headline font-bold uppercase text-primary mb-2 text-xs">Webhook Secret</label>
+                    <input
+                      type="password" aria-label="Webhook Secret"
+                      value={telegramWebhookSecret}
+                      onChange={(e) => {
+                        setTelegramWebhookSecret(e.target.value);
+                        handleUpdateSetting('telegram_webhook_secret', e.target.value);
+                      }}
+                      className="w-full bg-background neo-border p-3 font-mono text-xs focus:outline-none focus:border-tertiary"
+                      placeholder="e.g. MySecretToken123"
+                    />
+                  </div>
                 </div>
 
                 <div className="flex justify-between items-center mt-4 flex-wrap gap-4">
@@ -1241,7 +1255,7 @@ export default function SettingsPage() {
                       socialEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
                     }`}
                   >
-                    {socialEnabled ? 'Connected ✓' : 'Disconnected'}
+                    {socialEnabled ? 'Connected ✓' : 'Disabled (Coming Soon)'}
                   </button>
                 </div>
 
@@ -1260,7 +1274,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-between items-center flex-wrap gap-4 mt-2">
-                  <p className="font-body text-xs text-on-surface-variant max-w-lg">Allows research agents to draft or directly post scheduled social media announcements and trend analysis briefs.</p>
+                  <p className="font-body text-xs text-on-surface-variant max-w-lg">Allows research agents to draft or directly post scheduled social media announcements and trend analysis briefs. (Coming Soon)</p>
                 </div>
               </div>
 
@@ -1276,10 +1290,10 @@ export default function SettingsPage() {
                       emailEnabled ? 'bg-primary text-on-primary neo-shadow' : 'bg-surface-dim text-on-surface-variant'
                     }`}
                   >
-                    {emailEnabled ? 'Active ✓' : 'Inactive'}
+                    {emailEnabled ? 'Active ✓' : 'Inactive (Coming Soon)'}
                   </button>
                 </div>
-                <p className="font-body text-xs text-on-surface-variant">Sends automated daily executive brief summaries, critical diagnostic console alerts, and QA report handoffs directly to key stakeholders.</p>
+                <p className="font-body text-xs text-on-surface-variant">Sends automated daily executive brief summaries, critical diagnostic console alerts, and QA report handoffs directly to key stakeholders. (Coming Soon)</p>
               </div>
 
               {/* Slack Connector */}

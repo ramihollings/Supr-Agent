@@ -61,7 +61,7 @@ test('web_search uses the shared safeFetch for user-controlled URLs', () => {
 test('safeFetch enforces the full SSRF defense (private IPs, DNS pin, redirects, size cap)', () => {
   assert.match(SAFE_FETCH_SOURCE, /isPrivateIp/);
   assert.match(SAFE_FETCH_SOURCE, /assertSafeUrl/);
-  assert.match(SAFE_FETCH_SOURCE, /resolvePinnedUrl/);
+  assert.match(SAFE_FETCH_SOURCE, /resolveAndVetPublicAddress/);
   // The shared module must reject non-HTTP(S) protocols.
   assert.match(SAFE_FETCH_SOURCE, /\['http:', 'https:'\]/);
   // Must cap response size and enforce timeout.
@@ -126,10 +126,10 @@ test('composio resolves the API key from Settings, not only process.env', () => 
 
 // 6. Shell command policy approval gate
 test('shell tool enforces approvalRequired from the execution policy', () => {
-  assert.match(SHELL_SOURCE, /throwIfApprovalRequired/);
+  assert.match(SHELL_SOURCE, /assertExecutionAllowedOrThrow/);
   // The gate must be invoked on the local-execution path.
   const shellToolBody = SHELL_SOURCE.match(/name: "execute_command"[\s\S]*?^\};/m)?.[0] || '';
-  assert.ok(shellToolBody.includes('throwIfApprovalRequired'), 'shell tool must call throwIfApprovalRequired');
+  assert.ok(shellToolBody.includes('assertExecutionAllowedOrThrow'), 'shell tool must call assertExecutionAllowedOrThrow');
   // The error must carry the policy so the approval UI can route it.
   // The flag is set as a property on the thrown error so callers can
   // `if (error.approvalRequired) ...` to route to the approval UI.

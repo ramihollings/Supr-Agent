@@ -18,7 +18,7 @@
  * HTTPS endpoints, not just that the source contains the right words.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -33,20 +33,20 @@ const SAFE_FETCH_PATH = join(REPO_ROOT, 'lib', 'net', 'safe-fetch.ts');
  * network sockets isolated and lets us run TypeScript directly
  * without compiling.
  */
-function runSafeFetchScript(scriptBody: string, env: Record<string, string> = {}): { status: number; stdout: string; stderr: string } {
+function runSafeFetchScript(scriptBody, env = {}) {
   const harness = `
-    import { safeFetch, safeFetchText, assertSafeUrl } from './lib/net/safe-fetch.ts';
+    import { safeFetch, safeFetchText, assertSafeUrl } from '../lib/net/safe-fetch.ts';
     ${scriptBody}
   `;
   const harnessPath = join(REPO_ROOT, 'tests', '.ssrf-harness.mjs');
   writeFileSync(harnessPath, harness);
   try {
-    const tsxPath = join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
-    const result = spawnSync(tsxPath, [harnessPath], {
+    const result = spawnSync('npx', ['tsx', harnessPath], {
       cwd: REPO_ROOT,
       env: { ...process.env, ...env },
       encoding: 'utf8',
       timeout: 30_000,
+      shell: true,
     });
     return {
       status: result.status ?? -1,
@@ -122,7 +122,6 @@ test('safeFetch preserves SNI / cert validation (no IP-URL rewrite)', () => {
   // validation then failed and the request couldn't even reach
   // the wire for normal HTTPS sites. We assert the source path
   // does not do that anymore.
-  const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const source = readFileSync(SAFE_FETCH_PATH, 'utf8');
   // The fetch call must use the original URL, not a rewritten one.
   // The first argument to undiciFetch should be `currentUrl` (or a

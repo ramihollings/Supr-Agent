@@ -205,12 +205,13 @@ export const sandboxedShellTool: ToolDefinition<ShellParamsType, CommandResult> 
   parameters: ShellParams,
   requiredTier: "Execute",
   riskLevel: "High",
-  execute: async (params) => {
+  execute: async (params, ctx) => {
     const executionPolicy = await resolveCommandExecutionPolicy({
       command: params.command,
       riskLevel: "High",
       requestedEnvironment: "docker",
     });
+    await assertExecutionAllowedOrThrow(executionPolicy, ctx?.trustedApprovedActionId);
     try {
       return throwIfFailed(await runDockerSandboxCommand(params, executionPolicy));
     } catch (error: any) {

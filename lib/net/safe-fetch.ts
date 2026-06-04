@@ -122,7 +122,7 @@ export interface SafeFetchOptions {
   headers?: Record<string, string>;
 }
 
-export async function safeFetch(url: string, options: SafeFetchOptions = {}): Promise<UndiciResponse> {
+export async function safeFetch(url: string, options: SafeFetchOptions = {}): Promise<any> {
   const maxBytes = options.maxBytes ?? MAX_BYTES;
   const timeoutMs = options.timeoutMs ?? FETCH_TIMEOUT_MS;
 
@@ -146,7 +146,7 @@ export async function safeFetch(url: string, options: SafeFetchOptions = {}): Pr
       signal: AbortSignal.timeout(timeoutMs),
       dispatcher: agent,
     };
-    let response: UndiciResponse;
+    let response: any;
     try {
       response = await undiciFetch(currentUrl, init);
     } finally {
@@ -174,7 +174,9 @@ export async function safeFetch(url: string, options: SafeFetchOptions = {}): Pr
       throw new Error('Target response is too large.');
     }
     if (!response.body) {
-      return new UndiciResponse(new Uint8Array(), { headers: response.headers, status: response.status });
+      const emptyRes = new UndiciResponse(new Uint8Array(), { headers: response.headers, status: response.status }) as any;
+      emptyRes.url = currentUrl;
+      return emptyRes;
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -196,7 +198,9 @@ export async function safeFetch(url: string, options: SafeFetchOptions = {}): Pr
       merged.set(chunk, offset);
       offset += chunk.length;
     }
-    return new UndiciResponse(merged, { headers: response.headers, status: response.status });
+    const finalRes = new UndiciResponse(merged, { headers: response.headers, status: response.status }) as any;
+    finalRes.url = currentUrl;
+    return finalRes;
   }
   throw new Error('Too many redirects.');
 }

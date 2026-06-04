@@ -18,6 +18,7 @@ DATABASE_URL=<postgres connection string>
 PORT=3001
 TELEGRAM_BOT_TOKEN=<telegram bot token>
 TELEGRAM_CHAT_ID=<private chat id>
+TELEGRAM_WEBHOOK_SECRET=<webhook secret>
 SLACK_SIGNING_SECRET=<slack signing secret>
 DISCORD_WEBHOOK_TOKEN=<discord inbound token>
 ```

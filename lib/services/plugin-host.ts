@@ -86,11 +86,10 @@ export class PluginHost {
   }
 
   private async secretGet(pluginId: string, key: string): Promise<string | null> {
-    // Read secret key from environment or database Settings
     const dbKey = `secret_${pluginId}_${key}`;
     const row = await dbClient.queryOne<any>("SELECT value FROM Settings WHERE key = ?", [dbKey]);
     if (row) return row.value;
-    return process.env[key.toUpperCase()] || null;
+    return null;
   }
 
   private async auditLog(

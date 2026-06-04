@@ -135,25 +135,19 @@ test('production auth check caches the result, not just a checked flag', () => {
   assert.match(auth, /if\s*\(\s*process\.env\.NODE_ENV\s*!==\s*['"]production['"]\s*\)\s*return\s*\{\s*ok:\s*true\s*\}/);
 });
 
-test('proxy keeps SSRF defenses enabled', () => {
-  const proxyRoute = readFileSync('app/api/proxy/route.ts', 'utf8');
-  assert.match(proxyRoute, /redirect:\s*'manual'/);
-  assert.match(proxyRoute, /MAX_REDIRECTS/);
-  assert.match(proxyRoute, /MAX_BYTES/);
-  assert.match(proxyRoute, /isPrivateIp/);
+test('safeFetch implements centralized SSRF defenses', () => {
+  const safeFetchSource = readFileSync('lib/net/safe-fetch.ts', 'utf8');
+  assert.match(safeFetchSource, /redirect:\s*'manual'/);
+  assert.match(safeFetchSource, /MAX_REDIRECTS/);
+  assert.match(safeFetchSource, /MAX_BYTES/);
+  assert.match(safeFetchSource, /isPrivateIp/);
 });
 
-test('proxy pins the resolved IP for the actual fetch to prevent DNS rebinding (TOCTOU)', () => {
+test('proxy uses safeFetch for centralized SSRF and DNS rebinding defense', () => {
   const proxyRoute = readFileSync('app/api/proxy/route.ts', 'utf8');
-  // The fetch must go to a pinned IP, not the hostname. Asserted by
-  // checking that the fetch target is built from a resolved IP and
-  // that the original Host header is forwarded.
-  assert.match(proxyRoute, /resolvePinnedUrl/);
-  assert.match(proxyRoute, /'Host':\s*current\.originalHost/);
-  // Redirects must also be re-resolved through the same pin path.
-  assert.match(proxyRoute, /resolvePinnedUrl\(reCheck\.logUrl\)/);
-  // The old pattern (fetching the hostname URL directly) must be gone.
-  assert.doesNotMatch(proxyRoute, /await fetch\(currentUrl/);
+  assert.match(proxyRoute, /safeFetch\(/);
+  assert.doesNotMatch(proxyRoute, /await fetch\(/);
+  assert.doesNotMatch(proxyRoute, /resolvePinnedUrl/);
 });
 
 test('runbooks and artifact versions are backed by persistence tables and actions', () => {

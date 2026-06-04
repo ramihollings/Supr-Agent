@@ -161,6 +161,7 @@ export async function POST(req: NextRequest) {
     // Operator has not configured a webhook secret. Refuse to dispatch
     // commands rather than fall back to the chat-id-only check, which
     // is forgeable.
+    console.error('[Telegram] Webhook secret is not configured. Set telegram_webhook_secret in settings or TELEGRAM_WEBHOOK_SECRET in the environment.');
     return Response.json(
       { ok: false, error: 'Telegram webhook secret is not configured. Set telegram_webhook_secret in settings or TELEGRAM_WEBHOOK_SECRET in the environment.' },
       { status: 503 },
