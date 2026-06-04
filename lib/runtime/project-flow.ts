@@ -1,5 +1,5 @@
 import dbClient from '@/lib/database/db_client';
-import { addActivityLog, getActiveMission, getMissionById } from '@/lib/db';
+import { addActivityLog, getActiveMission, getMissionById, createMission } from '@/lib/db';
 import { createAgentAction, resumeAgentActionFromApproval } from './agent-actions';
 import { runAgentRuntimeAction } from './agent-runtime-runner';
 import { getActiveProvider } from '@/lib/providers/model';
@@ -297,17 +297,17 @@ async function maybeReplanFlow(flowRunId: string, missionId: string, trigger: st
   ]));
   const nodes = affectedActionIds.length
     ? await dbClient.query<any>(
-        `SELECT id FROM Flow_Nodes WHERE flow_run_id = ? AND kind = 'agent_action' AND ref_id IN (${affectedActionIds.map(() => '?').join(',')})`,
-        [flowRunId, ...affectedActionIds],
-      )
+      `SELECT id FROM Flow_Nodes WHERE flow_run_id = ? AND kind = 'agent_action' AND ref_id IN (${affectedActionIds.map(() => '?').join(',')})`,
+      [flowRunId, ...affectedActionIds],
+    )
     : [];
   const existingDecision = affectedActionIds.length
     ? await dbClient.queryOne<any>(
-        `SELECT id FROM Replan_Decisions
+      `SELECT id FROM Replan_Decisions
          WHERE mission_id = ? AND flow_run_id = ? AND removed_action_ids LIKE ?
          ORDER BY created_at DESC LIMIT 1`,
-        [missionId, flowRunId, `%${affectedActionIds[0]}%`],
-      )
+      [missionId, flowRunId, `%${affectedActionIds[0]}%`],
+    )
     : null;
   if (existingDecision) return existingDecision.id;
 
@@ -876,6 +876,21 @@ export async function approveLowRiskActions(projectId: string) {
   return { success: true, approved: approvals.length, flowRunId: flowRun.id };
 }
 
+/**
+ * Derive a short, deterministic mission name from a free-form user request.
+ * Falls back to a timestamped label when the content is too short or noisy
+ * to summarise. Trims to <=80 chars to fit the Mission.name column.
+ */
+function deriveMissionNameFromContent(content: string): string {
+  const cleaned = (content || '')
+    .replace(/[`*_~>#\n\r\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return `Ad-hoc project ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+  const firstSentence = cleaned.split(/[.?!]/)[0] || cleaned;
+  return firstSentence.slice(0, 80).trim() || `Ad-hoc project ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+}
+
 export async function routeIntakeToProjectFlow(input: {
   source: 'supr-chat' | 'telegram' | 'slack' | 'discord' | 'api';
   content: string;
@@ -883,10 +898,38 @@ export async function routeIntakeToProjectFlow(input: {
   actorId?: string | null;
   attachments?: unknown[];
 }) {
-  const mission = input.projectId ? await getMissionById(input.projectId) : await getActiveMission();
+  // Auto-provision a project if one isn't available. Before this fix,
+  // `routeIntakeToProjectFlow` failed with "No active project is available"
+  // any time the user started a chat before creating a mission, which
+  // made the chat window feel like a dead-end chatbot. Now Supr will
+  // spin up an Active mission whose name is derived from the request and
+  // whose objective is the user message itself, then run the flow against
+  // that mission. The Command Deck and `/api/mission/state` will pick it
+  // up via the existing notify-mission-changed bus.
+  let mission = input.projectId ? await getMissionById(input.projectId) : await getActiveMission();
   if (!mission) {
-    notifyMissionChanged(null, 'intake_routed');
-    return { success: false, error: 'No active project is available for intake.' };
+    try {
+      mission = await createMission({
+        name: deriveMissionNameFromContent(input.content),
+        objective: input.content,
+        status: 'Active',
+        readinessScore: 0,
+        phases: ['Intake', 'Research', 'Build', 'Verify', 'Deliver'].map((name) => ({
+          id: `phase-${name.toLowerCase()}`,
+          name,
+          status: 'Pending' as const,
+        })),
+        tasks: [],
+        messages: [],
+        artifacts: [],
+        activityLog: [],
+        failures: [],
+        memoryItems: [],
+      });
+    } catch (error: any) {
+      notifyMissionChanged(null, 'intake_routed');
+      return { success: false, error: `Unable to provision a project for this request: ${error.message || String(error)}` };
+    }
   }
   const commandId = id('cmd');
   await dbClient.execute(
