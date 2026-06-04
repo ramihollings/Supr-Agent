@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 export const SESSION_COOKIE = 'supr_auth_token';
-export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
+export const SESSION_TTL_SECONDS = 60 * 60 * 8;
 
 function getAuthSecret() {
   return process.env.AUTH_SECRET || process.env.APP_PASSWORD || process.env.NEXTAUTH_SECRET || 'supr-local-dev-secret';

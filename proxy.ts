@@ -115,9 +115,16 @@ export async function proxy(request: NextRequest) {
 
   const authToken = request.cookies.get('supr_auth_token')?.value;
   if (await verifySessionToken(authToken)) {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-request-id', requestId);
+    // Forward the pathname so the RootLayout can detect /login
+    // and hide the sidebar/chrome. Without this, the layout
+    // can't know what page it's on (the layout runs after the
+    // proxy and doesn't have direct access to the URL).
+    requestHeaders.set('x-pathname', request.nextUrl.pathname);
     const response = NextResponse.next({
       request: {
-        headers: new Headers({ ...Object.fromEntries(request.headers), 'x-request-id': requestId }),
+        headers: requestHeaders,
       },
     });
     response.headers.set('x-request-id', requestId);

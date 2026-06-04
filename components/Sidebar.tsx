@@ -169,7 +169,55 @@ function SidebarContent() {
             </button>
           </div>
         </div>
-      </nav>
+      
+      <div className="mt-4 pt-4 border-t-4 border-primary space-y-2">
+        <button
+          type="button"
+          onClick={async () => {
+            // SECURITY: thorough end-of-session cleanup. We:
+            // 1. POST to /api/auth/logout so the server clears
+            //    the session cookie via clearSessionCookie().
+            // 2. Clear any session-scoped browser storage.
+            // 3. Force a hard navigation to /login?logged_out=1
+            //    so the user gets a clear "your session ended"
+            //    confirmation (and so any in-memory React state
+            //    is reset — `window.location.href` is a full
+            //    page load, not a SPA navigation).
+            try {
+              await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+            } catch {}
+            try {
+              localStorage.removeItem('supr_theme');
+              localStorage.removeItem('supr_palette');
+              localStorage.removeItem('supr_no_persist');
+            } catch {}
+            try {
+              sessionStorage.clear();
+            } catch {}
+            // Clear any in-memory caches that might leak the
+            // session across tabs.
+            try {
+              if (typeof caches !== 'undefined') {
+                const keys = await caches.keys();
+                await Promise.all(keys.map((k) => caches.delete(k)));
+              }
+            } catch {}
+            // The hash trick (`#clean`) plus `replaceState` is
+            // a belt-and-braces way to prevent the back button
+            // from re-entering the now-unauthenticated app.
+            window.location.replace('/login?logged_out=1');
+          }}
+          className="w-full bg-error text-on-error font-headline font-bold uppercase py-2 px-3 border-2 border-primary hover:bg-tertiary hover:text-on-tertiary transition-colors shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-2"
+          title="End the current session and return to the Security Gate"
+        >
+          <span className="material-symbols-outlined text-[16px]">logout</span>
+          <span>End Session</span>
+        </button>
+        <p className="font-body text-[9px] text-on-surface-variant uppercase font-bold tracking-wider text-center leading-relaxed">
+          Clears cookies, local cache, and forces re-authentication.
+        </p>
+      </div>
+</nav>
     </>
   );
 }
