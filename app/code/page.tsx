@@ -75,12 +75,6 @@ export default function CodePage() {
       ),
     );
   };
-  const addTab = (tab: LightIDETab) => {
-    setTabs((prev) => {
-      if (prev.some((t) => t.filename === tab.filename)) return prev;
-      return [...prev, tab];
-    });
-  };
   const closeTab = (filename: string) => {
     setTabs((prev) => prev.filter((t) => t.filename !== filename));
     if (activeFile === filename) {
@@ -182,10 +176,6 @@ export default function CodePage() {
     }
   };
 
-  const setTerminalLogsAction = (msg: string) => {
-    setTerminalLines(prev => [...prev, { id: Date.now(), type: 'output', content: msg }]);
-  };
-
   const handleCreateFile = async () => {
     if (!newFilename.trim()) return;
     const name = newFilename.trim();
@@ -212,95 +202,9 @@ export default function CodePage() {
     }
   };
 
-      for (const [fname, content] of Object.entries(seeds)) {
-        await writeWorkspaceFileAction(fname, content);
-      }
-      list = await fetchWorkspaceFilesAction();
-    }
-    setFilesList(list);
-    
-    // Select first file if available and none selected yet
-    if (list.length > 0) {
-      const defaultFile = list.find(f => f.filename === 'main.py') || list[0];
-      setActiveFile(defaultFile.filename);
-      const content = await readWorkspaceFileAction(defaultFile.filename);
-      setEditorContent(content);
-      setLastSavedContent(content);
-    }
-    setIsLoading(false);
-  };
-
   useEffect(() => {
     loadWorkspace();
   }, []);
-
-  const selectFile = async (filename: string) => {
-    setActiveFile(filename);
-    setSaveStatus('saved');
-    const content = await readWorkspaceFileAction(filename);
-    setEditorContent(content);
-    setLastSavedContent(content);
-    setPendingFix(null);
-  };
-
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setSaveStatus('editing');
-    setEditorContent(e.target.value);
-  };
-
-  const handleSaveFile = async () => {
-    if (!activeFile) return;
-    try {
-      const res = await writeWorkspaceFileAction(activeFile, editorContent);
-      if (res.success) {
-        setSaveStatus('saved');
-        setLastSavedContent(editorContent);
-        showToast(`${activeFile} saved to workspace! ✓`);
-        setTerminalLogsAction(`[Workspace Storage] Synchronized ${activeFile} with secure workspace.`);
-        // Reload list for updated sizes
-        const list = await fetchWorkspaceFilesAction();
-        setFilesList(list);
-      } else {
-        showToast(`Failed to save: ${res.error}`);
-      }
-    } catch (err) {
-      console.error(err);
-      showToast(`Failed to save: ${String(err)}`);
-    }
-  };
-
-  const setTerminalLogsAction = (msg: string) => {
-    setTerminalLines(prev => [...prev, { id: Date.now(), type: 'output', content: msg }]);
-  };
-
-  const handleCreateFile = async () => {
-    if (!newFilename.trim()) return;
-    const name = newFilename.trim();
-    const defaultContent = `# New file: ${name}\n`;
-    await writeWorkspaceFileAction(name, defaultContent);
-    await loadWorkspace();
-    await selectFile(name);
-    setShowNewFileModal(false);
-    setNewFilename('');
-    showToast(`File ${name} created in workspace!`);
-  };
-
-  const handleDeleteFile = async (filename: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (confirm(`Are you sure you want to permanently delete ${filename}?`)) {
-      await deleteWorkspaceFileAction(filename);
-      showToast(`Deleted ${filename}`);
-      
-      const list = await fetchWorkspaceFilesAction();
-      setFilesList(list);
-      if (list.length > 0) {
-        await selectFile(list[0].filename);
-      } else {
-        setActiveFile('');
-        setEditorContent('');
-      }
-    }
-  };
 
   const handleToggleApiKeys = async (checked: boolean) => {
     setAllowApiKeys(checked);
@@ -418,7 +322,7 @@ export default function CodePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filename: activeFile,
-          fileContent: editorContent,
+          fileContent: activeTab?.content ?? '',
           researchContext,
           missionId: mission?.id,
         }),

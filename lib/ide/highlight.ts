@@ -1,45 +1,33 @@
-// Ambient module declaration for highlight.js (no @types package shipped).
-declare module 'highlight.js' {
-  export interface HighlightResult {
-    value: string;
-    language: string;
-    relevance: number;
-    illegal: boolean;
-    top?: unknown;
-  }
-  export interface HighlightAutoResult extends HighlightResult {
-    secondBest?: HighlightResult;
-    language: string;
-  }
-  export function highlight(code: string, options: { language: string; ignoreIllegals?: boolean }): HighlightResult;
-  export function highlightAuto(code: string, languageSubset?: string[]): HighlightAutoResult;
-  export function highlightAll(): void;
-  export function registerLanguage(name: string, language: unknown): void;
-  export const listLanguages: () => string[];
-  const hljs: {
-    highlight(code: string, options: { language: string; ignoreIllegals?: boolean }): HighlightResult;
-    highlightAuto(code: string, languageSubset?: string[]): HighlightAutoResult;
-    registerLanguage(name: string, language: unknown): void;
-    listLanguages: () => string[];
-  };
-  export default hljs;
-}
+// highlight.js is a CJS module that exports a function-form hljs object
+// (no `default` export). We dynamic-import it on the client and cast to
+// the surface we need, which keeps the bundle small (only loaded on
+// first editor open).
 
 import type { IdeLanguage } from './language';
 
-let hljsPromise: Promise<typeof import('highlight.js')> | null = null;
+type HljsSurface = {
+  highlight(code: string, options: { language: string; ignoreIllegals?: boolean }): { value: string };
+  highlightAuto(code: string, languageSubset?: string[]): { value: string };
+  listLanguages: () => string[];
+  registerLanguage: (name: string, language: unknown) => void;
+};
 
-async function loadHljs() {
+let hljsPromise: Promise<HljsSurface> | null = null;
+
+async function loadHljs(): Promise<HljsSurface> {
   if (!hljsPromise) {
-    hljsPromise = import('highlight.js');
+    // The package's CJS shape: the imported namespace is the hljs object
+    // (with `.highlight`, `.highlightAuto`, etc.). We use a require shim
+    // via dynamic import so Next.js can chunk it lazily.
+    hljsPromise = import('highlight.js').then((mod) => (mod as unknown as { default: HljsSurface }).default ?? (mod as unknown as HljsSurface));
   }
   return hljsPromise;
 }
 
 export async function highlightCode(code: string, hljsLanguage: string): Promise<string> {
   try {
-    const mod = await loadHljs();
-    return mod.default.highlight(code, { language: hljsLanguage, ignoreIllegals: true }).value;
+    const hljs = await loadHljs();
+    return hljs.highlight(code, { language: hljsLanguage, ignoreIllegals: true }).value;
   } catch {
     return escapeHtml(code);
   }
