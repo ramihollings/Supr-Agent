@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { fetchMissionState } from '@/app/actions';
 import { Mission, Artifact, RunEvent } from '@/types';
+import { LiveCloakBrowser, useCloakBrowser } from '@/components/LiveCloakBrowser';
 
 type SearchLogEntry = {
   id: number;
@@ -29,7 +30,10 @@ export default function ResearchPage() {
   const [sourceCards, setSourceCards] = useState<ResearchSourceCard[]>([]);
   const [completionStatus, setCompletionStatus] = useState<'idle' | 'complete' | 'partial'>('idle');
   const [isRunning, setIsRunning] = useState(false);
+  const [navigateUrl, setNavigateUrl] = useState('');
   const [mission, setMission] = useState<Mission | null>(null);
+
+  const cloak = useCloakBrowser();
   
   // Bridge state: Live Code view from the Code Workspace
   const [codeArtifacts, setCodeArtifacts] = useState<Artifact[]>([]);
@@ -160,6 +164,16 @@ export default function ResearchPage() {
                 { id: nextLogId(), type: 'extract', content: `[RESEARCH AGENT] Extracted ${msg.findings?.length || 0} intelligence signals from ${msg.sources?.length || 0} source(s).` },
                 { id: nextLogId(), type: 'supr', content: msg.completionStatus === 'complete' ? `[SUPR] Source-backed brief saved to SQLite: ${msg.filename}.` : `[SUPR] Partial brief saved to SQLite: ${msg.filename}. Source evidence required before verified handoff.` },
               ]);
+              // Drive the live CloakBrowser to the strongest source URL
+              // so the viewport reflects exactly what the agent saw.
+              const firstSource = Array.isArray(msg.sources) && msg.sources.length > 0
+                ? msg.sources[0]?.url
+                : null;
+              if (typeof msg.url === 'string' && msg.url.startsWith('http') && msg.url !== 'no-source://research-agent/') {
+                cloak.actions.navigate(msg.url);
+              } else if (firstSource && firstSource.startsWith('http')) {
+                cloak.actions.navigate(firstSource);
+              }
               // Refresh mission state to pick up new artifacts
               await fetchState();
             }
@@ -225,6 +239,49 @@ export default function ResearchPage() {
               <span className="material-symbols-outlined text-[18px]">search</span>
               Begin Web Crawl
             </button>
+
+            <div className="mt-3 pt-3 border-t-2 border-outline-variant">
+              <label className="block font-headline font-bold uppercase text-[10px] text-on-surface-variant tracking-widest mb-1">
+                Drive CloakBrowser
+              </label>
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  value={navigateUrl}
+                  onChange={(e) => setNavigateUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (navigateUrl.trim()) {
+                        cloak.actions.navigate(navigateUrl.trim());
+                        setNavigateUrl('');
+                      }
+                    }
+                  }}
+                  placeholder="https://example.com"
+                  className="flex-1 min-w-0 bg-surface neo-border px-2 py-2 font-mono text-[11px] focus:outline-none focus:border-tertiary"
+                />
+                <button
+                  onClick={() => {
+                    if (navigateUrl.trim()) {
+                      cloak.actions.navigate(navigateUrl.trim());
+                      setNavigateUrl('');
+                    }
+                  }}
+                  disabled={!navigateUrl.trim() || cloak.isNavigating}
+                  className="bg-tertiary text-on-tertiary font-headline font-bold uppercase px-2 neo-border neo-shadow text-[10px] hover:bg-primary hover:text-on-primary active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50 flex items-center gap-1"
+                  title="Navigate CloakBrowser to URL"
+                >
+                  <span className="material-symbols-outlined text-[14px]">travel_explore</span>
+                  Go
+                </button>
+              </div>
+              {cloak.activePage && cloak.activePage.url !== 'about:blank' && (
+                <p className="mt-1.5 font-mono text-[9px] text-on-surface-variant break-all">
+                  Live: {cloak.activePage.finalUrl || cloak.activePage.url}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Extracted Findings */}
@@ -269,107 +326,21 @@ export default function ResearchPage() {
           </div>
         </aside>
 
-        {/* Center: Browser Viewport */}
-        <div className="flex-1 flex flex-col min-w-0 bg-background relative w-full">
-          {/* Browser Chrome */}
-          <div className="flex items-center border-b-4 border-primary bg-surface-variant h-12 px-4 gap-3 shrink-0">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full border-2 border-primary bg-error-container"></span>
-              <span className="w-3 h-3 rounded-full border-2 border-primary bg-secondary-container"></span>
-              <span className="w-3 h-3 rounded-full border-2 border-primary bg-tertiary-container"></span>
-            </div>
-            <div className="flex-1 flex items-center bg-background neo-border px-3 py-1 font-mono text-xs gap-2 overflow-hidden">
-              <span className="material-symbols-outlined text-[14px] text-on-surface-variant shrink-0">lock</span>
-              <span className="truncate text-on-surface-variant">{currentUrl || 'about:blank'}</span>
-            </div>
-            <span className={`material-symbols-outlined text-[18px] ${isRunning ? 'animate-spin text-primary' : 'text-on-surface-variant'}`}>
-              {isRunning ? 'sync' : 'refresh'}
-            </span>
-          </div>
-
-          {/* Viewport Content */}
-          <div className="flex-1 overflow-auto custom-scrollbar bg-surface-container-lowest">
-            {browseState === 'idle' && (
-              <div className="flex flex-col items-center justify-center h-full text-center p-8">
-                <span className="material-symbols-outlined text-7xl text-outline mb-6">language</span>
-                <h3 className="font-headline font-bold uppercase text-xl text-on-surface-variant mb-2">Headless Browser Viewport</h3>
-                <p className="font-body text-sm text-on-surface-variant max-w-md leading-relaxed">
-                  When the Research Agent browses the web, you will see exactly what it crawls here in real time. Enter a query and click &quot;Begin Web Crawl&quot; to start.
-                </p>
-                <div className="mt-6 p-4 border-l-4 border-secondary bg-surface-container text-left max-w-md font-body text-xs text-on-surface-variant leading-relaxed">
-                  <strong>Bridge Sync Active</strong>: Findings extracted in the browser are written directly to SQLite, immediately refreshing the context drawer in the Coding Agent&apos;s workspace!
-                </div>
-              </div>
-            )}
-
-            {browseState === 'searching' && (
-              <div className="p-8">
-                <div className="max-w-2xl mx-auto">
-                  <div className="flex items-center gap-3 mb-8">
-                    <span className="font-headline text-3xl font-black tracking-tighter text-primary">Google</span>
-                  </div>
-                  <div className="neo-border bg-surface p-3 mb-6 flex items-center gap-2 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
-                    <span className="material-symbols-outlined text-on-surface-variant">search</span>
-                    <span className="font-body text-sm font-semibold">{searchQuery}</span>
-                  </div>
-                  <div className="space-y-4 animate-pulse">
-                    <div className="h-4 bg-surface-container-high rounded w-3/4"></div>
-                    <div className="h-3 bg-surface-container rounded w-1/2"></div>
-                    <div className="h-3 bg-surface-container rounded w-2/3"></div>
-                    <div className="h-16 bg-surface-container rounded w-full mt-4"></div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {(browseState === 'browsing' || browseState === 'extracting') && (
-              <div className="p-8">
-                <div className="max-w-3xl mx-auto">
-                  <div className="border-b-2 border-outline-variant pb-4 mb-6">
-                    <h1 className="font-headline text-2xl font-bold text-primary mb-1">Stitch Developer Spec Report</h1>
-                    <p className="font-body text-xs text-on-surface-variant">Target URI: docs.stitch-intelligence.io</p>
-                  </div>
-                  <div className="space-y-4 font-body text-sm leading-relaxed text-on-surface-variant">
-                    <p>Scanning specifications matching query: <strong className="text-secondary uppercase">{searchQuery}</strong>.</p>
-                    <p>Competitor release notes identify severe serialization validation bottlenecks inside index schemas.</p>
-                    <div className={`p-4 neo-border bg-primary-container text-on-primary-container shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] ${browseState === 'extracting' ? 'ring-2 ring-tertiary ring-offset-2 animate-pulse' : ''}`}>
-                      <p className="font-bold uppercase text-xs mb-2 text-primary">Extracted Spec Parameters</p>
-                      <p className="font-semibold leading-relaxed">Embedding values must undergo defensive padding to handle empty lists and avoid AssertionError crashes during clustering steps.</p>
-                    </div>
-                  </div>
-                  {browseState === 'extracting' && (
-                    <div className="mt-6 p-3 bg-tertiary-container text-on-tertiary-container neo-border flex items-center gap-3 font-body text-xs font-bold uppercase shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-                      <span className="material-symbols-outlined animate-spin text-[16px]">sync</span>
-                      Research Agent is extracting competitor schema findings...
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {browseState === 'done' && (
-              <div className="p-8">
-                <div className="max-w-3xl mx-auto">
-                  <div className="border-b-2 border-outline-variant pb-4 mb-6">
-                    <h1 className="font-headline text-2xl font-bold text-primary mb-1">Stitch Developer Spec Report</h1>
-                    <p className="font-body text-xs text-on-surface-variant">Target URI: docs.stitch-intelligence.io</p>
-                  </div>
-                  <div className="space-y-4 font-body text-sm leading-relaxed text-on-surface-variant">
-                    <p>Successfully processed spec queries matching: <span className="font-bold text-secondary uppercase">{searchQuery}</span>.</p>
-                    <div className="p-4 neo-border bg-tertiary-container text-on-tertiary-container shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
-                      <p className="font-bold uppercase text-xs mb-2 text-tertiary">✓ Extracted & Sync Saved</p>
-                      <p className="font-semibold leading-relaxed">All findings successfully recorded to SQLite database. Code Workspace drawer updated.</p>
-                    </div>
-                  </div>
-                  <div className="mt-6 p-3 bg-tertiary text-on-tertiary neo-border flex items-center gap-3 font-body text-xs font-bold uppercase shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-                    <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                    Research complete. Markdown files written to database.
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        {/* Center: Live CloakBrowser Viewport */}
+        <LiveCloakBrowser
+          pages={cloak.pages}
+          activePageId={cloak.activePageId}
+          cloakPath={cloak.cloakPath}
+          isNavigating={cloak.isNavigating}
+          canGoBack={cloak.canGoBack}
+          canGoForward={cloak.canGoForward}
+          onBack={cloak.actions.goBack}
+          onForward={cloak.actions.goForward}
+          onReload={cloak.actions.reload}
+          onHome={cloak.actions.goHome}
+          onSelect={cloak.actions.setActivePageId}
+          onClose={cloak.actions.closePage}
+        />
 
         {/* Right Panel: Search Log */}
         <aside className="w-80 lg:w-96 flex-none border-l-4 border-primary bg-background hidden lg:flex flex-col">
