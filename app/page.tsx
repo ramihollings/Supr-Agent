@@ -112,6 +112,14 @@ function DashboardContent() {
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('work');
   const [selectedObject, setSelectedObject] = useState<DashboardObject | null>(null);
   const [bulkSelectedObjects, setBulkSelectedObjects] = useState<Set<string>>(new Set());
+  // Live Mission Control status. Updated by the SSE subscription below
+  // and surfaced in the header so the user can see when the stream is
+  // connected, when it last received an event, and how many tool calls
+  // the active project has produced.
+  const [sseStatus, setSseStatus] = useState<'connecting' | 'open' | 'closed'>('connecting');
+  const [sseLastEventAt, setSseLastEventAt] = useState<string | null>(null);
+  const [recentToolCallCount, setRecentToolCallCount] = useState(0);
+  const [liveEvent, setLiveEvent] = useState<{ summary: string; at: string; tone: 'success' | 'failure' | 'system' } | null>(null);
   const { showToast } = useToast();
 
   const selectedOrFirstProjectId = selectedProjectId || projects[0]?.id || null;
@@ -453,17 +461,46 @@ function DashboardContent() {
     const url = new URL('/api/mission/stream', window.location.origin);
     if (selectedOrFirstProjectId) url.searchParams.set('id', selectedOrFirstProjectId);
     const source = new EventSource(url.toString());
+    setSseStatus('connecting');
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const handleMissionEvent = () => {
+    const handleMissionEvent = (event: MessageEvent) => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         void refreshAll();
       }, 400);
+      setSseLastEventAt(new Date().toISOString());
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.summary) {
+          setLiveEvent({
+            summary: payload.summary,
+            at: new Date().toISOString(),
+            tone: payload.eventType === 'failure' ? 'failure' : payload.eventType === 'agent_action' ? 'success' : 'system',
+          });
+        }
+      } catch {
+        // ignore unparseable
+      }
     };
+    const handleToolEvent = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.toolName === 'web_scrape') {
+          setRecentToolCallCount((c) => c + 1);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    source.addEventListener('open', () => setSseStatus('open'));
+    source.addEventListener('error', () => setSseStatus('closed'));
     source.addEventListener('mission', handleMissionEvent);
+    source.addEventListener('tool', handleToolEvent);
     return () => {
       source.removeEventListener('mission', handleMissionEvent);
+      source.removeEventListener('tool', handleToolEvent);
       source.close();
+      setSseStatus('closed');
       if (debounceTimer) clearTimeout(debounceTimer);
     };
     // We intentionally exclude refreshAll from deps to avoid
@@ -482,6 +519,12 @@ function DashboardContent() {
         onAction={handleObjectAction}
       />
       <TopNav title="Supr Command Deck" />
+      <LiveStatusBar
+        sseStatus={sseStatus}
+        sseLastEventAt={sseLastEventAt}
+        recentToolCallCount={recentToolCallCount}
+        liveEvent={liveEvent}
+      />
 
       <div className="xl:hidden bg-background border-b-4 border-primary grid grid-cols-3">
         {[
@@ -576,5 +619,58 @@ export default function WorkspacePage() {
     >
       <DashboardContent />
     </Suspense>
+  );
+}
+
+function LiveStatusBar({
+  sseStatus,
+  sseLastEventAt,
+  recentToolCallCount,
+  liveEvent,
+}: {
+  sseStatus: 'connecting' | 'open' | 'closed';
+  sseLastEventAt: string | null;
+  recentToolCallCount: number;
+  liveEvent: { summary: string; at: string; tone: 'success' | 'failure' | 'system' } | null;
+}) {
+  const statusLabel = sseStatus === 'open' ? 'Live' : sseStatus === 'connecting' ? 'Connecting…' : 'Offline';
+  const statusTone =
+    sseStatus === 'open'
+      ? 'bg-tertiary text-on-tertiary'
+      : sseStatus === 'connecting'
+        ? 'bg-secondary text-on-error animate-pulse'
+        : 'bg-error text-on-error';
+  return (
+    <div className="flex items-center gap-2 border-b-2 border-primary bg-surface-container px-3 py-1.5 text-[10px] font-mono shrink-0 overflow-x-auto custom-scrollbar" role="status" aria-live="polite">
+      <span
+        className={`px-2 py-0.5 border-2 border-primary font-headline font-black uppercase text-[9px] ${statusTone}`}
+        title={`Server-Sent Events stream status: ${statusLabel}`}
+      >
+        <span className="material-symbols-outlined text-[10px] align-middle">sensors</span>
+        <span className="ml-1">{statusLabel}</span>
+      </span>
+      <span className="text-on-surface-variant flex items-center gap-1" title="Most recent mission event seen on the stream">
+        <span className="material-symbols-outlined text-[12px]">schedule</span>
+        {sseLastEventAt ? new Date(sseLastEventAt).toLocaleTimeString() : '—'}
+      </span>
+      <span className="text-on-surface-variant flex items-center gap-1" title="CloakBrowser web_scrape invocations observed in this session">
+        <span className="material-symbols-outlined text-[12px]">travel_explore</span>
+        {recentToolCallCount} web_scrape
+      </span>
+      {liveEvent && (
+        <span
+          className={`ml-2 px-2 py-0.5 border-2 border-primary font-headline font-bold uppercase text-[9px] truncate max-w-[40rem] ${
+            liveEvent.tone === 'failure'
+              ? 'bg-error text-on-error'
+              : liveEvent.tone === 'success'
+                ? 'bg-tertiary text-on-tertiary'
+                : 'bg-secondary text-on-primary'
+          }`}
+          title={liveEvent.summary}
+        >
+          {liveEvent.summary}
+        </span>
+      )}
+    </div>
   );
 }

@@ -272,6 +272,27 @@ function SupervisorConsoleContent() {
                     ))}
                   </div>
                 </article>
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">travel_explore</span>
+                    CloakBrowser
+                  </h3>
+                  <dl className="mt-2 space-y-1 font-mono text-[10px]">
+                    <div className="flex justify-between gap-3"><dt>Path</dt><dd className="truncate max-w-[12rem]" title={productionHealth?.cloakBrowser?.path ?? ''}>{productionHealth?.cloakBrowser?.path || 'unset'}</dd></div>
+                    <div className="flex justify-between gap-3">
+                      <dt>Binary</dt>
+                      <dd className={productionHealth?.cloakBrowser?.exists ? 'text-tertiary' : 'text-error'}>
+                        {productionHealth?.cloakBrowser?.exists ? 'present' : 'missing'}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt>Executable</dt>
+                      <dd className={productionHealth?.cloakBrowser?.executable ? 'text-tertiary' : 'text-secondary'}>
+                        {productionHealth?.cloakBrowser?.executable ? 'yes' : 'no'}
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
                 <article className="md:col-span-2 bg-surface-container border-2 border-primary p-3">
                   <h3 className="font-headline font-black uppercase text-primary text-sm">Warnings</h3>
                   <div className="mt-2 space-y-1 font-body text-[11px] text-on-surface-variant max-h-32 overflow-y-auto custom-scrollbar">

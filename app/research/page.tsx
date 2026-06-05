@@ -387,6 +387,19 @@ export default function ResearchPage() {
                 {browseState === 'idle' ? 'Standby' : browseState === 'done' ? 'Ready' : 'Monitoring'}
               </span>
             </div>
+            <div className="p-2 border-b-2 border-primary bg-surface-container flex items-center gap-2 text-[10px] font-mono">
+              <span className="material-symbols-outlined text-[12px] text-primary">travel_explore</span>
+              <span className="font-bold uppercase text-primary">CloakBrowser</span>
+              {cloak.cloakPath ? (
+                <span className="text-tertiary" title={cloak.cloakPath}>
+                  ready · {cloak.cloakPath.split('/').pop() || cloak.cloakPath}
+                </span>
+              ) : (
+                <span className="text-error" title="Set CLOAKBROWSER_PATH to enable live navigation">
+                  CLOAKBROWSER_PATH not set
+                </span>
+              )}
+            </div>
             <div className="p-4 flex-1 overflow-y-auto custom-scrollbar text-xs">
               {browseState === 'idle' && (
                 <p className="text-on-surface-variant leading-relaxed">Supr is monitoring the Research Agent. When competitor specs are saved, they are immediately synchronized to the Coding Agent sandbox.</p>

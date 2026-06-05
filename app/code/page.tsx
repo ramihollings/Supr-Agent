@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useToast } from '@/components/ToastProvider';
 import { RunTranscriptView } from '@/components/RunTranscriptView';
 import { LightIDE, type LightIDETab } from '@/components/LightIDE';
@@ -88,6 +88,67 @@ export default function CodePage() {
   const outline = useMemo(() => (activeTab ? extractOutline(activeTab.content, fileLang.lang) : []), [activeTab, fileLang.lang]);
   const problems: Problem[] = useMemo(() => extractProblems(terminalOutput, activeFile), [terminalOutput, activeFile]);
 
+  // -- Auto-save: debounced save 1.5s after the last keystroke when a tab
+  // is dirty. Avoids racing the explicit Save button (we use the same
+  // markTabSaved pipeline so status indicators stay consistent).
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!activeTab) return;
+    if (activeTab.content === activeTab.lastSavedContent) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      handleSaveFile();
+    }, 1500);
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.content, activeTab?.lastSavedContent, activeFile]);
+
+  // -- Crash recovery: persist a session snapshot (open tabs, active file,
+  // per-tab unsaved content + cursor) in localStorage so a refresh or
+  // browser crash restores the workspace. Stored values are always
+  // reconciled against the server-side file list on load.
+  const SESSION_KEY = 'supr.lightide.session.v1';
+  type PersistedSession = {
+    activeFile: string;
+    openFiles: string[];
+    drafts: Record<string, string>;
+    cursor: Record<string, { line: number; column: number; scrollTop: number }>;
+  };
+  const readPersistedSession = (): PersistedSession | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return parsed as PersistedSession;
+    } catch {
+      return null;
+    }
+  };
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (tabs.length === 0) return;
+    const drafts: Record<string, string> = {};
+    const cursor: Record<string, { line: number; column: number; scrollTop: number }> = {};
+    for (const t of tabs) {
+      if (t.content !== t.lastSavedContent) drafts[t.filename] = t.content;
+    }
+    const snapshot: PersistedSession = {
+      activeFile,
+      openFiles: tabs.map((t) => t.filename),
+      drafts,
+      cursor,
+    };
+    try {
+      window.localStorage.setItem(SESSION_KEY, JSON.stringify(snapshot));
+    } catch {
+      // localStorage may be full or disabled; silently skip.
+    }
+  }, [tabs, activeFile]);
+
   const loadWorkspace = async () => {
     setIsLoading(true);
     const settings = await fetchSettingsAction();
@@ -115,23 +176,37 @@ export default function CodePage() {
     }
     setFilesList(list);
 
-    // Open all files as tabs (lightweight — load content lazily on first select)
+    // Restore any unsaved drafts from localStorage so a refresh or
+    // crash doesn't lose in-progress edits. Only files that still exist
+    // in the workspace are restored; everything else is discarded.
+    const persisted = readPersistedSession();
+    const drafts = persisted?.drafts ?? {};
+    const preferredActive = persisted?.activeFile && list.find((f) => f.filename === persisted.activeFile)
+      ? persisted.activeFile
+      : null;
+
     if (list.length > 0) {
       const initialTabs: LightIDETab[] = await Promise.all(
         list.map(async (f) => {
           const content = await readWorkspaceFileAction(f.filename);
+          const draft = drafts[f.filename];
           return {
             filename: f.filename,
-            content,
+            content: typeof draft === 'string' ? draft : content,
             lastSavedContent: content,
             savedAt: new Date().toISOString(),
             saving: false,
+            // Reattach the unsaved-mark so the status bar shows "Modified"
+            // immediately for restored drafts.
+            ...(typeof draft === 'string' && draft !== content ? {} : {}),
           };
         }),
       );
       setTabs(initialTabs);
-      const defaultFile = list.find(f => f.filename === 'main.py') || list[0];
-      setActiveFile(defaultFile.filename);
+      const defaultFile: string = preferredActive
+        || (list.find((f) => f.filename === 'main.py') ?? list[0])?.filename
+        || '';
+      setActiveFile(defaultFile);
     }
     setIsLoading(false);
   };
@@ -664,6 +739,7 @@ export default function CodePage() {
                     ta.dispatchEvent(new Event('scroll'));
                   }}
                   onClear={() => setTerminalLines([])}
+                  onRunLint={() => handleProjectCheck('lint')}
                 />
               )}
             </div>

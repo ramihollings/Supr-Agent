@@ -2,7 +2,7 @@
 
 import { TopNav } from '@/components/TopNav';
 import { useToast } from '@/components/ToastProvider';
-import { useState, useEffect, startTransition, Suspense } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, startTransition, Suspense } from 'react';
 import { Mission, MemoryItem } from '@/types';
 import { getActiveMissionAction, fetchMissionsAction } from '@/app/actions';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -107,10 +107,60 @@ function ReasoningPageContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Reasoning Tree States
+  // The reasoning tree starts empty while we wait for the live API
+  // call, then hydrates from the active mission's Event_Log. Polling
+  // every 5s keeps the tree live so users can watch new decisions
+  // appear as the orchestrator runs.
   const [treeNodes, setTreeNodes] = useState<ReasoningNode[]>(DEFAULT_REASONING_TREE);
   const [selectedNodeId, setSelectedNodeId] = useState<string>('n4');
   const [overrideDirective, setOverrideDirective] = useState('');
+  const [liveStats, setLiveStats] = useState<{ eventCount: number; runCount: number; recentFailures: number } | null>(null);
+  const [liveSource, setLiveSource] = useState<'live' | 'fallback'>('fallback');
   const { showToast } = useToast();
+
+  const loadReasoningTree = useCallback(async (missionId: string) => {
+    try {
+      const res = await fetch(`/api/reasoning/tree?missionId=${encodeURIComponent(missionId)}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Tree request failed: ${res.status}`);
+      const data = await res.json();
+      if (Array.isArray(data.nodes) && data.nodes.length > 0) {
+        const mapped: ReasoningNode[] = data.nodes.map((n: any, idx: number) => ({
+          id: n.id || `evt-${idx}`,
+          label: n.label || n.summary || 'Reasoning step',
+          status: n.status || 'pending',
+          timestamp: n.timestamp ? new Date(n.timestamp).toLocaleTimeString() : '--:--:--',
+          thoughtProcess: n.thoughtProcess || '',
+          hypotheses: n.hypotheses || [],
+          actionTaken: n.actionTaken || n.label || '',
+          actor: n.actor,
+          targetAgent: n.targetAgent,
+        }));
+        setTreeNodes(mapped);
+        setLiveSource('live');
+        setLiveStats({
+          eventCount: data.eventCount ?? mapped.length,
+          runCount: data.runCount ?? 0,
+          recentFailures: data.recentFailures?.length ?? 0,
+        });
+        setSelectedNodeId((current) => (mapped.find((m) => m.id === current) ? current : mapped[0].id));
+      } else {
+        setTreeNodes(DEFAULT_REASONING_TREE);
+        setLiveSource('fallback');
+        setLiveStats({ eventCount: 0, runCount: 0, recentFailures: 0 });
+      }
+    } catch (error) {
+      setLiveSource('fallback');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    void loadReasoningTree(selectedProjectId);
+    const id = setInterval(() => {
+      void loadReasoningTree(selectedProjectId);
+    }, 5000);
+    return () => clearInterval(id);
+  }, [selectedProjectId, loadReasoningTree]);
 
   useEffect(() => {
     async function loadProjects() {
@@ -188,7 +238,25 @@ function ReasoningPageContent() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <span
+              className={`px-2 h-7 border-2 border-primary font-headline font-black uppercase text-[10px] flex items-center gap-1 ${
+                liveSource === 'live' ? 'bg-tertiary text-on-tertiary' : 'bg-secondary text-on-error animate-pulse'
+              }`}
+              title={liveSource === 'live' ? 'Hydrated from live Event_Log / Agent_Runs' : 'Showing the demo tree (no live events yet)'}
+            >
+              <span className="material-symbols-outlined text-[12px]">{liveSource === 'live' ? 'sensors' : 'science'}</span>
+              {liveSource === 'live' ? 'Live Reasoning' : 'Demo Tree'}
+            </span>
+            {liveStats && (
+              <span className="font-mono text-[10px] text-on-surface-variant flex items-center gap-2">
+                <span title="Recent Event_Log rows for the active mission">events: {liveStats.eventCount}</span>
+                <span title="Recent Agent_Runs for the active mission">runs: {liveStats.runCount}</span>
+                {liveStats.recentFailures > 0 && (
+                  <span className="text-error font-bold" title="Recent failed runs">failures: {liveStats.recentFailures}</span>
+                )}
+              </span>
+            )}
             <span className="font-headline text-xs font-bold uppercase text-primary">Workspace:</span>
             <select
               value={selectedProjectId}

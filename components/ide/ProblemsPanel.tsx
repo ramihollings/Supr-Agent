@@ -6,10 +6,12 @@ export function ProblemsPanel({
   problems,
   onJump,
   onClear,
+  onRunLint,
 }: {
   problems: Problem[];
   onJump: (p: Problem) => void;
   onClear: () => void;
+  onRunLint: () => void;
 }) {
   const errors = problems.filter((p) => p.severity === 'error').length;
   const warnings = problems.filter((p) => p.severity === 'warning').length;
@@ -19,7 +21,15 @@ export function ProblemsPanel({
         <span className="material-symbols-outlined text-[14px]">bug_report</span>
         <span className="text-error">Errors: {errors}</span>
         <span className="text-amber-600">Warnings: {warnings}</span>
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-1">
+          <button
+            onClick={onRunLint}
+            className="text-on-surface-variant hover:text-primary uppercase"
+            title="Re-run lint to refresh problems"
+          >
+            <span className="material-symbols-outlined text-[12px] align-middle">refresh</span>
+            <span className="ml-1">Lint</span>
+          </button>
           <button onClick={onClear} className="text-on-surface-variant hover:text-error uppercase">
             Clear
           </button>
@@ -28,7 +38,7 @@ export function ProblemsPanel({
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         {problems.length === 0 ? (
           <p className="p-3 text-on-surface-variant text-[10px] font-body italic text-center">
-            No problems detected.
+            No problems detected. Click <em>Lint</em> to refresh.
           </p>
         ) : (
           <ul>
@@ -37,6 +47,14 @@ export function ProblemsPanel({
                 key={p.id}
                 onClick={() => onJump(p)}
                 className="flex items-start gap-2 px-2 py-1 border-b border-outline-variant hover:bg-surface-container cursor-pointer font-mono text-[10px]"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onJump(p);
+                  }
+                }}
               >
                 <span
                   className={`mt-0.5 material-symbols-outlined text-[12px] ${
@@ -54,6 +72,7 @@ export function ProblemsPanel({
                     {p.column != null ? `:${p.column}` : ''} · {p.source}
                   </p>
                 </div>
+                <span className="material-symbols-outlined text-[12px] text-on-surface-variant" title="Jump to problem">arrow_forward</span>
               </li>
             ))}
           </ul>

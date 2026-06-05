@@ -70,6 +70,44 @@ export async function getProductionHealth(options: { probeModel?: boolean } = {}
   const failures: string[] = [];
   const warnings: string[] = [];
 
+  // Probe the CloakBrowser binary path. We don't try to launch the
+  // process here (production-health is called frequently from the
+  // supervisor console) — we just verify the configured binary exists
+  // and is executable. The Research page does a real launch probe.
+  const cloakPath = process.env.CLOAKBROWSER_PATH || null;
+  let cloakBrowser: { configured: boolean; path: string | null; exists: boolean; executable: boolean; note?: string } = {
+    configured: false,
+    path: null,
+    exists: false,
+    executable: false,
+    note: 'CLOAKBROWSER_PATH is not set. Live web research is disabled until the env var points at a browser binary.',
+  };
+  if (cloakPath) {
+    try {
+      const fs = await import('fs');
+      const exists = fs.existsSync(cloakPath);
+      let executable = false;
+      try {
+        if (exists) {
+          fs.accessSync(cloakPath, fs.constants.X_OK);
+          executable = true;
+        }
+      } catch {
+        executable = false;
+      }
+      cloakBrowser = { configured: true, path: cloakPath, exists, executable };
+      if (!exists) {
+        warnings.push(`CloakBrowser path ${cloakPath} does not exist.`);
+      } else if (!executable) {
+        warnings.push(`CloakBrowser path ${cloakPath} is not executable.`);
+      }
+    } catch (error: any) {
+      warnings.push(`CloakBrowser probe failed: ${error.message || String(error)}`);
+    }
+  } else {
+    warnings.push(cloakBrowser.note!);
+  }
+
   let dbReachable = false;
   let recentFailures: any[] = [];
   try {
@@ -164,6 +202,7 @@ export async function getProductionHealth(options: { probeModel?: boolean } = {}
     },
     channels,
     defaultChannel,
+    cloakBrowser,
     recentFailures: recentFailures.map((row) => ({
       id: row.id,
       status: row.status,
