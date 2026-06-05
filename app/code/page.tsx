@@ -1,13 +1,18 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { TopNav } from '@/components/TopNav';
+import { useState, useEffect, useMemo } from 'react';
 import { useToast } from '@/components/ToastProvider';
 import { RunTranscriptView } from '@/components/RunTranscriptView';
-import { 
-  fetchMissionState, 
-  recordFailureAction, 
-  updateTaskStatusAction, 
+import { LightIDE, type LightIDETab } from '@/components/LightIDE';
+import { FileOutline } from '@/components/ide/FileOutline';
+import { ProblemsPanel } from '@/components/ide/ProblemsPanel';
+import { extractOutline } from '@/lib/ide/outline';
+import { extractProblems, type Problem } from '@/lib/ide/problems';
+import { detectLanguage } from '@/lib/ide/language';
+import {
+  fetchMissionState,
+  recordFailureAction,
+  updateTaskStatusAction,
   fetchWorkspaceFilesAction,
   readWorkspaceFileAction,
   writeWorkspaceFileAction,
@@ -31,12 +36,11 @@ export default function CodePage() {
   const [triageState, setTriageState] = useState<TriageState>('idle');
   const [retryCount, setRetryCount] = useState(0);
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([]);
+  const [tabs, setTabs] = useState<LightIDETab[]>([]);
   const [activeFile, setActiveFile] = useState<string>('');
-  const [editorContent, setEditorContent] = useState<string>('');
-  const [lastSavedContent, setLastSavedContent] = useState<string>('');
   const [pendingFix, setPendingFix] = useState<{ code: string; diagnosis: string; fix: string } | null>(null);
   const [testHistory, setTestHistory] = useState<string[]>([]);
-  
+
   // Real filesystem files list
   const [filesList, setFilesList] = useState<{ filename: string; size: number; updatedAt: string; type: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,7 +49,7 @@ export default function CodePage() {
   const [activeResearch, setActiveResearch] = useState<Artifact | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [mission, setMission] = useState<Mission | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'editing'>('saved');
+  const [sidePanel, setSidePanel] = useState<'outline' | 'problems' | 'git'>('outline');
 
   // New file modal state
   const [showNewFileModal, setShowNewFileModal] = useState(false);
@@ -53,30 +57,160 @@ export default function CodePage() {
 
   const { showToast } = useToast();
 
+  const terminalOutput = useMemo(
+    () => terminalLines.map((l) => l.content).join('\n'),
+    [terminalLines],
+  );
+
+  const updateTabContent = (filename: string, content: string) => {
+    setTabs((prev) => prev.map((t) => (t.filename === filename ? { ...t, content } : t)));
+  };
+  const setTabSaving = (filename: string, saving: boolean) => {
+    setTabs((prev) => prev.map((t) => (t.filename === filename ? { ...t, saving } : t)));
+  };
+  const markTabSaved = (filename: string, content: string) => {
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.filename === filename ? { ...t, lastSavedContent: content, content, saving: false, savedAt: new Date().toISOString() } : t,
+      ),
+    );
+  };
+  const addTab = (tab: LightIDETab) => {
+    setTabs((prev) => {
+      if (prev.some((t) => t.filename === tab.filename)) return prev;
+      return [...prev, tab];
+    });
+  };
+  const closeTab = (filename: string) => {
+    setTabs((prev) => prev.filter((t) => t.filename !== filename));
+    if (activeFile === filename) {
+      const remaining = tabs.filter((t) => t.filename !== filename);
+      setActiveFile(remaining[0]?.filename ?? '');
+    }
+  };
+
+  const activeTab = useMemo(() => tabs.find((t) => t.filename === activeFile) ?? null, [tabs, activeFile]);
+  const fileLang = useMemo(() => detectLanguage(activeFile), [activeFile]);
+  const outline = useMemo(() => (activeTab ? extractOutline(activeTab.content, fileLang.lang) : []), [activeTab, fileLang.lang]);
+  const problems: Problem[] = useMemo(() => extractProblems(terminalOutput, activeFile), [terminalOutput, activeFile]);
+
   const loadWorkspace = async () => {
     setIsLoading(true);
-    // Fetch settings
     const settings = await fetchSettingsAction();
     setAllowApiKeys(settings?.sandbox_allow_api_keys === 'true');
 
-    // Fetch active mission
     const activeMission = await fetchMissionState();
     if (activeMission) {
       setMission(activeMission);
-      // Sync retry count from mission failures if any
       const codeFailures = activeMission.failures?.filter(f => f.agentName === 'Code Agent');
       if (codeFailures) setRetryCount(codeFailures.length);
     }
 
-    // Fetch files
     let list = await fetchWorkspaceFilesAction();
     if (list.length === 0) {
-      // Seed default files
       const seeds: Record<string, string> = {
         'main.py': `# Core entry point\nimport feedback_clusters as fc\n\ndef run_pipeline():\n    print("Starting Cognitive Pipeline...")\n    print("Loading datasets...")\n    print("Pipeline run completed successfully.")\n\nif __name__ == "__main__":\n    run_pipeline()`,
         'feedback_clusters.py': `# Cognitive Debt Detection Script\n# Author: Supr CodeBot\nimport numpy as np\n\ndef analyze_feedback(data_path: str):\n    """\n    Analyzes ticket feedback to identify clusters.\n    """\n    print("Analyzing feedback embeddings...")\n    return {"status": "success", "clusters": 5}\n`,
-        'validation.py': `# Pytest Verification Suite\n# Author: QA Sentinel\nimport pytest\nfrom feedback_clusters import analyze_feedback\n\ndef test_analyze_feedback():\n    # Active sample verification\n    print("Running verification tests...")\n    result = analyze_feedback("sample_tickets.json")\n    assert result["status"] == "success"\n    print("Test validation.py PASSED.")\n\nif __name__ == "__main__":\n    test_analyze_feedback()`
+        'validation.py': `# Pytest Verification Suite\n# Author: QA Sentinel\nimport pytest\nfrom feedback_clusters import analyze_feedback\n\ndef test_analyze_feedback():\n    print("Running verification tests...")\n    result = analyze_feedback("sample_tickets.json")\n    assert result["status"] == "success"\n    print("Test validation.py PASSED.")\n\nif __name__ == "__main__":\n    test_analyze_feedback()`
       };
+
+      for (const [fname, content] of Object.entries(seeds)) {
+        await writeWorkspaceFileAction(fname, content);
+      }
+      list = await fetchWorkspaceFilesAction();
+    }
+    setFilesList(list);
+
+    // Open all files as tabs (lightweight — load content lazily on first select)
+    if (list.length > 0) {
+      const initialTabs: LightIDETab[] = await Promise.all(
+        list.map(async (f) => {
+          const content = await readWorkspaceFileAction(f.filename);
+          return {
+            filename: f.filename,
+            content,
+            lastSavedContent: content,
+            savedAt: new Date().toISOString(),
+            saving: false,
+          };
+        }),
+      );
+      setTabs(initialTabs);
+      const defaultFile = list.find(f => f.filename === 'main.py') || list[0];
+      setActiveFile(defaultFile.filename);
+    }
+    setIsLoading(false);
+  };
+
+  useEffect(() => {
+    loadWorkspace();
+  }, []);
+
+  const selectFile = async (filename: string) => {
+    setActiveFile(filename);
+    setPendingFix(null);
+    const existing = tabs.find((t) => t.filename === filename);
+    if (existing && existing.content === '') {
+      const content = await readWorkspaceFileAction(filename);
+      updateTabContent(filename, content);
+      setTabs((prev) => prev.map((t) => (t.filename === filename ? { ...t, content, lastSavedContent: content, savedAt: new Date().toISOString() } : t)));
+    }
+  };
+
+  const handleSaveFile = async (filenameArg?: string) => {
+    const filename = filenameArg ?? activeFile;
+    if (!filename) return;
+    const tab = tabs.find((t) => t.filename === filename);
+    if (!tab) return;
+    setTabSaving(filename, true);
+    try {
+      const res = await writeWorkspaceFileAction(filename, tab.content);
+      if (res.success) {
+        markTabSaved(filename, tab.content);
+        showToast(`${filename} saved to workspace! ✓`);
+        setTerminalLines(prev => [...prev, { id: Date.now(), type: 'output', content: `[Workspace Storage] Synchronized ${filename} with secure workspace.` }]);
+        const list = await fetchWorkspaceFilesAction();
+        setFilesList(list);
+      } else {
+        showToast(`Failed to save: ${res.error}`);
+        setTabSaving(filename, false);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to save: ${String(err)}`);
+      setTabSaving(filename, false);
+    }
+  };
+
+  const setTerminalLogsAction = (msg: string) => {
+    setTerminalLines(prev => [...prev, { id: Date.now(), type: 'output', content: msg }]);
+  };
+
+  const handleCreateFile = async () => {
+    if (!newFilename.trim()) return;
+    const name = newFilename.trim();
+    const defaultContent = `# New file: ${name}\n`;
+    await writeWorkspaceFileAction(name, defaultContent);
+    await loadWorkspace();
+    setActiveFile(name);
+    setShowNewFileModal(false);
+    setNewFilename('');
+    showToast(`File ${name} created in workspace!`);
+  };
+
+  const handleDeleteFile = async (filename: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm(`Are you sure you want to permanently delete ${filename}?`)) {
+      await deleteWorkspaceFileAction(filename);
+      showToast(`Deleted ${filename}`);
+      const list = await fetchWorkspaceFilesAction();
+      setFilesList(list);
+      closeTab(filename);
+      if (activeFile === filename && list.length > 0) {
+        setActiveFile(list[0].filename);
+      }
+    }
+  };
 
       for (const [fname, content] of Object.entries(seeds)) {
         await writeWorkspaceFileAction(fname, content);
@@ -176,11 +310,12 @@ export default function CodePage() {
 
   const handleRunTest = async () => {
     if (!activeFile || isRunning) return;
+    const tab = tabs.find((t) => t.filename === activeFile);
+    if (!tab) return;
     setIsRunning(true);
     setTerminalLines(prev => [...prev, { id: Date.now(), type: 'command', content: `python ${activeFile}` }]);
 
-    // Auto save
-    if (saveStatus !== 'saved') {
+    if (tab.content !== tab.lastSavedContent) {
       await handleSaveFile();
     }
 
@@ -241,18 +376,19 @@ export default function CodePage() {
   };
 
   const handleRollbackFile = () => {
-    setEditorContent(lastSavedContent);
-    setSaveStatus('saved');
+    if (!activeFile) return;
+    const tab = tabs.find((t) => t.filename === activeFile);
+    if (!tab) return;
+    updateTabContent(activeFile, tab.lastSavedContent);
     setPendingFix(null);
     showToast(`Rolled ${activeFile} back to last saved content`);
   };
 
   const handleApplyPendingFix = async () => {
     if (!pendingFix || !activeFile) return;
-    setEditorContent(pendingFix.code);
+    updateTabContent(activeFile, pendingFix.code);
     await writeWorkspaceFileAction(activeFile, pendingFix.code);
-    setLastSavedContent(pendingFix.code);
-    setSaveStatus('saved');
+    markTabSaved(activeFile, pendingFix.code);
     setPendingFix(null);
     showToast(`Applied Code Agent fix to ${activeFile}`);
   };
@@ -530,31 +666,15 @@ export default function CodePage() {
           </div>
         </aside>
 
-        {/* Middle Pane: Active Workspace Editor */}
-        <div className="flex-1 flex flex-col min-w-0 bg-background relative w-full border-r-4 border-primary">
-          <div className="flex border-b-4 border-primary bg-surface-variant h-10 overflow-x-auto custom-scrollbar shrink-0">
-            {filesList.map(file => (
-              <div 
-                key={file.filename}
-                onClick={() => selectFile(file.filename)}
-                className={`flex items-center space-x-2 px-4 border-r-4 border-primary font-body font-bold text-xs shrink-0 cursor-pointer ${activeFile === file.filename ? 'bg-background text-primary' : 'hover:bg-background text-on-surface-variant'}`}
-              >
-                <span>{file.filename}</span>
-                {saveStatus !== 'saved' && activeFile === file.filename && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                )}
-              </div>
-            ))}
-          </div>
-          
-          <div className="flex-1 flex flex-col relative overflow-hidden bg-surface-container-lowest">
+        {/* Middle Pane: Light IDE */}
+        <div className="flex-1 flex min-w-0 bg-background relative w-full border-r-4 border-primary">
+          <div className="flex-1 flex flex-col min-w-0">
             {pendingFix && (
               <div className="border-b-4 border-primary bg-primary-container p-3 flex flex-col gap-2 shrink-0">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="font-headline font-black uppercase text-xs text-primary">Code Agent fix pending review</h3>
                     <p className="font-body text-[11px] text-on-primary-container">{pendingFix.diagnosis} Fix: {pendingFix.fix}</p>
-                    <p className="font-mono text-[10px] mt-1">{lastSavedContent.split('\n').length} lines current · {pendingFix.code.split('\n').length} lines proposed</p>
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={handleApplyPendingFix} className="bg-primary text-on-primary border-2 border-primary px-3 py-1 font-headline font-bold uppercase text-[10px] hover:bg-tertiary">
@@ -567,37 +687,83 @@ export default function CodePage() {
                 </div>
               </div>
             )}
-            {/* Interactive textarea editor */}
-            <textarea
-              value={editorContent}
-              onChange={handleTextChange}
-              className="flex-1 p-4 font-mono text-xs leading-relaxed bg-surface-container-lowest text-on-surface focus:outline-none resize-none custom-scrollbar w-full"
-              placeholder="# Type code here..."
-              disabled={!activeFile}
+            <LightIDE
+              tabs={tabs}
+              activeFile={activeFile}
+              onSelectFile={selectFile}
+              onChangeContent={updateTabContent}
+              onSaveFile={handleSaveFile}
+              onCloseTab={closeTab}
+              onNewFile={() => setShowNewFileModal(true)}
+              onRunCode={() => handleRunTest()}
+              onLint={() => handleProjectCheck('lint')}
+              onBuild={() => handleProjectCheck('build')}
+              onDiagnoseFix={() => handleDiagnoseAndFix()}
+              ghostSuggestion={pendingFix}
+              onApplyGhost={handleApplyPendingFix}
+              onDismissGhost={() => setPendingFix(null)}
+              terminalOutput={terminalOutput}
             />
-            
-            {/* Save Toolbar */}
-            <div className="p-3 border-t-4 border-primary bg-surface-container-high flex justify-between items-center shrink-0">
-              <span className="font-mono text-[10px] text-on-surface-variant flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${saveStatus === 'saved' ? 'bg-tertiary' : 'bg-amber-500 animate-pulse'}`}></span>
-                {saveStatus === 'saved' ? 'Saved to workspace' : 'Unsaved modifications...'}
-              </span>
-              <button
-                onClick={handleSaveFile}
-                disabled={!activeFile}
-                className="bg-secondary text-on-secondary border-2 border-primary px-3 py-1 text-xs font-headline font-bold uppercase hover:bg-tertiary hover:text-on-tertiary transition-colors shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50"
-              >
-                Save File
-              </button>
-              <button
-                onClick={handleRollbackFile}
-                disabled={!activeFile || editorContent === lastSavedContent}
-                className="bg-background text-primary border-2 border-primary px-3 py-1 text-xs font-headline font-bold uppercase hover:bg-surface transition-colors shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50"
-              >
-                Rollback
-              </button>
-            </div>
           </div>
+
+          {/* Outline + Problems rail */}
+          <aside className="w-56 flex-none border-l-4 border-primary bg-background hidden xl:flex flex-col">
+            <div className="flex items-center border-b-4 border-primary bg-surface-variant">
+              {([
+                { id: 'outline' as const, label: 'Outline', icon: 'account_tree' },
+                { id: 'problems' as const, label: `Problems (${problems.length})`, icon: 'bug_report' },
+              ]).map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setSidePanel(tab.id)}
+                  className={`flex-1 px-2 h-8 border-r-2 border-primary last:border-r-0 font-headline font-black uppercase text-[10px] flex items-center justify-center gap-1 ${
+                    sidePanel === tab.id ? 'bg-background text-primary' : 'bg-surface text-on-surface-variant hover:bg-surface-container'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[12px]">{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              {sidePanel === 'outline' && (
+                <FileOutline
+                  symbols={outline}
+                  activeLine={1}
+                  onJump={(line) => {
+                    const ta = document.querySelector<HTMLTextAreaElement>('textarea');
+                    if (!ta || !activeTab) return;
+                    const before = activeTab.content.split('\n').slice(0, line - 1).join('\n');
+                    const offset = before.length + (line > 1 ? 1 : 0);
+                    ta.focus();
+                    ta.selectionStart = ta.selectionEnd = offset;
+                    ta.scrollTop = Math.max(0, (line - 3) * 18);
+                    ta.dispatchEvent(new Event('scroll'));
+                  }}
+                />
+              )}
+              {sidePanel === 'problems' && (
+                <ProblemsPanel
+                  problems={problems}
+                  onJump={(p) => {
+                    const ta = document.querySelector<HTMLTextAreaElement>('textarea');
+                    if (!ta || !activeTab) return;
+                    const lines = activeTab.content.split('\n');
+                    let offset = 0;
+                    for (let i = 0; i < Math.min(p.line - 1, lines.length); i += 1) {
+                      offset += lines[i].length + 1;
+                    }
+                    offset += Math.max(0, (p.column ?? 1) - 1);
+                    ta.focus();
+                    ta.selectionStart = ta.selectionEnd = offset;
+                    ta.scrollTop = Math.max(0, (p.line - 3) * 18);
+                    ta.dispatchEvent(new Event('scroll'));
+                  }}
+                  onClear={() => setTerminalLines([])}
+                />
+              )}
+            </div>
+          </aside>
         </div>
 
         {/* Right Pane: Terminal & Guidance */}
