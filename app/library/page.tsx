@@ -101,6 +101,54 @@ export default function LibraryPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  // Live wiring: subscribe to the mission event stream so newly
+  // produced research briefs and other deliverables show up in the
+  // Library tree without a manual refresh. We also poll on a slower
+  // cadence for workspace files (they're typically created in the
+  // Code Agent, which doesn't always emit a mission event).
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'open' | 'closed'>('connecting');
+  const [liveArtifactCount, setLiveArtifactCount] = useState(0);
+  const [lastLiveEvent, setLastLiveEvent] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL('/api/mission/stream', window.location.origin);
+    const source = new EventSource(url.toString());
+    setLiveStatus('connecting');
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const onMission = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data?.eventType === 'artifact' || data?.summary?.toLowerCase().includes('artifact')) {
+          setLastLiveEvent(new Date().toISOString());
+          setLiveArtifactCount((c) => c + 1);
+          void loadLibrary();
+        }
+      } catch {
+        // ignore
+      }
+    };
+    const onOpen = () => {
+      setLiveStatus('open');
+      // Slow workspace poll (every 30s) catches file system writes
+      // that don't go through the runtime (e.g. manual uploads).
+      pollTimer = setInterval(() => {
+        void loadLibrary();
+      }, 30000);
+    };
+    const onError = () => setLiveStatus('closed');
+    source.addEventListener('mission', onMission);
+    source.addEventListener('open', onOpen);
+    source.addEventListener('error', onError);
+    return () => {
+      source.removeEventListener('mission', onMission);
+      source.removeEventListener('open', onOpen);
+      source.removeEventListener('error', onError);
+      source.close();
+      if (pollTimer) clearInterval(pollTimer);
+      setLiveStatus('closed');
+    };
+  }, []);
+
   const selectFile = async (node: FileNode) => {
     setIsEditing(false);
     if (node.origin === 'workspace') {
@@ -236,6 +284,25 @@ export default function LibraryPage() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Universal Library Explorer" />
+      <div className="flex items-center gap-2 border-b-2 border-primary bg-surface-container px-3 py-1 text-[10px] font-mono shrink-0" role="status" aria-live="polite">
+        <span
+          className={`px-2 py-0.5 border-2 border-primary font-headline font-black uppercase text-[9px] ${
+            liveStatus === 'open' ? 'bg-tertiary text-on-tertiary' : liveStatus === 'connecting' ? 'bg-secondary text-on-error animate-pulse' : 'bg-error text-on-error'
+          }`}
+          title={`Library stream status: ${liveStatus}`}
+        >
+          <span className="material-symbols-outlined text-[10px] align-middle">sensors</span>
+          <span className="ml-1">{liveStatus === 'open' ? 'Live' : liveStatus === 'connecting' ? 'Connecting…' : 'Offline'}</span>
+        </span>
+        <span className="text-on-surface-variant" title="Live artifacts observed on the mission stream since this page loaded">
+          artifacts: {liveArtifactCount}
+        </span>
+        {lastLiveEvent && (
+          <span className="text-on-surface-variant" title="Last live event time">
+            last: {new Date(lastLiveEvent).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
 
 
       {/* 3-Pane Layout */}

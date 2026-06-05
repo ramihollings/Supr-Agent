@@ -764,7 +764,11 @@ test('LLM entry routes delegate to thinking-tolerant structured parsers', () => 
   assert.match(codeRoute, /runAgentRuntimeAction/);
   assert.match(codeRoute, /parseModelJson\(raw\)/);
   assert.match(skillLearning, /stripModelThinking\(raw\)/);
-  assert.match(actions, /stripModelThinking\(response\)\.trim\(\)/);
+  // The Supr Chat path no longer calls the LLM directly (it routes to
+  // Project Flow for substantive content), so there is no `response`
+  // to strip thinking tags from. Verify the skill-learning path is
+  // still using the helper, which is the only live consumer.
+  assert.match(skillLearning, /stripModelThinking\(/);
 });
 
 test('project flow registers native tools before runtime context and records routing failures', () => {
@@ -800,14 +804,17 @@ test('supr chat only routes explicit work requests into project flow', () => {
 
   assert.match(actions, /function shouldRouteSuprChatToProjectFlow/);
   assert.match(actions, /function buildDirectSuprChatResponse/);
-  assert.match(actions, /getActiveProvider\('supr'\)/);
+  // The new buildDirectSuprChatResponse dispatches substantive content
+  // straight into Project Flow (FIX 3) instead of asking the LLM for
+  // a chatbot reply, so it deliberately does NOT call getActiveProvider.
+  // We assert the routing contract instead:
+  assert.match(actions, /routeIntakeToProjectFlow/);
   assert.match(actions, /hasConfiguredModelProvider/);
-  assert.match(actions, /Do not create, route, queue, or claim to execute Project Flow work/);
-  assert.match(actions, /what are you currently working on/);
   assert.match(actions, /No agents are actively working right now/);
-  assert.match(actions, /Use action language like "build", "fix", "generate", "run"/);
+  assert.match(actions, /Active project: /);
   assert.match(actions, /routeIntakeToProjectFlow\(\{/);
   assert.match(actions, /chatMessageId\(\)/);
+  assert.match(actions, /I'm here\./);
   assert.doesNotMatch(actions, /`chat-\$\{Date\.now\(\)\}`/);
 });
 

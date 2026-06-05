@@ -2,7 +2,7 @@
 
 import { TopNav } from '@/components/TopNav';
 import { useToast } from '@/components/ToastProvider';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { fetchSkillsState, createSkillAction, deleteSkillAction } from '@/app/actions';
 
 interface Skill {
@@ -50,6 +50,12 @@ function SkillsPageContent() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // Live diffs: track the previous skill/lesson signature so the
+  // 5s poll can surface a toast when something new appears.
+  const [lastLessonCount, setLastLessonCount] = useState(0);
+  const [lastLessonAt, setLastLessonAt] = useState<string | null>(null);
+  const prevSkillIdsRef = useRef<Set<string>>(new Set());
+  const { showToast } = useToast();
 
   // Modal form states
   const [newSkill, setNewSkill] = useState({
@@ -62,17 +68,73 @@ function SkillsPageContent() {
   const loadSkills = async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
     const data = await fetchSkillsState();
-    if (data) setSkills(data);
+    if (data) {
+      // Diff against the previous snapshot so we can toast on new
+      // skills (excluding the initial load).
+      const nextIds = new Set(data.map((s) => s.id));
+      if (prevSkillIdsRef.current.size > 0) {
+        for (const s of data) {
+          if (!prevSkillIdsRef.current.has(s.id)) {
+            showToast(`New skill registered: ${s.name}`);
+          }
+        }
+      }
+      prevSkillIdsRef.current = nextIds;
+      setSkills(data);
+    }
     if (showLoading) setIsLoading(false);
+  };
+
+  // Poll the lesson count separately so the page can surface a toast
+  // when the SkillsLessonsPanel backend records a new lesson.
+  const pollLessons = async () => {
+    try {
+      const res = await fetch('/api/skills/lessons?summary=1', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      // The summary endpoint returns { skills: [{ name, count, ... }, ...] }
+      const total = Array.isArray(data?.skills) ? data.skills.reduce((s: number, e: any) => s + (e.count || 0), 0) : 0;
+      if (lastLessonCount > 0 && total > lastLessonCount) {
+        const added = total - lastLessonCount;
+        showToast(`${added} new skill lesson${added === 1 ? '' : 's'} learned`);
+        setLastLessonAt(new Date().toISOString());
+      }
+      setLastLessonCount(total);
+    } catch {
+      // ignore
+    }
   };
 
   useEffect(() => {
     loadSkills(true);
     const interval = setInterval(() => loadSkills(false), 5000);
-    return () => clearInterval(interval);
+    const lessonInterval = setInterval(pollLessons, 10000);
+    return () => {
+      clearInterval(interval);
+      clearInterval(lessonInterval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { showToast } = useToast();
+  const [lastEventAt, setLastEventAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL('/api/mission/stream', window.location.origin);
+    const source = new EventSource(url.toString());
+    const onMission = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data?.eventType === 'skill_lesson' || data?.summary?.toLowerCase().includes('lesson')) {
+          setLastEventAt(new Date().toISOString());
+        }
+      } catch { /* ignore */ }
+    };
+    source.addEventListener('mission', onMission);
+    return () => {
+      source.removeEventListener('mission', onMission);
+      source.close();
+    };
+  }, []);
 
   const handleCreate = async () => {
     if (!newSkill.name || !newSkill.description) {
@@ -115,6 +177,21 @@ function SkillsPageContent() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Agent Skills Registry" />
+      <div className="flex items-center gap-2 border-b-2 border-primary bg-surface-container px-3 py-1 text-[10px] font-mono shrink-0" role="status" aria-live="polite">
+        <span className="px-2 py-0.5 border-2 border-primary font-headline font-black uppercase text-[9px] bg-tertiary text-on-tertiary" title="Skills + lesson stream is live">
+          <span className="material-symbols-outlined text-[10px] align-middle">sensors</span>
+          <span className="ml-1">Live</span>
+        </span>
+        <span className="text-on-surface-variant" title="Total lessons recorded across all skills">
+          lessons: {lastLessonCount}
+        </span>
+        {lastEventAt && (
+          <span className="text-on-surface-variant" title="Last skill-related mission event">last event: {new Date(lastEventAt).toLocaleTimeString()}</span>
+        )}
+        {lastLessonAt && (
+          <span className="text-on-surface-variant" title="Last time a lesson delta was observed">last lesson: {new Date(lastLessonAt).toLocaleTimeString()}</span>
+        )}
+      </div>
 
       <main className="flex-1 p-6 md:p-10 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-6 border-b-4 border-primary pb-6">

@@ -32,7 +32,6 @@ import { getActiveProvider, invalidateProviderCache } from '@/lib/providers/mode
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
 import { DEFAULT_GEMINI_MODEL, OPENAI_COMPATIBLE_BASE_URLS } from '@/lib/providers/catalog';
 import { hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';
-import { stripModelThinking } from '@/lib/runtime/model-json';
 import { createAgentAction as createRuntimeAgentAction, fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
 import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
 import {

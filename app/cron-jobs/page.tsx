@@ -43,6 +43,48 @@ const INTERVAL_OPTIONS = [
   'Monthly on the 1st',
 ];
 
+// Compute the approximate time until the next tick of a cron
+// schedule from the human-readable interval string stored on the
+// job ("Hourly", "Every 5 minutes", etc.). This is purely a UI
+// countdown — the real scheduler runs server-side — but it gives
+// operators a sense of when to expect the next run.
+function computeNextRun(interval: string, nowMs: number): string {
+  const text = (interval || '').toLowerCase();
+  let totalMs = 60_000; // default: 1 minute
+  if (text.includes('hourly')) totalMs = 60 * 60_000;
+  else if (text.includes('daily')) totalMs = 24 * 60 * 60_000;
+  else if (text.includes('weekly')) totalMs = 7 * 24 * 60 * 60_000;
+  else if (text.includes('monthly')) totalMs = 30 * 24 * 60 * 60_000;
+  else {
+    const m = text.match(/every\s+(\d+)\s*(second|sec|s|minute|min|m|hour|hr|h)/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      const unit = m[2];
+      if (/^s/.test(unit)) totalMs = n * 1000;
+      else if (/^m/.test(unit)) totalMs = n * 60_000;
+      else if (/^h/.test(unit)) totalMs = n * 60 * 60_000;
+    }
+  }
+  // Snap to the next multiple of `totalMs` after the current tick so
+  // multiple schedules show consistent boundaries.
+  const bucket = Math.floor(nowMs / totalMs) * totalMs;
+  const next = bucket + totalMs;
+  const diff = Math.max(0, next - nowMs);
+  return formatDuration(diff);
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return '<1s';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m < 60) return r ? `${m}m ${r}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm ? `${h}h ${rm}m` : `${h}h`;
+}
+
 export default function CronJobsPage() {
   const [crons, setCrons] = useState<CronJob[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -112,6 +154,41 @@ export default function CronJobsPage() {
     return () => { active = false; };
   }, []);
 
+  // Live ticker: a 1s interval that re-renders any "next run in X"
+  // countdowns, and a 30s poll that re-fetches the schedule table.
+  // Also subscribe to the mission SSE stream so schedule changes
+  // (added/removed/triggered) show up immediately instead of waiting
+  // for the 30s poll.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
+  useEffect(() => {
+    const poll = setInterval(() => {
+      void loadCrons();
+    }, 30000);
+    return () => clearInterval(poll);
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL('/api/mission/stream', window.location.origin);
+    const source = new EventSource(url.toString());
+    const onMission = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const text = `${data?.summary || ''} ${data?.eventType || ''}`.toLowerCase();
+        if (text.includes('cron') || text.includes('schedule') || text.includes('trigger')) {
+          void loadCrons();
+        }
+      } catch { /* ignore */ }
+    };
+    source.addEventListener('mission', onMission);
+    return () => {
+      source.removeEventListener('mission', onMission);
+      source.close();
+    };
+  }, []);
   const { showToast } = useToast();
 
   const handleToggle = async (id: string, currentStatus: string, name: string) => {
@@ -208,6 +285,14 @@ export default function CronJobsPage() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Scheduled Automations" />
+      <div className="flex items-center gap-2 border-b-2 border-primary bg-surface-container px-3 py-1 text-[10px] font-mono shrink-0" role="status" aria-live="polite">
+        <span className="px-2 py-0.5 border-2 border-primary font-headline font-black uppercase text-[9px] bg-tertiary text-on-tertiary" title="Cron schedules tick every second; schedules are re-fetched every 30s and on mission events">
+          <span className="material-symbols-outlined text-[10px] align-middle">schedule</span>
+          <span className="ml-1">Live Ticker</span>
+        </span>
+        <span className="text-on-surface-variant">{crons.length} schedules</span>
+        {now && <span className="text-on-surface-variant">now: {new Date(now).toLocaleTimeString()}</span>}
+      </div>
 
       <main className="flex-1 p-6 md:p-12 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6 border-b-4 border-primary pb-6">
@@ -276,6 +361,15 @@ export default function CronJobsPage() {
                         <span className="bg-surface border-2 border-primary px-2 py-0.5 font-mono text-[10px] text-primary flex items-center gap-1 font-bold">
                           <span className="material-symbols-outlined text-xs">loop</span> {job.interval}
                         </span>
+                        {job.status === 'Active' && (
+                          <span
+                            className="bg-secondary-container border-2 border-secondary px-2 py-0.5 font-mono text-[10px] text-on-secondary-container flex items-center gap-1 font-bold"
+                            title="Approximate time until the next tick, computed from the configured interval. Sub-minute schedules round up to the nearest second."
+                          >
+                            <span className="material-symbols-outlined text-xs">timer</span>
+                            next: {computeNextRun(job.interval, now)}
+                          </span>
+                        )}
                       </div>
 
                       <p className="font-body text-sm text-on-surface-variant border-l-4 border-primary pl-3 mt-1">

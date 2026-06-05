@@ -1,7 +1,7 @@
 "use client";
 
 import { TopNav } from '@/components/TopNav';
-import { useState, useEffect, useRef, startTransition, Suspense, useCallback } from 'react';
+import { useState, useEffect, useRef, startTransition, Suspense } from 'react';
 import { fetchOrchestrationFeed, fetchAgentStatuses, fetchMissionsAction } from '@/app/actions';
 import { Mission } from '@/types';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -50,12 +50,19 @@ function OrchestrationContent() {
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // Live stream + last event time. The SSE subscription is the
+  // primary feed; the persisted-state poll remains as a 30s safety
+  // net for events the stream may have missed (e.g. while the
+  // page was hidden / disconnected).
+  const [sseStatus, setSseStatus] = useState<'connecting' | 'open' | 'closed'>('connecting');
+  const [sseLastEventAt, setSseLastEventAt] = useState<string | null>(null);
+  const [liveEventCount, setLiveEventCount] = useState(0);
 
   // Filters
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  
+
   const [now, setNow] = useState<number>(Date.now());
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -72,7 +79,46 @@ function OrchestrationContent() {
     return () => clearInterval(interval);
   }, []);
 
-  const loadData = useCallback(async () => {
+  // Subscribe to the mission SSE stream and refresh the feed the
+  // moment a new event arrives. The persisted-state poll below
+  // remains as a 30s safety net (it picks up anything the stream
+  // missed while the page was hidden / disconnected).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL('/api/mission/stream', window.location.origin);
+    if (selectedProjectId !== 'all') url.searchParams.set('id', selectedProjectId);
+    const source = new EventSource(url.toString());
+    setSseStatus('connecting');
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const refreshSoon = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        void loadData();
+      }, 300);
+    };
+    const onMission = () => {
+      setSseLastEventAt(new Date().toISOString());
+      setLiveEventCount((c) => c + 1);
+      refreshSoon();
+    };
+    source.addEventListener('open', () => setSseStatus('open'));
+    source.addEventListener('error', () => setSseStatus('closed'));
+    source.addEventListener('mission', onMission);
+    return () => {
+      source.removeEventListener('mission', onMission);
+      source.close();
+      setSseStatus('closed');
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectId]);
+
+  // The React Compiler handles memoization for us here, so we avoid
+  // a manual useCallback (which conflicts with the compiler's
+  // preservation pass). `loadData` is intentionally redefined on
+  // every render so the SSE + safety-net effects always see the
+  // current `selectedProjectId`.
+  const loadData = async () => {
     const [feed, statuses, missionList] = await Promise.all([
       fetchOrchestrationFeed(selectedProjectId === 'all' ? undefined : selectedProjectId),
       fetchAgentStatuses(),
@@ -82,18 +128,24 @@ function OrchestrationContent() {
     setAgentStatuses(statuses);
     setMissions(missionList);
     setIsLoading(false);
-  }, [selectedProjectId]);
+  };
 
   useEffect(() => {
     void loadData();
+    // loadData intentionally is not memoized (see comment above) so
+    // the React Compiler can preserve the rest of the component.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadData]);
 
-  // Poll persisted orchestration state. The feed must reflect stored runtime events only.
+  // Safety-net poll for events the SSE stream may have missed while
+  // the page was hidden. 30s keeps the feed fresh without competing
+  // with the SSE-driven refresh path.
   useEffect(() => {
     const interval = setInterval(() => {
       void loadData();
-    }, 8000);
+    }, 30000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadData]);
 
   const handleProjectFilterChange = (id: string) => {
@@ -135,6 +187,22 @@ function OrchestrationContent() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="Observance & Activity Hub" />
+      <div className="flex items-center gap-2 border-b-2 border-primary bg-surface-container px-3 py-1 text-[10px] font-mono shrink-0" role="status" aria-live="polite">
+        <span
+          className={`px-2 py-0.5 border-2 border-primary font-headline font-black uppercase text-[9px] ${
+            sseStatus === 'open' ? 'bg-tertiary text-on-tertiary' : sseStatus === 'connecting' ? 'bg-secondary text-on-error animate-pulse' : 'bg-error text-on-error'
+          }`}
+          title={`Mission SSE stream status: ${sseStatus}`}
+        >
+          <span className="material-symbols-outlined text-[10px] align-middle">sensors</span>
+          <span className="ml-1">{sseStatus === 'open' ? 'Live' : sseStatus === 'connecting' ? 'Connecting…' : 'Offline'}</span>
+        </span>
+        <span className="text-on-surface-variant" title="Events seen on the stream since this page loaded">events: {liveEventCount}</span>
+        {sseLastEventAt && (
+          <span className="text-on-surface-variant" title="Last event time">last: {new Date(sseLastEventAt).toLocaleTimeString()}</span>
+        )}
+        <span className="text-on-surface-variant">{events.length} total · {agentStatuses.filter((a) => a.status === 'Working').length} working agents</span>
+      </div>
 
       <main className="flex-1 flex overflow-hidden">
         {/* LEFT: Unified scannable timeline feed */}

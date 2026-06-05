@@ -73,6 +73,45 @@ export default function AgentsPage() {
     void loadAgents();
   }, [loadAgents]);
 
+  // Live: refresh when the mission stream reports a new blueprint or
+  // group change. The blueprint service runs as part of the runtime,
+  // so a freshly-spawned agent usually shows up here within a second
+  // of being created.
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'open' | 'closed'>('connecting');
+  const [liveEventCount, setLiveEventCount] = useState(0);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL('/api/mission/stream', window.location.origin);
+    const source = new EventSource(url.toString());
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const refresh = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void loadAgents();
+      }, 300);
+      setLiveEventCount((c) => c + 1);
+    };
+    const onMission = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const text = `${data?.summary || ''} ${data?.eventType || ''}`.toLowerCase();
+        if (text.includes('blueprint') || text.includes('agent') || text.includes('group')) {
+          refresh();
+        }
+      } catch { /* ignore */ }
+    };
+    source.addEventListener('open', () => setLiveStatus('open'));
+    source.addEventListener('error', () => setLiveStatus('closed'));
+    source.addEventListener('mission', onMission);
+    return () => {
+      source.removeEventListener('mission', onMission);
+      source.close();
+      setLiveStatus('closed');
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const { showToast } = useToast();
 
   const persistAgentPolicy = async (agentId: string, next: any) => {
@@ -142,6 +181,19 @@ export default function AgentsPage() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden relative">
       <TopNav title="AI Team Manager" />
+      <div className="flex items-center gap-2 border-b-2 border-primary bg-surface-container px-3 py-1 text-[10px] font-mono shrink-0" role="status" aria-live="polite">
+        <span
+          className={`px-2 py-0.5 border-2 border-primary font-headline font-black uppercase text-[9px] ${
+            liveStatus === 'open' ? 'bg-tertiary text-on-tertiary' : liveStatus === 'connecting' ? 'bg-secondary text-on-error animate-pulse' : 'bg-error text-on-error'
+          }`}
+          title={`Agent registry stream: ${liveStatus}`}
+        >
+          <span className="material-symbols-outlined text-[10px] align-middle">sensors</span>
+          <span className="ml-1">{liveStatus === 'open' ? 'Live' : liveStatus === 'connecting' ? 'Connecting…' : 'Offline'}</span>
+        </span>
+        <span className="text-on-surface-variant">events: {liveEventCount}</span>
+        <span className="text-on-surface-variant">{agents.length} agents</span>
+      </div>
 
       <main className="flex-1 p-6 md:p-12 overflow-y-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-6 border-b-4 border-primary pb-6">

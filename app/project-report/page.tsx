@@ -57,14 +57,18 @@ export default function MissionPacketPage() {
     url.searchParams.set('id', projectId);
     const source = new EventSource(url.toString());
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    
+
     const handleMissionEvent = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         void load(projectId);
       }, 400);
+      setSseLastEventAt(new Date().toISOString());
+      setSseEventCount((c) => c + 1);
     };
-    
+
+    source.addEventListener('open', () => setSseStatus('open'));
+    source.addEventListener('error', () => setSseStatus('closed'));
     source.addEventListener('mission', handleMissionEvent);
     return () => {
       source.removeEventListener('mission', handleMissionEvent);
@@ -72,6 +76,10 @@ export default function MissionPacketPage() {
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [projectId]);
+
+  const [sseStatus, setSseStatus] = useState<'connecting' | 'open' | 'closed'>('connecting');
+  const [sseLastEventAt, setSseLastEventAt] = useState<string | null>(null);
+  const [sseEventCount, setSseEventCount] = useState(0);
 
   const handleCopyBrief = () => {
     if (!mission) return;
@@ -173,6 +181,19 @@ export default function MissionPacketPage() {
   return (
     <div className="flex-1 md:ml-64 flex flex-col min-h-screen bg-surface-container overflow-hidden">
       <TopNav title="Handover Package" />
+      <div className="flex items-center gap-2 border-b-2 border-primary bg-surface-container px-3 py-1 text-[10px] font-mono shrink-0" role="status" aria-live="polite">
+        <span
+          className={`px-2 py-0.5 border-2 border-primary font-headline font-black uppercase text-[9px] ${
+            sseStatus === 'open' ? 'bg-tertiary text-on-tertiary' : sseStatus === 'connecting' ? 'bg-secondary text-on-error animate-pulse' : 'bg-error text-on-error'
+          }`}
+          title={`Handover live stream: ${sseStatus}`}
+        >
+          <span className="material-symbols-outlined text-[10px] align-middle">sensors</span>
+          <span className="ml-1">{sseStatus === 'open' ? 'Live' : sseStatus === 'connecting' ? 'Connecting…' : 'Offline'}</span>
+        </span>
+        <span className="text-on-surface-variant">events: {sseEventCount}</span>
+        {sseLastEventAt && <span className="text-on-surface-variant">last: {new Date(sseLastEventAt).toLocaleTimeString()}</span>}
+      </div>
       
       <main className="flex-1 overflow-y-auto p-6 md:p-12 max-w-6xl mx-auto w-full space-y-10">
         
