@@ -67,10 +67,10 @@
       "name": "Filesystem",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${env:SUPR_FILESYSTEM_ROOT|default:/workspace}"],
       "required_tier": "Edit",
       "env_keys": [],
-      "description": "Governed file-system surface rooted at /workspace for the Code Agent. Scoped read/write/list within the workspace boundary.",
+      "description": "Governed file-system surface for the Code Agent. Rooted at $SUPR_FILESYSTEM_ROOT (default: /workspace). Operators can override the root by setting the env var before launching Supr.",
       "enabled": true
     },
     {
@@ -83,6 +83,16 @@
       "env_keys": ["BRAVE_API_KEY"],
       "description": "Standard MCP server for Brave Search. Lets agents run web queries. Requires a BRAVE_API_KEY.",
       "enabled": true
+    },
+    {
+      "id": "context7-mcp",
+      "name": "Context7 (HTTP example)",
+      "transport": "http",
+      "endpoint": "${env:CONTEXT7_MCP_URL|default:https://mcp.context7.com/mcp}",
+      "required_tier": "Observe",
+      "env_keys": ["CONTEXT7_API_KEY"],
+      "description": "Reference HTTP transport example. Context7 serves up-to-date library docs. Operators can override the URL via CONTEXT7_MCP_URL and supply CONTEXT7_API_KEY for auth.",
+      "enabled": false
     }
   ]
 }

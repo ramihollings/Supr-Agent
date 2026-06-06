@@ -34,6 +34,33 @@ export type TeamSlot = 'qa' | 'planner' | 'research' | 'supervisor' | 'extra';
 
 export type TeamCoordinationMode = 'pipeline' | 'chain';
 
+// Lightweight retry helper for transient LLM failures. We retry
+// once on any error that looks like a transient provider hiccup
+// (timeout, 5xx, network reset). The retry waits `baseMs` (default
+// 800ms) and doubles. We do NOT retry on parse errors, validation
+// errors, or explicit 4xx responses — those won't get better.
+async function withProviderRetry<T>(fn: () => Promise<T>, opts: { retries?: number; baseMs?: number; label?: string } = {}): Promise<T> {
+  const retries = opts.retries ?? 1;
+  const baseMs = opts.baseMs ?? 800;
+  let attempt = 0;
+  let lastErr: any;
+  while (attempt <= retries) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      const message = String(err?.message ?? err ?? '');
+      const transient = /timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|429|5\d\d|rate.?limit|overloaded|service.?unavailable/i.test(message);
+      if (!transient || attempt === retries) break;
+      const wait = baseMs * Math.pow(2, attempt);
+      console.warn(`[TeamCoordinator] ${opts.label ?? 'provider'} call failed (attempt ${attempt + 1}/${retries + 1}), retrying in ${wait}ms: ${message.slice(0, 160)}`);
+      await new Promise((r) => setTimeout(r, wait));
+      attempt += 1;
+    }
+  }
+  throw lastErr;
+}
+
 export interface TeamMemberSpec {
   slot: TeamSlot;
   name: string;
@@ -226,9 +253,12 @@ async function runOneMember(
       `2. <context>key=value pairs, one per line, that you want to write to shared team context</context>`,
       `Limit the total response to 6000 characters.`,
     ].join('\n');
-    const response = await provider.generateContent(prompt, {
-      systemInstruction: `You are ${spec.name}, acting as the ${spec.role}. Provide a detailed, premium solution. Only respond with original, high-quality work.`,
-    });
+    const response = await withProviderRetry(
+      () => provider.generateContent(prompt, {
+        systemInstruction: `You are ${spec.name}, acting as the ${spec.role}. Provide a detailed, premium solution. Only respond with original, high-quality work.`,
+      }),
+      { label: `member:${spec.name}` },
+    );
     output = response;
     // Parse the structured payload. The parser is tolerant of
     // JSON, fenced JSON, legacy <work>/<context> tags, and
@@ -340,54 +370,83 @@ export class TeamCoordinator {
       }
     }
 
-    // Hire + run members
-    const ordered = input.coordinationMode === 'chain'
-      ? [input.members.find((m) => m.slot === 'planner')!, ...input.members.filter((m) => m.slot !== 'planner')]
-      : input.members;
-    // Run every member concurrently. `Promise.allSettled` is the
-    // right shape here — we want every member to complete (or fail)
-    // independently and we aggregate at the end. The previous
-    // sequential `for` loop serialized every LLM call, so a 6-member
-    // team took ~6x longer than necessary. Each member's own
-    // try/catch inside `runOneMember` ensures one bad member can't
-    // take down the others.
-    const settled = await Promise.allSettled(
-      ordered.map(async (m) => {
-        const memberId = (await dbClient.query<{ member_id: string }>(
-          `SELECT member_id FROM Team_Members WHERE team_id = ? AND name = ? AND slot = ? LIMIT 1`,
-          [input.teamId, m.name, m.slot],
-        ) as any[])[0]?.member_id;
-        if (!memberId) {
-          return { ok: false as const, error: `No member_id for ${m.name} (${m.slot}).` };
-        }
-        await AgentLifecycleManager.hireAgent(
-          input.missionId,
-          memberId,
-          m.name,
-          m.role,
-          m.permissionTier,
-          m.tools,
-          `Team member of '${input.name}': ${m.task}`,
-        ).catch(() => 'unavailable');
-        try {
-          const result = await runOneMember({ ...m, teamId: input.teamId, missionId: input.missionId, memberId });
-          return { ok: true as const, result, memberId };
-        } finally {
-          await AgentLifecycleManager.terminateAgent(input.missionId, memberId, m.name).catch(() => {});
-        }
-      }),
-    );
-    const memberResults: Array<{ memberId: string; slot: TeamSlot; name: string; role: string; status: 'completed' | 'failed'; output: string; error?: string; contextKeysWritten: string[] }> = [];
-    let teamStatus: 'completed' | 'failed' = 'completed';
-    for (const s of settled) {
-      if (s.status === 'fulfilled' && s.value.ok) {
-        memberResults.push(s.value.result);
-        if (s.value.result.status === 'failed') teamStatus = 'failed';
-      } else if (s.status === 'fulfilled' && !s.value.ok) {
-        teamStatus = 'failed';
-      } else {
-        teamStatus = 'failed';
+    // Coordination mode:
+    //   - 'pipeline' (default): every member fires in parallel.
+    //   - 'chain': the Planner member runs FIRST, alone, and the
+    //     rest of the team starts only after the Planner writes
+    //     to the shared Team_Context. This is the mode you want
+    //     when downstream work depends on an upfront plan; in
+    //     'pipeline' mode every member would have started with
+    //     empty context and made the planner's work irrelevant.
+    const planner = input.members.find((m) => m.slot === 'planner');
+    const others = input.members.filter((m) => m.slot !== 'planner');
+    // runMemberOnce: hire + run a single member, return a
+    // normalized result. Used for both 'pipeline' (concurrent
+    // fan-out) and 'chain' (planner-first gating) modes.
+    const runMemberOnce = async (m: typeof input.members[number]) => {
+      const memberId = (await dbClient.query<{ member_id: string }>(
+        `SELECT member_id FROM Team_Members WHERE team_id = ? AND name = ? AND slot = ? LIMIT 1`,
+        [input.teamId, m.name, m.slot],
+      ) as any[])[0]?.member_id;
+      if (!memberId) {
+        return { ok: false as const, error: `No member_id for ${m.name} (${m.slot}).` };
       }
+      await AgentLifecycleManager.hireAgent(
+        input.missionId,
+        memberId,
+        m.name,
+        m.role,
+        m.permissionTier,
+        m.tools,
+        `Team member of '${input.name}': ${m.task}`,
+      ).catch(() => 'unavailable');
+      try {
+        const result = await runOneMember({ ...m, teamId: input.teamId, missionId: input.missionId, memberId });
+        return { ok: true as const, result, memberId };
+      } finally {
+        await AgentLifecycleManager.terminateAgent(input.missionId, memberId, m.name).catch(() => {});
+      }
+    };
+    // Helper: aggregate a list of settled-runner results into the
+    // canonical `memberResults` array and update the team status.
+    const collect = (settled: Awaited<ReturnType<typeof runMemberOnce>>[]) => {
+      const out: Array<{ memberId: string; slot: TeamSlot; name: string; role: string; status: 'completed' | 'failed'; output: string; error?: string; contextKeysWritten: string[] }> = [];
+      let teamStatus: 'completed' | 'failed' = 'completed';
+      for (const s of settled) {
+        if (s && 'ok' in s && s.ok) {
+          out.push(s.result);
+          if (s.result.status === 'failed') teamStatus = 'failed';
+        } else {
+          teamStatus = 'failed';
+        }
+      }
+      return { out, teamStatus };
+    };
+    let memberResults: Array<{ memberId: string; slot: TeamSlot; name: string; role: string; status: 'completed' | 'failed'; output: string; error?: string; contextKeysWritten: string[] }> = [];
+    let teamStatus: 'completed' | 'failed' = 'completed';
+
+    if (input.coordinationMode === 'chain' && planner) {
+      // Chain mode: run the planner first, then fire the rest in
+      // parallel. The rest read the shared Team_Context for the
+      // planner's output, so the upstream plan is visible to
+      // every downstream member before they start.
+      const plannerSettled = await runMemberOnce(planner);
+      const plannerCollected = collect([plannerSettled]);
+      memberResults.push(...plannerCollected.out);
+      if (plannerCollected.teamStatus === 'failed') teamStatus = 'failed';
+
+      const restSettled = await Promise.allSettled(others.map((m) => runMemberOnce(m)));
+      const rest: any[] = restSettled.map((s) => (s.status === 'fulfilled' ? s.value : { ok: false as const, error: 'promise rejected' }));
+      const restCollected = collect(rest);
+      memberResults.push(...restCollected.out);
+      if (restCollected.teamStatus === 'failed') teamStatus = 'failed';
+    } else {
+      // Pipeline mode: every member fires concurrently.
+      const settled = await Promise.allSettled(input.members.map((m) => runMemberOnce(m)));
+      const results: any[] = settled.map((s) => (s.status === 'fulfilled' ? s.value : { ok: false as const, error: 'promise rejected' }));
+      const collected = collect(results);
+      memberResults = collected.out;
+      teamStatus = collected.teamStatus;
     }
 
     // Reduce: supervisor synthesizes a final team report
@@ -420,20 +479,23 @@ export class TeamCoordinator {
       try {
         const provider = await getActiveProvider('sub');
         const brief = await readContext(input.teamId);
-        const response = await provider.generateContent(
-          [
-            `You are the Supr team supervisor. The team has just completed its work.`,
-            `Produce a 4-6 sentence team report that highlights: what each member delivered, `,
-            `where they disagreed (if any), and what the final recommendation is for the caller.`,
-            `Do NOT add a work or context block; just the report.`,
-            ``,
-            `## Shared brief`,
-            brief['brief'] ?? '',
-            ``,
-            `## Per-member output`,
-            memberResults.map((m) => `### ${m.name}\n${m.status === 'completed' ? m.output : `[failed] ${m.error}`}`).join('\n\n'),
-          ].join('\n'),
-          { systemInstruction: 'You are the Supr team supervisor. Be concise and decisive.' },
+        const response = await withProviderRetry(
+          () => provider.generateContent(
+            [
+              `You are the Supr team supervisor. The team has just completed its work.`,
+              `Produce a 4-6 sentence team report that highlights: what each member delivered, `,
+              `where they disagreed (if any), and what the final recommendation is for the caller.`,
+              `Do NOT add a work or context block; just the report.`,
+              ``,
+              `## Shared brief`,
+              brief['brief'] ?? '',
+              ``,
+              `## Per-member output`,
+              memberResults.map((m) => `### ${m.name}\n${m.status === 'completed' ? m.output : `[failed] ${m.error}`}`).join('\n\n'),
+            ].join('\n'),
+            { systemInstruction: 'You are the Supr team supervisor. Be concise and decisive.' },
+          ),
+          { label: 'supervisor:reduce' },
         );
         if (response && response.trim().length > 0) {
           coordinatorSummary = [

@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import crypto from 'node:crypto';
 import type { McpServerEntry } from './registry';
+import { expandMcpArgs } from './registry';
 
 export interface StdioToolDescriptor {
   name: string;
@@ -116,9 +117,13 @@ export class StdioMcpSession {
     // it. Otherwise the command is invoked directly.
     const needsTsx = (this.server.args || []).some((a) => a.endsWith('.ts'));
     const command = needsTsx && existsSync(TSX_BIN) ? TSX_BIN : this.server.command;
+    // Expand env/default placeholders so operators can pin
+    // filesystem roots, docker volumes, etc. without editing the
+    // config file. See expandMcpArgs for the supported syntax.
+    const expandedArgs = expandMcpArgs(this.server.args);
     const args = needsTsx && existsSync(TSX_BIN)
-      ? [...(this.server.args || [])]
-      : (this.server.args || []);
+      ? [...(expandedArgs || [])]
+      : (expandedArgs || []);
     this.child = spawn(command, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.startedAt = Date.now();
     this.child.stdout.on('data', (data) => this.handleStdout(data.toString()));

@@ -222,3 +222,98 @@ test('Composio Settings card has a Test Connection button that hits the test rou
   assert.match(testRoute, /composioBridge\.listApps/);
   assert.match(testRoute, /appCount/);
 });
+
+test('Filesystem-mcp root is configurable via $SUPR_FILESYSTEM_ROOT env var', () => {
+  const cfg = JSON.parse(read('config/mcp-servers.json'));
+  const fs = cfg.servers.find((s) => s.id === 'filesystem-mcp');
+  assert.ok(fs, 'filesystem-mcp entry must exist');
+  // The last arg is the env|default placeholder, not a hard-coded path.
+  const last = fs.args[fs.args.length - 1];
+  assert.match(last, /\$\{env:SUPR_FILESYSTEM_ROOT\|default:\/workspace\}/);
+  // The registry must support the placeholder expansion
+  const reg = read('lib/mcp/registry.ts');
+  assert.match(reg, /expandMcpArgs/);
+  assert.match(reg, /\$\{env:([A-Z0-9_]+)/);
+  // And stdio.ts must use the expanded args
+  const stdio = read('lib/mcp/stdio.ts');
+  assert.match(stdio, /expandMcpArgs/);
+});
+
+test('MCP registry includes an HTTP transport example (context7)', () => {
+  const cfg = JSON.parse(read('config/mcp-servers.json'));
+  const c7 = cfg.servers.find((s) => s.id === 'context7-mcp');
+  assert.ok(c7, 'context7-mcp HTTP example must exist');
+  assert.equal(c7.transport, 'http');
+  assert.match(c7.endpoint, /\$\{env:CONTEXT7_MCP_URL/);
+  assert.equal(c7.enabled, false);
+});
+
+test('chain coordination mode actually gates the rest on the planner', () => {
+  const coord = read('lib/services/team-coordinator.ts');
+  // The conditional that picks the planner
+  assert.match(coord, /coordinationMode === 'chain'/);
+  assert.match(coord, /planner = input\.members\.find\(\(m\) => m\.slot === 'planner'\)/);
+  // The await on runMemberOnce for the planner BEFORE the rest
+  assert.match(coord, /await runMemberOnce\(planner\)/);
+  // The rest of the team then runs in parallel
+  assert.match(coord, /Promise\.allSettled\(others\.map/);
+});
+
+test('withProviderRetry retries transient errors but rethrows persistent ones', () => {
+  const coord = read('lib/services/team-coordinator.ts');
+  assert.match(coord, /async function withProviderRetry/);
+  // Recognises transient signals
+  assert.match(coord, /ETIMEDOUT|ECONNRESET|5\\d\\d|overloaded/);
+  // Uses exponential backoff
+  assert.match(coord, /baseMs \* Math\.pow\(2, attempt\)/);
+  // And is wired to both call sites
+  const withRetryCallCount = (coord.match(/withProviderRetry\(/g) || []).length;
+  assert.ok(withRetryCallCount >= 2, `Expected >= 2 withProviderRetry calls, found ${withRetryCallCount}`);
+});
+
+test('Per-team cancel route marks the run cancelled and publishes team_failed', () => {
+  const route = read('app/api/teams/[teamId]/cancel/route.ts');
+  assert.match(route, /requireApiAuth/);
+  assert.match(route, /UPDATE Team_Runs/);
+  assert.match(route, /SET status = 'cancelled'/);
+  assert.match(route, /notifyTeamEvent/);
+  // Idempotent: a second cancel on a terminal team is a no-op
+  assert.match(route, /alreadyTerminal/);
+});
+
+test('MCP audit log: per-invocation table, fire-and-forget writer, reader', () => {
+  const migration = read('lib/database/migrations/011__mcp_invocations.ts');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS MCP_Invocations/);
+  // Indexes for server + mission lookups
+  assert.match(migration, /idx_mcp_inv_server/);
+  assert.match(migration, /idx_mcp_inv_mission/);
+  // Migration registered
+  const registry = read('lib/database/migrations_registry.ts');
+  assert.match(registry, /addMcpInvocations/);
+  // Writer exists and is fire-and-forget
+  const audit = read('lib/mcp/audit.ts');
+  assert.match(audit, /recordMcpInvocation/);
+  assert.match(audit, /logMcpAudit/);
+  // Reader exists
+  assert.match(audit, /queryMcpAudit/);
+  // And the registry wraps every forwardToMcpServer call
+  const reg = read('lib/mcp/registry.ts');
+  assert.match(reg, /forwardToMcpServer/);
+  assert.match(reg, /recordMcpInvocation/);
+});
+
+test('Spawn Team UI on /teams page: form + spawn route + nav link', () => {
+  const page = read('app/teams/page.tsx');
+  // The form component
+  assert.match(page, /SpawnTeamForm/);
+  // The form is opened via a New button
+  assert.match(page, /setShowSpawn\(true\)/);
+  // Submits to /api/teams/spawn
+  assert.match(page, /\/api\/teams\/spawn/);
+  // The route exists + calls the tool
+  const route = read('app/api/teams/spawn/route.ts');
+  assert.match(route, /toolRegistry\.getTool\('spawn_subagent_team'\)/);
+  assert.match(route, /requireApiAuth/);
+  // Cancel button for running teams
+  assert.match(page, /api\/teams\/.+\/cancel/);
+});

@@ -44,6 +44,7 @@ export default function TeamsPage() {
   const [context, setContext] = useState<TeamContextEntry[]>([]);
   const [messages, setMessages] = useState<TeamMessage[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(true);
+  const [showSpawn, setShowSpawn] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [mission, setMission] = useState<Mission | null>(null);
   const [sseStatus, setSseStatus] = useState<'connecting' | 'open' | 'closed'>('connecting');
@@ -175,10 +176,31 @@ export default function TeamsPage() {
         <aside className="w-72 flex-none border-r-4 border-primary bg-background overflow-y-auto custom-scrollbar">
           <div className="p-3 border-b-4 border-primary bg-surface-variant flex items-center justify-between">
             <span className="font-headline font-black uppercase text-sm tracking-widest">Teams</span>
-            <button onClick={() => void fetchTeams()} className="hover:text-primary" title="Refresh">
-              <span className="material-symbols-outlined text-[18px]">refresh</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowSpawn(true)}
+                className="bg-primary text-on-primary px-2 h-7 border-2 border-primary font-headline font-bold uppercase text-[10px] flex items-center gap-1 hover:bg-tertiary hover:text-on-tertiary"
+                title="Spawn a new sub-agent team"
+              >
+                <span className="material-symbols-outlined text-[12px]">add</span>
+                New
+              </button>
+              <button onClick={() => void fetchTeams()} className="hover:text-primary" title="Refresh">
+                <span className="material-symbols-outlined text-[18px]">refresh</span>
+              </button>
+            </div>
           </div>
+          {showSpawn && (
+            <SpawnTeamForm
+              defaultBrief={mission?.objective ?? ''}
+              onClose={() => setShowSpawn(false)}
+              onSpawned={() => {
+                setShowSpawn(false);
+                void fetchTeams();
+                showToast('Team spawned — see the live progress chip in the header.');
+              }}
+            />
+          )}
           {loadingTeams ? (
             <p className="p-3 text-on-surface-variant text-xs font-mono animate-pulse">Loading teams…</p>
           ) : teams.length === 0 ? (
@@ -215,6 +237,31 @@ export default function TeamsPage() {
                     <div className="font-mono text-[10px] text-on-surface-variant">
                       {t.memberCount} members · {t.coordinationMode} · {new Date(t.startedAt).toLocaleString()}
                     </div>
+                    {(t.status === 'running' || t.status === 'pending') && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm(`Cancel team "${t.name}"?`)) return;
+                          try {
+                            const res = await fetch(`/api/teams/${encodeURIComponent(t.teamId)}/cancel`, { method: 'POST' });
+                            const data = await res.json().catch(() => ({}));
+                            if (data?.ok) {
+                              showToast(`Team ${t.name} cancelled.`);
+                              void fetchTeams();
+                            } else {
+                              showToast(`Cancel failed: ${data?.error || res.status}`);
+                            }
+                          } catch (err) {
+                            showToast(`Cancel failed: ${(err as Error).message}`);
+                          }
+                        }}
+                        className="mt-2 w-full bg-background border-2 border-error text-error px-2 py-1 font-headline font-bold uppercase text-[10px] hover:bg-error hover:text-on-error"
+                        title="Cancel this team (in-flight LLM calls will be allowed to finish, but the team will be marked cancelled)."
+                      >
+                        <span className="material-symbols-outlined text-[12px] align-middle">block</span>
+                        <span className="ml-1">Cancel</span>
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -341,6 +388,156 @@ function TeamDetail({ members, context, messages }: { members: TeamMember[]; con
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function SpawnTeamForm({
+  defaultBrief,
+  onClose,
+  onSpawned,
+}: {
+  defaultBrief: string;
+  onClose: () => void;
+  onSpawned: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [brief, setBrief] = useState(defaultBrief);
+  const [mode, setMode] = useState<'pipeline' | 'chain'>('pipeline');
+  const [extras, setExtras] = useState<Array<{ name: string; role: string; task: string; tools: string }>>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
+
+  const submit = async () => {
+    if (!name.trim() || !brief.trim()) {
+      setError('Team name and shared brief are required.');
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/teams/spawn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          sharedBrief: brief.trim(),
+          coordinationMode: mode,
+          members: extras
+            .filter((m) => m.name.trim() && m.task.trim())
+            .map((m) => ({
+              name: m.name.trim(),
+              role: m.role.trim() || 'Extra member',
+              task: m.task.trim(),
+              tools: m.tools.split(',').map((t) => t.trim()).filter(Boolean),
+            })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok) {
+        showToast('Team spawned ✓');
+        onSpawned();
+      } else {
+        setError(data?.error || `HTTP ${res.status}`);
+        showToast(`Spawn failed: ${data?.error || res.status}`);
+      }
+    } catch (err: any) {
+      setError(err.message || String(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="border-b-2 border-primary bg-surface-container p-3 space-y-2" role="dialog" aria-label="Spawn a new team">
+      <div className="flex items-center justify-between">
+        <span className="font-headline font-black uppercase text-[10px] text-primary">New Team</span>
+        <button onClick={onClose} className="text-on-surface-variant hover:text-error" aria-label="Close spawn form">
+          <span className="material-symbols-outlined text-[14px]">close</span>
+        </button>
+      </div>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Team name (e.g. 'Stitch Spec Audit Squad')"
+        className="w-full bg-background border-2 border-primary px-2 py-1 font-body text-[11px] focus:outline-none focus:border-tertiary"
+        maxLength={120}
+      />
+      <textarea
+        value={brief}
+        onChange={(e) => setBrief(e.target.value)}
+        placeholder="Shared brief every team member sees"
+        rows={3}
+        maxLength={16_000}
+        className="w-full bg-background border-2 border-primary px-2 py-1 font-body text-[11px] focus:outline-none focus:border-tertiary resize-none"
+      />
+      <div className="flex items-center gap-2 text-[10px] font-mono">
+        <span className="text-on-surface-variant">Mode:</span>
+        {(['pipeline', 'chain'] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`px-2 py-0.5 border-2 border-primary font-headline font-bold uppercase ${mode === m ? 'bg-primary text-on-primary' : 'bg-background text-primary'}`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+      <details className="text-[10px]">
+        <summary className="cursor-pointer font-headline font-bold uppercase text-primary">Extra members ({extras.length})</summary>
+        <div className="mt-2 space-y-2">
+          {extras.map((m, i) => (
+            <div key={i} className="space-y-1 border-2 border-outline-variant p-2">
+              <input
+                value={m.name}
+                onChange={(e) => setExtras((prev) => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                placeholder="Name (e.g. Code Extractor)"
+                className="w-full bg-background border border-primary px-1 py-0.5 font-mono text-[10px]"
+                maxLength={120}
+              />
+              <input
+                value={m.role}
+                onChange={(e) => setExtras((prev) => prev.map((x, j) => j === i ? { ...x, role: e.target.value } : x))}
+                placeholder="Role"
+                className="w-full bg-background border border-primary px-1 py-0.5 font-mono text-[10px]"
+                maxLength={200}
+              />
+              <textarea
+                value={m.task}
+                onChange={(e) => setExtras((prev) => prev.map((x, j) => j === i ? { ...x, task: e.target.value } : x))}
+                placeholder="Task"
+                rows={2}
+                className="w-full bg-background border border-primary px-1 py-0.5 font-mono text-[10px] resize-none"
+                maxLength={2_000}
+              />
+              <input
+                value={m.tools}
+                onChange={(e) => setExtras((prev) => prev.map((x, j) => j === i ? { ...x, tools: e.target.value } : x))}
+                placeholder="Tools (comma-separated, e.g. todo, read_workspace_file)"
+                className="w-full bg-background border border-primary px-1 py-0.5 font-mono text-[10px]"
+              />
+            </div>
+          ))}
+          <button
+            onClick={() => setExtras((prev) => [...prev, { name: '', role: '', task: '', tools: '' }])}
+            className="w-full bg-background border-2 border-primary py-1 font-headline font-bold uppercase text-[10px] text-primary hover:bg-surface"
+          >
+            + Add extra member
+          </button>
+        </div>
+      </details>
+      {error && (
+        <p className="text-[10px] font-mono text-error break-words whitespace-pre-wrap">{error}</p>
+      )}
+      <button
+        onClick={submit}
+        disabled={isSubmitting || !name.trim() || !brief.trim()}
+        className="w-full bg-primary text-on-primary border-2 border-primary py-1.5 font-headline font-bold uppercase text-[11px] hover:bg-tertiary hover:text-on-tertiary disabled:opacity-50 flex items-center justify-center gap-1"
+      >
+        <span className="material-symbols-outlined text-[14px]">groups</span>
+        {isSubmitting ? 'Spawning… (this can take a few minutes)' : 'Spawn Team (QA + Planner + Research + Supervisor + extras)'}
+      </button>
     </div>
   );
 }

@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
         toolName: name,
         agentId,
         missionId,
-        status: 'ok',
+        status: 'success',
         durationMs: Date.now() - start,
       });
       return Response.json({ ok: true, server: resolved.server.id, result });
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
       toolName: name,
       agentId,
       missionId,
-      status: 'ok',
+      status: 'success',
       durationMs: Date.now() - start,
     });
     return Response.json({ ok: true, server: resolved.server.id, result });

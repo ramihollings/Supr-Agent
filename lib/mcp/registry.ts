@@ -86,6 +86,36 @@ export function tierMeetsRequirement(agentTier: PermissionTier, required: Permis
   return TIER_RANK[agentTier] >= TIER_RANK[required];
 }
 
+/**
+ * Substitute env-var and default placeholders in an MCP server's
+ * `args` array. Two forms are supported:
+ *
+ *   - `${env:VAR_NAME}`  -> value of `process.env.VAR_NAME`, or empty
+ *     string if the env var is not set
+ *   - `${default:FALLBACK}` -> `FALLBACK` (used when the resolved
+ *     value would otherwise be empty)
+ *
+ * This lets operators pin filesystem roots, docker volumes, etc.
+ * without editing `config/mcp-servers.json`. Example:
+ *   "args": ["-y", "@modelcontextprotocol/server-filesystem",
+ *            "${env:SUPR_FILESYSTEM_ROOT|default:/workspace}"]
+ */
+export function expandMcpArgs(args: string[] | undefined): string[] | undefined {
+  if (!Array.isArray(args)) return args;
+  return args.map((arg) => {
+    let out = arg;
+    // env:VAR (with optional |default:VAL fallback)
+    out = out.replace(/\$\{env:([A-Z0-9_]+)(?:\|default:([^}]*))?\}/gi, (_match, name: string, def: string | undefined) => {
+      const v = process.env[name];
+      if (v && v.length > 0) return v;
+      return def ?? '';
+    });
+    // default:VAL only (no env var)
+    out = out.replace(/\$\{default:([^}]*)\}/g, (_match, def: string) => def);
+    return out;
+  });
+}
+
 export interface McpToolResolution {
   server: McpServerEntry;
   toolName: string;
@@ -319,31 +349,57 @@ export async function listAllTools(): Promise<McpToolDescriptor[]> {
  * Forward a tool call to a non-internal MCP server (currently
  * stdio and http). The in-process server is handled by the
  * toolRegistry directly.
+ *
+ * Every call is recorded in the MCP_Invocations audit log so the
+ * operator can see who called what server, when, and how long
+ * the call took. The audit write is fire-and-forget so it never
+ * adds latency to the tool path.
  */
 export async function forwardToMcpServer(
   server: McpServerEntry,
   toolName: string,
   args: Record<string, unknown>,
+  ctx?: { agentId?: string | null; missionId?: string | null },
 ): Promise<unknown> {
-  if (server.transport === 'stdio') {
-    const { getOrStartSession } = await import('./stdio');
-    const session = await getOrStartSession(server);
-    const result = await session.callTool(toolName, args);
-    if ((result as any)?.isError) {
-      const text = (result as any).content?.[0]?.text || 'MCP tool returned an error.';
-      throw new Error(text);
+  const startedAt = Date.now();
+  let ok = false;
+  let errorMessage: string | undefined;
+  try {
+    if (server.transport === 'stdio') {
+      const { getOrStartSession } = await import('./stdio');
+      const session = await getOrStartSession(server);
+      const result = await session.callTool(toolName, args);
+      if ((result as any)?.isError) {
+        errorMessage = (result as any).content?.[0]?.text || 'MCP tool returned an error.';
+        throw new Error(errorMessage);
+      }
+      ok = true;
+      return result;
     }
-    return result;
-  }
-  if (server.transport === 'http') {
-    const { getOrStartHttpSession } = await import('./http');
-    const session = await getOrStartHttpSession(server);
-    const result = await session.callTool(toolName, args);
-    if ((result as any)?.isError) {
-      const text = (result as any).content?.[0]?.text || 'MCP tool returned an error.';
-      throw new Error(text);
+    if (server.transport === 'http') {
+      const { getOrStartHttpSession } = await import('./http');
+      const session = await getOrStartHttpSession(server);
+      const result = await session.callTool(toolName, args);
+      if ((result as any)?.isError) {
+        errorMessage = (result as any).content?.[0]?.text || 'MCP tool returned an error.';
+        throw new Error(errorMessage);
+      }
+      ok = true;
+      return result;
     }
-    return result;
+    throw new Error(`Unsupported MCP transport '${server.transport}'.`);
+  } catch (err: any) {
+    errorMessage = err?.message || String(err);
+    throw err;
+  } finally {
+    try {
+      const { recordMcpInvocation } = await import('./audit');
+      recordMcpInvocation(
+        { serverId: server.id, toolName, agentId: ctx?.agentId, missionId: ctx?.missionId, args },
+        { ok, durationMs: Date.now() - startedAt, error: errorMessage },
+      );
+    } catch {
+      // ignore
+    }
   }
-  throw new Error(`Server '${server.id}' is not a forwardable transport.`);
 }
