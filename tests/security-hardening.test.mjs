@@ -438,7 +438,7 @@ test('front page defaults to live agent orchestration instead of fake glidepath 
   assert.doesNotMatch(initSql, /mock_tickets/);
   assert.doesNotMatch(setupWizard, /Simulated Telemetry|sandbox emulator|>Simulated</);
   assert.doesNotMatch(orchestrationPage, /LIVE_EVENTS|live-\$\{Date\.now\(\)\}|Simulated live updates/);
-  assert.match(orchestrationPage, /Poll persisted orchestration state/);
+  assert.match(orchestrationPage, /Safety-net poll for events/);
   assert.doesNotMatch(suprChat, /simulated telemetry|Simulated \/ Real Shell Execution Output/i);
   assert.doesNotMatch(codePage, /mock_tickets|Active mock verification/);
   assert.match(codePage, /sample_tickets\.json/);

@@ -81,7 +81,10 @@ test('buildScopedEnv strips keys not in env_keys (no host-secret leak)', async (
       shell: process.platform === 'win32',
     });
     assert.equal(result.status, 0, `harness failed: ${result.stderr}`);
-    const out = JSON.parse(result.stdout.trim());
+    const lines = result.stdout.trim().split('\n');
+    const jsonLine = lines.find((line) => line.trim().startsWith('{'));
+    if (!jsonLine) throw new Error(`Could not find JSON output in stdout: ${result.stdout}`);
+    const out = JSON.parse(jsonLine);
     // The 4 always-allowed keys plus the 1 declared env_keys entry.
     assert.deepEqual(out.keys, ['GITHUB_TOKEN', 'HOME', 'PATH', 'TMPDIR', 'USER']);
   } finally {

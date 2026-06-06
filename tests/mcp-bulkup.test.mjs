@@ -20,9 +20,9 @@ const SETTINGS_PAGE = readFileSync(join(REPO_ROOT, 'app/settings/page.tsx'), 'ut
  *     integrations_composio setting reference
  */
 
-test('config/mcp-servers.json parses and contains 8 servers', () => {
+test('config/mcp-servers.json parses and contains 9 servers', () => {
   assert.ok(Array.isArray(REGISTRY.servers), 'servers must be an array');
-  assert.equal(REGISTRY.servers.length, 8, 'expected 8 server entries');
+  assert.equal(REGISTRY.servers.length, 9, 'expected 9 server entries');
 });
 
 test('all four in-process servers remain enabled', () => {

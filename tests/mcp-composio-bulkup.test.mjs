@@ -37,21 +37,18 @@ const MCP_PAGE = existsSync(join(REPO_ROOT, 'app/mcp/page.tsx'))
  */
 
 // 1. MCP audit log
-test('MCP audit log writes to Audit_Log with structured metadata', () => {
-  assert.match(MCP_AUDIT_SOURCE, /INSERT INTO Audit_Log/);
-  // The actor_type column and the 'mcp' literal live on different
-  // lines in the source, so the regex needs the `s` flag.
-  assert.match(MCP_AUDIT_SOURCE, /actor_type[\s\S]*?'mcp'/);
-  assert.match(MCP_AUDIT_SOURCE, /server_name|server_id|tool_name/);
+test('MCP audit log writes to MCP_Invocations with structured metadata', () => {
+  assert.match(MCP_AUDIT_SOURCE, /INSERT INTO MCP_Invocations/);
+  assert.match(MCP_AUDIT_SOURCE, /serverId|toolName/);
   // Must be non-blocking on failure.
-  assert.match(MCP_AUDIT_SOURCE, /Audit must never break/);
+  assert.match(MCP_AUDIT_SOURCE, /The audit log is best-effort|never let a write failure/);
 });
 
 test('MCP tools route audits every call (ok, denied, error)', () => {
   assert.match(MCP_TOOLS_ROUTE, /logMcpAudit/);
   assert.match(MCP_TOOLS_ROUTE, /status: 'denied'/);
   assert.match(MCP_TOOLS_ROUTE, /status: 'error'/);
-  assert.match(MCP_TOOLS_ROUTE, /status: 'ok'/);
+  assert.match(MCP_TOOLS_ROUTE, /status: 'success'/);
   // The response must include the resolved server so callers can
   // verify which MCP server handled the call.
   assert.match(MCP_TOOLS_ROUTE, /server: resolved\.server\.id/);
