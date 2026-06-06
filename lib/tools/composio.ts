@@ -69,6 +69,20 @@ class SuprComposioBridge implements ComposioBridge {
       { key: 'slack', name: 'Slack', description: 'Channels, messages, reactions.' },
       { key: 'notion', name: 'Notion', description: 'Pages, blocks, databases.' },
       { key: 'gmail', name: 'Gmail', description: 'Mail read, send, label.' },
+      { key: 'google_calendar', name: 'Google Calendar', description: 'Events, calendars, scheduling.' },
+      { key: 'google_drive', name: 'Google Drive', description: 'Files, folders, sharing.' },
+      { key: 'google_sheets', name: 'Google Sheets', description: 'Spreadsheets, ranges, formulas.' },
+      { key: 'linear', name: 'Linear', description: 'Issues, projects, cycles.' },
+      { key: 'jira', name: 'Jira', description: 'Tickets, sprints, boards.' },
+      { key: 'hubspot', name: 'HubSpot', description: 'Contacts, deals, companies.' },
+      { key: 'salesforce', name: 'Salesforce', description: 'Accounts, opportunities, leads.' },
+      { key: 'asana', name: 'Asana', description: 'Tasks, projects, sections.' },
+      { key: 'trello', name: 'Trello', description: 'Boards, lists, cards.' },
+      { key: 'figma', name: 'Figma', description: 'Files, comments, exports.' },
+      { key: 'airtable', name: 'Airtable', description: 'Bases, tables, records.' },
+      { key: 'zendesk', name: 'Zendesk', description: 'Tickets, macros, views.' },
+      { key: 'sendgrid', name: 'SendGrid', description: 'Transactional email.' },
+      { key: 'stripe', name: 'Stripe', description: 'Customers, subscriptions, invoices.' },
     ];
   }
 

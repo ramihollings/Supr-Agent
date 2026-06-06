@@ -42,25 +42,47 @@
     },
     {
       "id": "github-mcp",
-      "name": "GitHub (planned)",
+      "name": "GitHub",
       "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
       "required_tier": "Edit",
       "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
-      "description": "Standard MCP server for GitHub. Will pull repos, create issues, and manage task branches.",
-      "enabled": false
+      "description": "Standard MCP server for GitHub. Pulls repos, creates issues, and manages task branches. Requires a PAT.",
+      "enabled": true
     },
     {
       "id": "postgres-mcp",
-      "name": "PostgreSQL (planned)",
+      "name": "PostgreSQL",
       "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-postgres"],
       "required_tier": "Edit",
       "env_keys": ["POSTGRES_CONNECTION_STRING"],
-      "description": "Standard MCP server for PostgreSQL. Lets agents query the database schema and run read-only SQL.",
-      "enabled": false
+      "description": "Standard MCP server for PostgreSQL. Lets agents query the database schema and run read-only SQL. Requires a connection string.",
+      "enabled": true
+    },
+    {
+      "id": "filesystem-mcp",
+      "name": "Filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "required_tier": "Edit",
+      "env_keys": [],
+      "description": "Governed file-system surface rooted at /workspace for the Code Agent. Scoped read/write/list within the workspace boundary.",
+      "enabled": true
+    },
+    {
+      "id": "brave-search-mcp",
+      "name": "Brave Search",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "required_tier": "Draft",
+      "env_keys": ["BRAVE_API_KEY"],
+      "description": "Standard MCP server for Brave Search. Lets agents run web queries. Requires a BRAVE_API_KEY.",
+      "enabled": true
     }
   ]
 }

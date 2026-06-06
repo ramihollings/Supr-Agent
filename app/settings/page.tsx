@@ -682,6 +682,7 @@ export default function SettingsPage() {
   const onSaveGlobalKey = (key: string, value: string, label: string) => {
     void handleUpdateSetting(key, value, label);
   };
+  const handleSaveComposioBridge = () => handleUpdateSetting('integrations_composio', integrationComposio, 'Composio bridge key saved ✓');
   const onSaveBackupConfig = async () => {
     // Going through handleUpdateSetting ensures the cross-tab
     // settings sentinel is broadcast on every save, so the chat
@@ -1048,6 +1049,32 @@ export default function SettingsPage() {
                   >Save</button>
                 </div>
                 <span className="text-[9px] text-on-surface-variant block mt-1">Connects dynamic workspaces, tool schemas, and agent executions via Composio.</span>
+              </div>
+
+              {/* Composio Bridge */}
+              <div className="border-2 border-primary p-4 bg-background flex flex-col gap-3">
+                <h4 className="font-headline font-bold uppercase text-primary text-xs flex items-center gap-2">
+                  <span className="material-symbols-outlined text-sm">hub</span> Composio Bridge
+                </h4>
+                <p className="font-body text-[10px] text-on-surface-variant">
+                  The bridge resolves the Composio API key on every call (Settings first, then
+                  <code className="font-mono mx-1">process.env.COMPOSIO_API_KEY</code>). Saving here
+                  invalidates the provider cache so the next request picks up the new key without
+                  a restart.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="password" aria-label="Composio Bridge API Key"
+                    value={integrationComposio}
+                    onChange={(e) => setIntegrationComposio(e.target.value)}
+                    className="flex-1 bg-surface neo-border p-2 font-mono text-xs focus:outline-none focus:border-tertiary"
+                    placeholder="sk-..."
+                  />
+                  <button
+                    onClick={handleSaveComposioBridge}
+                    className="bg-tertiary text-on-tertiary font-bold uppercase text-xs px-4 neo-border hover:bg-primary hover:text-on-primary transition-colors"
+                  >Save &amp; Invalidate</button>
+                </div>
               </div>
 
               {/* GitHub */}

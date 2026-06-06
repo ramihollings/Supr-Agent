@@ -21,6 +21,12 @@ import {
   addMemoryItemsReason,
   addApprovalsAgentActionId,
 } from './migrations/001__v1_alter_patches';
+import {
+  addTeamRuns,
+  addTeamMembers,
+  addTeamContext,
+  addTeamMessages,
+} from './migrations/010__team_runs';
 
 export const migrations: Migration[] = [
   addCronJobsAssignedAgentId,
@@ -29,4 +35,8 @@ export const migrations: Migration[] = [
   addMemoryItemsReviewedAt,
   addMemoryItemsReason,
   addApprovalsAgentActionId,
+  addTeamRuns,
+  addTeamMembers,
+  addTeamContext,
+  addTeamMessages,
 ];

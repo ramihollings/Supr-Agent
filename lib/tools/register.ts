@@ -1,6 +1,7 @@
 import "./shell";
 import "./web-search";
 import "./subagent";
+import "./subagent-team";
 import "./todo";
 import "./skill-invoker";
 import "./project-flow";

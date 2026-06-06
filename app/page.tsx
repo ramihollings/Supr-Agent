@@ -119,6 +119,11 @@ function DashboardContent() {
   const [sseStatus, setSseStatus] = useState<'connecting' | 'open' | 'closed'>('connecting');
   const [sseLastEventAt, setSseLastEventAt] = useState<string | null>(null);
   const [recentToolCallCount, setRecentToolCallCount] = useState(0);
+  // Live team-run tracking. Polled on a slow cadence (the team
+  // coordinator writes to Team_Runs directly so the count and
+  // status are always up to date when the page loads or refreshes).
+  const [activeTeamCount, setActiveTeamCount] = useState(0);
+  const [recentTeamCount, setRecentTeamCount] = useState(0);
   const [liveEvent, setLiveEvent] = useState<{ summary: string; at: string; tone: 'success' | 'failure' | 'system' } | null>(null);
   const { showToast } = useToast();
 
@@ -508,6 +513,35 @@ function DashboardContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrFirstProjectId]);
 
+  // Team-run poll: keeps the "active teams" + "recent teams" chips
+  // on the live status bar fresh. 10s cadence is fine because the
+  // Team_Runs row is written when the team is created and updated
+  // again when it completes; we don't need sub-second accuracy here.
+  useEffect(() => {
+    let active = true;
+    const fetchTeams = async () => {
+      try {
+        const url = new URL('/api/teams', window.location.origin);
+        if (selectedOrFirstProjectId) url.searchParams.set('missionId', selectedOrFirstProjectId);
+        const res = await fetch(url.toString(), { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!active) return;
+        const teams = Array.isArray(data.teams) ? data.teams : [];
+        setActiveTeamCount(teams.filter((t: any) => t.status === 'running' || t.status === 'pending').length);
+        setRecentTeamCount(teams.length);
+      } catch {
+        // ignore
+      }
+    };
+    void fetchTeams();
+    const id = setInterval(fetchTeams, 10_000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [selectedOrFirstProjectId]);
+
   return (
     <div className="flex-1 md:ml-64 min-h-screen bg-surface-container text-on-surface overflow-hidden">
       {showSetupWizard && <SetupWizard onClose={handleSetupWizardClose} required={bootstrapRequired} />}
@@ -524,6 +558,8 @@ function DashboardContent() {
         sseLastEventAt={sseLastEventAt}
         recentToolCallCount={recentToolCallCount}
         liveEvent={liveEvent}
+        activeTeamCount={activeTeamCount}
+        recentTeamCount={recentTeamCount}
       />
 
       <div className="xl:hidden bg-background border-b-4 border-primary grid grid-cols-3">
@@ -627,11 +663,15 @@ function LiveStatusBar({
   sseLastEventAt,
   recentToolCallCount,
   liveEvent,
+  activeTeamCount,
+  recentTeamCount,
 }: {
   sseStatus: 'connecting' | 'open' | 'closed';
   sseLastEventAt: string | null;
   recentToolCallCount: number;
   liveEvent: { summary: string; at: string; tone: 'success' | 'failure' | 'system' } | null;
+  activeTeamCount: number;
+  recentTeamCount: number;
 }) {
   const statusLabel = sseStatus === 'open' ? 'Live' : sseStatus === 'connecting' ? 'Connecting…' : 'Offline';
   const statusTone =
@@ -656,6 +696,13 @@ function LiveStatusBar({
       <span className="text-on-surface-variant flex items-center gap-1" title="CloakBrowser web_scrape invocations observed in this session">
         <span className="material-symbols-outlined text-[12px]">travel_explore</span>
         {recentToolCallCount} web_scrape
+      </span>
+      <span
+        className={`flex items-center gap-1 ${activeTeamCount > 0 ? 'text-secondary font-bold' : 'text-on-surface-variant'}`}
+        title={`Active sub-agent teams running on the active mission (${recentTeamCount} total in the recent window).`}
+      >
+        <span className="material-symbols-outlined text-[12px]">groups</span>
+        {activeTeamCount} active team{activeTeamCount === 1 ? '' : 's'} / {recentTeamCount} recent
       </span>
       {liveEvent && (
         <span
