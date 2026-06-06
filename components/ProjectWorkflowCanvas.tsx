@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import type { PhaseGroup } from '@/lib/services/graph-layout';
 
 type WorkflowNode = {
   id: string;
@@ -12,6 +13,11 @@ type WorkflowNode = {
   riskLevel?: string;
   x: number;
   y: number;
+  width?: number;
+  height?: number;
+  // Optional phase id used to bucket the node into a sub-graph.
+  phaseId?: string;
+  phaseName?: string;
 };
 
 type WorkflowEdge = {
@@ -33,6 +39,7 @@ type Props = {
   graph: {
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
+    phaseGroups?: PhaseGroup[];
     flowRun?: { id: string; status: string; mode: string; source?: string } | null;
     agentRuns?: Array<{ id: string; status: string; agentId?: string; logs?: string[]; error?: string; createdAt?: string }>;
     toolInvocations?: Array<{
@@ -59,6 +66,11 @@ type Props = {
   onResumeFlow: () => Promise<void>;
   onRetryFailed: () => Promise<void>;
   onApproveLowRisk: () => Promise<void>;
+  /**
+   * Throttle: max one node-status transition per this many ms.
+   * Set to 0 in tests to drain the queue immediately.
+   */
+  transitionMs?: number;
   isSpawning?: boolean;
   isBusy?: boolean;
 };
@@ -87,6 +99,34 @@ const kindIcon: Record<WorkflowNode['kind'], string> = {
   artifact: 'description',
 };
 
+const PHASE_BAND_TONE: Record<string, string> = {
+  Active: 'border-tertiary bg-tertiary/5',
+  Done: 'border-primary bg-primary/5',
+  Pending: 'border-outline bg-surface-container/30 opacity-70',
+  Blocked: 'border-secondary bg-secondary/5',
+  Gate_Pending: 'border-secondary bg-secondary/5',
+};
+
+const PHASE_TONE: Record<string, string> = {
+  Active: 'border-tertiary bg-tertiary text-on-tertiary animate-pulse',
+  Done: 'border-primary bg-primary/30 text-primary',
+  Pending: 'border-outline bg-surface text-on-surface-variant',
+  Blocked: 'border-secondary bg-secondary/20 text-secondary',
+  Gate_Pending: 'border-secondary bg-secondary/20 text-secondary',
+};
+
+/**
+ * ProjectWorkflowCanvas -- the Live Work Graph view.
+ *
+ * Pass 2 changes (Live Work Graph cleanup):
+ *   - Renders the DAG layout produced server-side by
+ *     `lib/services/graph-layout.ts` (dagre with pure-JS fallback).
+ *   - Renders collapsed phase sub-graphs (PhaseGroups) behind the
+ *     nodes; clicking a phase header toggles expansion.
+ *   - Throttles node-status transitions through a per-status queue
+ *     so the human eye can follow the work without losing
+ *     information when the SSE stream fires 10+ events at once.
+ */
 export function ProjectWorkflowCanvas({
   graph,
   onSpawnAgent,
@@ -96,10 +136,14 @@ export function ProjectWorkflowCanvas({
   onResumeFlow,
   onRetryFailed,
   onApproveLowRisk,
+  transitionMs = 600,
   isSpawning = false,
   isBusy = false,
 }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(
+    () => new Set(), // collapsed by default; user opts in
+  );
   const [draft, setDraft] = useState<SpawnDraft>({
     role: 'Code',
     objective: '',
@@ -108,44 +152,196 @@ export function ProjectWorkflowCanvas({
     riskLevel: 'Medium',
   });
 
+  // -------------------------------------------------------------------
+  // Throttled status transitions. We diff incoming nodes against
+  // the last rendered snapshot and push *changed statuses* onto a
+  // queue. The drainer pops one entry every `transitionMs` and
+  // updates the displayed node. A status change is just a colour
+  // flash, so the user sees the work without losing context.
+  // -------------------------------------------------------------------
+  const [renderedNodes, setRenderedNodes] = useState<WorkflowNode[]>(graph?.nodes || []);
+  const pendingStatusChangesRef = useRef<Array<{ id: string; status: string }>>([]);
+  const drainingRef = useRef(false);
+  const lastNodeMapRef = useRef<Map<string, WorkflowNode>>(new Map());
+
+  useEffect(() => {
+    if (!graph || !graph.nodes) {
+      setRenderedNodes([]);
+      return;
+    }
+    // First load: just take the snapshot wholesale.
+    if (lastNodeMapRef.current.size === 0) {
+      lastNodeMapRef.current = new Map(graph.nodes.map((n) => [n.id, n]));
+      setRenderedNodes(graph.nodes);
+      return;
+    }
+    // Diff statuses and push new ones onto the queue.
+    const incomingById = new Map(graph.nodes.map((n) => [n.id, n]));
+    for (const n of graph.nodes) {
+      const prev = lastNodeMapRef.current.get(n.id);
+      if (prev && prev.status !== n.status) {
+        pendingStatusChangesRef.current.push({ id: n.id, status: n.status });
+      }
+    }
+    // Remove queue entries for nodes that no longer exist.
+    const liveIds = new Set(graph.nodes.map((n) => n.id));
+    pendingStatusChangesRef.current = pendingStatusChangesRef.current.filter(
+      (p) => liveIds.has(p.id),
+    );
+    // Update the last-seen map to the latest incoming positions so
+    // the canvas can re-render positions in lock-step with
+    // statuses.
+    lastNodeMapRef.current = incomingById;
+    setRenderedNodes(graph.nodes);
+  }, [graph]);
+
+  // Drainer: one node transition per `transitionMs`.
+  useEffect(() => {
+    if (transitionMs <= 0) {
+      // Tests: drain everything synchronously.
+      while (pendingStatusChangesRef.current.length > 0) {
+        const next = pendingStatusChangesRef.current.shift()!;
+        setRenderedNodes((prev) =>
+          prev.map((n) => (n.id === next.id ? { ...n, status: next.status } : n)),
+        );
+      }
+      return;
+    }
+    const drain = () => {
+      if (drainingRef.current) return;
+      const next = pendingStatusChangesRef.current.shift();
+      if (!next) {
+        drainingRef.current = false;
+        return;
+      }
+      drainingRef.current = true;
+      setRenderedNodes((prev) =>
+        prev.map((n) => (n.id === next.id ? { ...n, status: next.status } : n)),
+      );
+      setTimeout(() => {
+        drainingRef.current = false;
+        drain();
+      }, transitionMs);
+    };
+    // Kick off a drain whenever the queue is non-empty. The
+    // drainer above is single-flight so we never overlap.
+    const interval = setInterval(drain, transitionMs);
+    return () => clearInterval(interval);
+  }, [transitionMs]);
+
+  // -------------------------------------------------------------------
+  // Layout bookkeeping.
+  // -------------------------------------------------------------------
   const selectedNode = useMemo(
-    () => graph?.nodes.find((node) => node.id === selectedNodeId) || graph?.nodes.find((node) => node.status === 'Active' || node.status === 'running') || graph?.nodes[0],
-    [graph, selectedNodeId],
+    () =>
+      renderedNodes.find((n) => n.id === selectedNodeId) ||
+      renderedNodes.find((n) => n.status === 'Active' || n.status === 'running') ||
+      renderedNodes[0],
+    [renderedNodes, selectedNodeId],
   );
 
   const nodeMap = useMemo(() => {
     const map = new Map<string, WorkflowNode>();
-    graph?.nodes.forEach((node) => map.set(node.id, node));
+    renderedNodes.forEach((n) => map.set(n.id, n));
     return map;
-  }, [graph]);
+  }, [renderedNodes]);
 
+  // Canvas size: union of nodes AND phase bands. Use a small
+  // margin so the rightmost band isn't clipped.
   const canvasSize = useMemo(() => {
-    const nodes = graph?.nodes || [];
+    const xs: number[] = [];
+    const ys: number[] = [];
+    const xEnds: number[] = [];
+    const yEnds: number[] = [];
+    for (const n of renderedNodes) {
+      const w = n.width ?? 176;
+      const h = n.height ?? 86;
+      xs.push(n.x);
+      ys.push(n.y);
+      xEnds.push(n.x + w);
+      yEnds.push(n.y + h);
+    }
+    for (const g of graph?.phaseGroups || []) {
+      xs.push(g.x);
+      ys.push(g.y);
+      xEnds.push(g.x + g.width);
+      yEnds.push(g.y + g.height);
+    }
+    const minX = xs.length > 0 ? Math.min(...xs) : 0;
+    const minY = ys.length > 0 ? Math.min(...ys) : 0;
+    const maxX = xEnds.length > 0 ? Math.max(...xEnds) : 980;
+    const maxY = yEnds.length > 0 ? Math.max(...yEnds) : 620;
     return {
-      width: Math.max(980, ...nodes.map((node) => node.x + 220)),
-      height: Math.max(620, ...nodes.map((node) => node.y + 140)),
+      width: Math.max(980, maxX - minX + 80),
+      height: Math.max(620, maxY - minY + 80),
+      offsetX: minX - 40,
+      offsetY: minY - 40,
     };
-  }, [graph]);
+  }, [renderedNodes, graph?.phaseGroups]);
 
-  const workEvents = useMemo(() => [
-    ...(graph?.toolInvocations || []).map((tool) => ({
-      id: tool.id,
-      status: tool.status,
-      actor: tool.agentId || 'Tool',
-      detail: tool.error
-        || (tool.toolName === 'execute_command' && tool.output
-          ? `exitCode=${tool.output.exitCode ?? 'unknown'} stdout=${tool.output.stdout || ''} stderr=${tool.output.stderr || ''}`.trim()
-          : tool.toolName),
-      kind: 'tool',
-    })),
-    ...(graph?.agentRuns || []).map((run) => ({
-      id: run.id,
-      status: run.status,
-      actor: run.agentId || 'Agent',
-      detail: run.error || run.logs?.[0] || 'Heartbeat recorded.',
-      kind: 'agent',
-    })),
-  ], [graph]);
+  const workEvents = useMemo(
+    () => [
+      ...(graph?.toolInvocations || []).map((tool) => ({
+        id: tool.id,
+        status: tool.status,
+        actor: tool.agentId || 'Tool',
+        detail: tool.error
+          || (tool.toolName === 'execute_command' && tool.output
+            ? `exitCode=${tool.output.exitCode ?? 'unknown'} stdout=${tool.output.stdout || ''} stderr=${tool.output.stderr || ''}`.trim()
+            : tool.toolName),
+        kind: 'tool',
+      })),
+      ...(graph?.agentRuns || []).map((run) => ({
+        id: run.id,
+        status: run.status,
+        actor: run.agentId || 'Agent',
+        detail: run.error || run.logs?.[0] || 'Heartbeat recorded.',
+        kind: 'agent',
+      })),
+    ],
+    [graph],
+  );
+
+  // -------------------------------------------------------------------
+  // Phase sub-graph expansion logic.
+  // -------------------------------------------------------------------
+  const phaseGroups = graph?.phaseGroups || [];
+  const togglePhase = useCallback((phaseId: string) => {
+    setExpandedPhases((prev) => {
+      const next = new Set(prev);
+      if (next.has(phaseId)) next.delete(phaseId);
+      else next.add(phaseId);
+      return next;
+    });
+  }, []);
+
+  // Map node id -> phaseGroup id so we can hide/show nodes
+  // based on the user's collapse state.
+  const nodeToPhase = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of phaseGroups) {
+      for (const nid of g.nodeIds) m.set(nid, g.id);
+    }
+    return m;
+  }, [phaseGroups]);
+
+  // Whether a node is "visible" given the current collapse state.
+  // Future phases are always collapsed by default; the user can
+  // expand a phase to peek at its pending work.
+  const isNodeVisible = useCallback(
+    (n: WorkflowNode) => {
+      if (phaseGroups.length === 0) return true; // no sub-graphs, show all
+      const phaseId = nodeToPhase.get(n.id) || n.phaseId;
+      if (!phaseId) return true;
+      // Active phase is always expanded. Future phases are
+      // collapsed until the user clicks the band.
+      const grp = phaseGroups.find((g) => g.id === phaseId);
+      if (!grp) return true;
+      if (grp.status === 'Active') return true;
+      return expandedPhases.has(phaseId);
+    },
+    [phaseGroups, expandedPhases, nodeToPhase],
+  );
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -181,10 +377,10 @@ export function ProjectWorkflowCanvas({
               <span className="block font-headline text-[8px] font-bold uppercase text-on-surface-variant">flow</span>
             </div>
             {Object.entries(graph?.counts || { phases: 0, tasks: 0, actions: 0, approvals: 0, artifacts: 0 }).map(([key, value]) => (
-            <div key={key} className="bg-surface-container border border-outline-variant p-2 text-center">
-              <span className="block font-mono text-sm font-black text-primary">{value}</span>
-              <span className="block font-headline text-[8px] font-bold uppercase text-on-surface-variant">{key}</span>
-            </div>
+              <div key={key} className="bg-surface-container border border-outline-variant p-2 text-center">
+                <span className="block font-mono text-sm font-black text-primary">{value}</span>
+                <span className="block font-headline text-[8px] font-bold uppercase text-on-surface-variant">{key}</span>
+              </div>
             ))}
           </div>
         </div>
@@ -198,27 +394,47 @@ export function ProjectWorkflowCanvas({
             </div>
           ) : (
             <div className="relative" style={{ width: canvasSize.width, height: canvasSize.height }}>
-              <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              <svg
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                style={{ overflow: 'visible' }}
+              >
                 <defs>
                   <marker id="workflow-arrow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="#1a1a1a" />
                   </marker>
                 </defs>
-                {(graph.edges || []).map((edge) => {
+                {graph.edges.map((edge) => {
                   const source = nodeMap.get(edge.source);
                   const target = nodeMap.get(edge.target);
                   if (!source || !target) return null;
-                  const x1 = source.x + 88;
-                  const y1 = source.y + 42;
-                  const x2 = target.x + 88;
-                  const y2 = target.y + 42;
-                  const midX = (x1 + x2) / 2;
-                  const midY = (y1 + y2) / 2;
+                  if (!isNodeVisible(source) || !isNodeVisible(target)) return null;
+                  const sw = source.width ?? 176;
+                  const sh = source.height ?? 86;
+                  const tw = target.width ?? 176;
+                  const th = target.height ?? 86;
+                  const x1 = source.x - canvasSize.offsetX + sw / 2;
+                  const y1 = source.y - canvasSize.offsetY + sh / 2;
+                  const x2 = target.x - canvasSize.offsetX + tw / 2;
+                  const y2 = target.y - canvasSize.offsetY + th / 2;
                   return (
                     <g key={edge.id}>
-                      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#1a1a1a" strokeWidth="2" markerEnd="url(#workflow-arrow)" />
+                      <line
+                        x1={x1}
+                        y1={y1}
+                        x2={x2}
+                        y2={y2}
+                        stroke="#1a1a1a"
+                        strokeWidth="2"
+                        markerEnd="url(#workflow-arrow)"
+                        opacity={0.6}
+                      />
                       {edge.label && (
-                        <text x={midX} y={midY - 8} textAnchor="middle" className="fill-primary font-headline text-[9px] font-black uppercase">
+                        <text
+                          x={(x1 + x2) / 2}
+                          y={(y1 + y2) / 2 - 8}
+                          textAnchor="middle"
+                          className="fill-primary font-headline text-[9px] font-black uppercase"
+                        >
                           {edge.label}
                         </text>
                       )}
@@ -227,17 +443,70 @@ export function ProjectWorkflowCanvas({
                 })}
               </svg>
 
-              {graph.nodes.map((node) => {
+              {/* Phase sub-graph bands (rendered behind the nodes). */}
+              {phaseGroups.map((g) => {
+                const tone = PHASE_BAND_TONE[g.status] || PHASE_BAND_TONE.Pending;
+                const isExpanded = expandedPhases.has(g.id) || g.status === 'Active';
+                return (
+                  <div
+                    key={g.id}
+                    data-phase-band={g.id}
+                    className={`absolute border-4 border-dashed ${tone} pointer-events-none`}
+                    style={{
+                      left: g.x - canvasSize.offsetX,
+                      top: g.y - canvasSize.offsetY,
+                      width: g.width,
+                      height: g.height,
+                    }}
+                  />
+                );
+              })}
+
+              {/* Phase band headers (clickable, rendered in front of bands). */}
+              {phaseGroups.map((g) => {
+                const tone = PHASE_TONE[g.status] || PHASE_TONE.Pending;
+                const isExpanded = expandedPhases.has(g.id) || g.status === 'Active';
+                const nodeCount = g.nodeIds.length;
+                return (
+                  <button
+                    key={`${g.id}-header`}
+                    type="button"
+                    onClick={() => togglePhase(g.id)}
+                    className={`absolute neo-border ${tone} font-headline font-black uppercase text-[10px] flex items-center gap-1.5 px-2 py-1 cursor-pointer z-10`}
+                    style={{
+                      left: g.x - canvasSize.offsetX + 8,
+                      top: g.y - canvasSize.offsetY - 18,
+                    }}
+                    title={`${isExpanded ? 'Collapse' : 'Expand'} ${g.name} phase (${nodeCount} node${nodeCount === 1 ? '' : 's'})`}
+                  >
+                    <span className="material-symbols-outlined text-[12px]">
+                      {isExpanded ? 'expand_less' : 'expand_more'}
+                    </span>
+                    {g.name}
+                    <span className="ml-1 px-1.5 py-0.5 bg-background/40 text-[8px] font-mono">{nodeCount}</span>
+                  </button>
+                );
+              })}
+
+              {/* Nodes (filtered by collapse state). */}
+              {renderedNodes.filter(isNodeVisible).map((node) => {
+                const w = node.width ?? 176;
+                const h = node.height ?? 86;
                 const active = selectedNode?.id === node.id;
+                // Flash a border-colour transition when a status
+                // change is applied. The CSS `transition` is
+                // on the border colour; the JS just toggles
+                // the class.
                 return (
                   <button
                     key={node.id}
                     type="button"
                     onClick={() => setSelectedNodeId(node.id)}
-                    className={`absolute w-44 min-h-[86px] text-left neo-border p-3 transition-all ${statusTone[node.status] || 'border-outline bg-background'} ${
-                      active ? 'shadow-[5px_5px_0px_0px_rgba(0,85,255,1)] -translate-x-0.5 -translate-y-0.5' : 'hover:shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]'
-                    }`}
-                    style={{ left: node.x, top: node.y }}
+                    className={`absolute neo-border p-3 text-left transition-colors duration-500 ${statusTone[node.status] || 'border-outline bg-background'} ${active
+                        ? 'shadow-[5px_5px_0px_0px_rgba(0,85,255,1)] -translate-x-0.5 -translate-y-0.5'
+                        : 'hover:shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]'
+                      }`}
+                    style={{ left: node.x - canvasSize.offsetX, top: node.y - canvasSize.offsetY, width: w, height: h }}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span className="material-symbols-outlined text-base text-primary">{kindIcon[node.kind]}</span>
@@ -323,6 +592,9 @@ export function ProjectWorkflowCanvas({
                 <p className="font-mono text-[10px] uppercase text-on-surface-variant">{selectedNode.kind} / {selectedNode.status}</p>
                 <p className="font-body text-xs text-on-surface-variant leading-relaxed">{selectedNode.detail || 'No detail recorded yet.'}</p>
                 <p className="font-body text-xs"><strong>Owner:</strong> {selectedNode.actor || 'Supr'}</p>
+                {selectedNode.phaseName && (
+                  <p className="font-body text-xs"><strong>Phase:</strong> {selectedNode.phaseName}</p>
+                )}
               </div>
             ) : (
               <p className="font-body text-xs text-on-surface-variant">Select a node to inspect it.</p>

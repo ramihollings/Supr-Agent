@@ -22,6 +22,7 @@ import dbClient from '@/lib/database/db_client';
 import { getActiveMission, getMissionById, addActivityLog, createMission } from '@/lib/db';
 import { portabilityService } from '@/lib/services/portability';
 import { probeDockerAvailability } from '@/lib/services/execution-environment';
+import { layoutGraph, buildPhaseGroups, type PhaseGroup, type GraphNodeInput } from '@/lib/services/graph-layout';
 import { fetchSettingsAction, updateSettingAction, checkShadowModeAction } from './settings';
 import fs from 'fs';
 import path from 'path';
@@ -303,6 +304,67 @@ export async function fetchMissionTimelineAction(projectId?: string) {
   }
 }
 
+/**
+ * Post-process the operating graph payload so the canvas can
+ * render a DAG layout with phase sub-graphs. Pure: same input
+ * produces the same output. Called from both return sites of
+ * `fetchProjectOperatingGraphAction`.
+ */
+function finalizeGraphShape<T extends {
+  nodes: any[];
+  edges: any[];
+  missionPhases?: any[];
+}>(input: T): T & { phaseGroups: PhaseGroup[] } {
+  const { nodes, edges, missionPhases } = input;
+  if (!nodes || nodes.length === 0) {
+    return { ...(input as T), phaseGroups: [] };
+  }
+
+  // 1. Build GraphNodeInput list. We infer the phase from
+  //    existing node metadata (branch 1: Flow_Nodes.metadata)
+  //    or from the phase / kind heuristic in the legacy branch.
+  const nodeInputs: GraphNodeInput[] = nodes.map((n) => {
+    const phase =
+      n.phase ||
+      (n.detail && typeof n.detail === 'string' ? '' : '') ||
+      n._phase;
+    return {
+      id: n.id,
+      phase: phase || (n.kind === 'phase' ? n.label : undefined),
+      label: n.label,
+      width: 176,
+      height: 86,
+    };
+  });
+
+  // 2. Compute DAG positions.
+  const positions = layoutGraph(nodeInputs, edges as any);
+
+  // 3. Apply positions to nodes.
+  const positionedNodes = nodes.map((n, i) => {
+    const p = positions[i];
+    if (!p) return n;
+    return { ...n, x: p.x, y: p.y, width: p.width, height: p.height };
+  });
+
+  // 4. Build phase groups.
+  const nodePhase = new Map<string, string | undefined>();
+  for (const ni of nodeInputs) {
+    nodePhase.set(ni.id, ni.phase);
+  }
+  const phaseStatus = new Map<string, string>();
+  for (const p of missionPhases || []) {
+    if (p?.name) phaseStatus.set(p.name, p.status || 'Pending');
+  }
+  const phaseGroups = buildPhaseGroups({
+    nodePhase,
+    positions,
+    phaseStatus,
+  });
+
+  return { ...(input as T), nodes: positionedNodes, phaseGroups };
+}
+
 export async function fetchProjectOperatingGraphAction(projectId: string) {
   try {
     z.string().min(1).parse(projectId);
@@ -369,7 +431,9 @@ export async function fetchProjectOperatingGraphAction(projectId: string) {
           }
         }
       });
-      return {
+      // Apply DAG layout + phase groups so the canvas can render
+      // collapsed sub-graphs. See lib/services/graph-layout.ts.
+      return finalizeGraphShape({
         missionId: projectId,
         flowRun: flowRun ? { id: flowRun.id, status: flowRun.status, mode: flowRun.mode, source: flowRun.source } : null,
         nodes,
@@ -402,7 +466,8 @@ export async function fetchProjectOperatingGraphAction(projectId: string) {
           approvals: approvalRows.length,
           artifacts: mission.artifacts?.length || 0,
         },
-      };
+        missionPhases: mission.phases,
+      });
     }
 
     const nodes: any[] = [];
@@ -488,7 +553,9 @@ export async function fetchProjectOperatingGraphAction(projectId: string) {
       if (agentActions[0]) edges.push({ id: `edge:${agentActions[0].id}:${nodeId}`, source: `action:${agentActions[0].id}`, target: nodeId, label: 'produces' });
     });
 
-    return {
+    // Apply DAG layout + phase groups so the canvas can render
+    // collapsed sub-graphs. See lib/services/graph-layout.ts.
+    return finalizeGraphShape({
       missionId: projectId,
       flowRun: flowRun ? { id: flowRun.id, status: flowRun.status, mode: flowRun.mode, source: flowRun.source } : null,
       nodes,
@@ -512,7 +579,8 @@ export async function fetchProjectOperatingGraphAction(projectId: string) {
         approvals: approvalRows.length,
         artifacts: mission.artifacts?.length || 0,
       },
-    };
+      missionPhases: mission.phases,
+    });
   } catch (error) {
     console.error('Failed to fetch project operating graph:', error);
     return null;
@@ -1078,7 +1146,10 @@ function shouldRouteSuprChatToProjectFlow(content: string, file?: SuprChatFile) 
   return true;
 }
 
-async function buildDirectSuprChatResponse(content: string) {
+async function buildDirectSuprChatResponse(
+  content: string,
+  options: { conciergeActive?: boolean } = {},
+) {
   // FIX 3: the direct path is now agentic instead of a chatbot.
   //
   // Previously this function explicitly told the model to "do not create,
@@ -1088,7 +1159,15 @@ async function buildDirectSuprChatResponse(content: string) {
   // routeIntakeToProjectFlow so the runtime can spawn sub-agents and
   // invoke skills. The auto-provisioning in routeIntakeToProjectFlow
   // ensures this works even when no project is set up.
+  //
+  // Pass 3 polish: when Concierge mode is on, we DO NOT auto-spawn
+  // from chat (the caller in sendChatMessageAction forces the direct
+  // path). Instead we surface a hint explaining how to use the
+  // Concierge protocol: propose a plan in plain language, Supr will
+  // summarise it as a confirmation card, the user clicks Approve,
+  // and only then does the runtime start spinning up sub-agents.
   const normalized = content.trim().toLowerCase();
+  const conciergeActive = options.conciergeActive === true;
   const [mission, agents] = await Promise.all([
     getActiveMission(),
     fetchAgentStatuses(),
@@ -1117,6 +1196,22 @@ async function buildDirectSuprChatResponse(content: string) {
       `I'm online and ready to coordinate.`,
       statusBlock(),
       `Tell me what to build, fix, generate, or run when you want me to dispatch sub-agents.`,
+    ].join('\n');
+  }
+
+  // Concierge-mode (Pass 3 polish) branch: the caller forced the
+  // direct path because the operator has Concierge enabled. The
+  // chat thread NEVER auto-spawns in this mode. Instead we
+  // surface a short, plain-language instruction so the user
+  // knows how to use the protocol: type out a plan, Supr will
+  // summarise it as a confirmation card, the user clicks
+  // Approve, and only then does the runtime spin up sub-agents.
+  if (conciergeActive) {
+    return [
+      `Concierge mode is on, so the chat thread is read-only -- nothing was auto-spawned.`,
+      `To start work, describe your plan in plain language (goal, audience, deliverable, constraints). I'll summarise it as a confirmation card; once you click Approve, the runtime spins up the right sub-agents.`,
+      `If you only want to chat or ask a quick question, just keep typing -- no mission is created until you approve.`,
+      statusBlock(),
     ].join('\n');
   }
 
@@ -1168,7 +1263,27 @@ export async function sendChatMessageAction(
       await dbClient.execute(insertMsgSql, [userMsgId, content, file?.name || null, file?.type || null, file?.content || null]);
     }
 
-    const shouldRoute = shouldRouteSuprChatToProjectFlow(content, file);
+    // Concierge mode (Pass 3 polish): if the operator has the
+    // Concierge protocol enabled, the chat thread NEVER auto-spawns
+    // missions. The user must explicitly propose a plan, get the
+    // confirmation card, and click Approve. This is the only
+    // surface in the codebase that bypasses the handshake -- and
+    // it should NOT. The Concierge-enabled chat just answers the
+    // user directly, and the auto-routing decision is forced off.
+    const settings = await fetchSettingsAction();
+    const conciergeActive = isConciergeEnabled((settings as any)[CONCIERGE_MODE_SETTING]);
+    const shouldRoute = !conciergeActive && shouldRouteSuprChatToProjectFlow(content, file);
+    if (conciergeActive && !file) {
+      // Drop a soft hint into the Supr reply so the user knows
+      // the chat is in Concierge mode and what to do next. The
+      // hint is only emitted on the direct (non-routed) path,
+      // so the existing telemetry still shows the "routed"
+      // branch in the audit log when Concierge is OFF.
+      console.info(
+        `[Concierge] sendChatMessageAction: auto-spawn suppressed ` +
+        `for chat surface. Waiting for an explicit plan + handshake.`,
+      );
+    }
     const finalContent = shouldRoute
       ? await (async () => {
         const routed = await routeIntakeToProjectFlow({
@@ -1187,7 +1302,7 @@ export async function sendChatMessageAction(
           ].join('\n')
           : `Supr could not route this into Project Flow: ${routed.error}`;
       })()
-      : await buildDirectSuprChatResponse(content);
+      : await buildDirectSuprChatResponse(content, { conciergeActive });
 
     const responseMessageId = shadow.active ? chatMessageId('shadow') : chatMessageId();
 

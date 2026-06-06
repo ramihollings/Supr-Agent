@@ -12,7 +12,7 @@
     "smoke": "node scripts/smoke.mjs",
     "db:status": "node scripts/recover.mjs",
     "composio": "node bin/supr-composio.mjs",
-    "test:security": "node --import tsx --test tests/security-hardening.test.mjs tests/behavior-regression.test.mjs tests/telemetry.test.mjs tests/project-flow-structure.test.mjs tests/agent-runtime-pure.test.mjs tests/auth-fail-closed.test.mjs tests/proxy-xss-hardening.test.mjs tests/persisted-ids.test.mjs tests/plugin-trust-boundary.test.mjs tests/second-pass-audit.test.mjs tests/safe-fetch-behavior.test.mjs tests/blueprint5.test.mjs tests/mcp-composio-bulkup.test.mjs tests/mcp-bulkup.test.mjs tests/blueprint5-wave2.test.mjs tests/blueprint5-final.test.mjs tests/cleanup-final.test.mjs tests/plugin-env-allowlist.test.mjs tests/live-surfaces.test.mjs tests/teams-and-mcp.test.mjs tests/team-parser-runtime.test.mjs tests/concierge-handshake.test.mjs",
+    "test:security": "node --import tsx --test tests/security-hardening.test.mjs tests/behavior-regression.test.mjs tests/telemetry.test.mjs tests/project-flow-structure.test.mjs tests/agent-runtime-pure.test.mjs tests/auth-fail-closed.test.mjs tests/proxy-xss-hardening.test.mjs tests/persisted-ids.test.mjs tests/plugin-trust-boundary.test.mjs tests/second-pass-audit.test.mjs tests/safe-fetch-behavior.test.mjs tests/blueprint5.test.mjs tests/mcp-composio-bulkup.test.mjs tests/mcp-bulkup.test.mjs tests/blueprint5-wave2.test.mjs tests/blueprint5-final.test.mjs tests/cleanup-final.test.mjs tests/plugin-env-allowlist.test.mjs tests/live-surfaces.test.mjs tests/teams-and-mcp.test.mjs tests/team-parser-runtime.test.mjs tests/concierge-handshake.test.mjs tests/workflow-canvas-throttle.test.mjs",
     "test:e2e": "playwright test",
     "test:prod": "npm run lint && npm run test:security && npm run build && npm run smoke && npm run test:e2e"
   },
@@ -26,6 +26,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "composio-core": "^0.5.39",
+    "dagre": "^0.8.5",
     "lucide-react": "^0.553.0",
     "motion": "^12.23.24",
     "next": "^16.2.6",

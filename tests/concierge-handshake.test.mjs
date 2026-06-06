@@ -396,3 +396,65 @@ test('isConciergeEnabled treats undefined / empty / "false" as off and "true" / 
     assert.equal(isConciergeEnabled('0'), false, '"0" -> off');
     assert.equal(isConciergeEnabled('no'), false, '"no" -> off');
 });
+
+// ---------------------------------------------------------------------------
+// Pass 3 polish: chat thread must respect Concierge mode
+// ---------------------------------------------------------------------------
+//
+// Without this guard, a user typing a substantive request into the
+// chat would still get an auto-spawned mission even when the
+// operator has explicitly enabled Concierge mode. The whole point
+// of Concierge is that the user has to approve a plan before
+// anything spins up, so the chat must take the direct (read-only)
+// path and surface a hint. The ConciergeInitiateAction is the
+// only writer in the Concierge loop, so the chat must NOT
+// call routeIntakeToProjectFlow when Concierge is on.
+
+test('sendChatMessageAction forces the direct (read-only) path under Concierge', () => {
+    const body = chatActions.match(/export async function sendChatMessageAction[\s\S]*?\n\}/)?.[0] || '';
+    // The Concierge branch must force shouldRoute=false, so the
+    // shouldRoute calculation must reference isConciergeEnabled.
+    assert.match(
+        body,
+        /isConciergeEnabled/,
+        'sendChatMessageAction must consult isConciergeEnabled before routing',
+    );
+    // The chat should NOT auto-spawn via routeIntakeToProjectFlow
+    // when Concierge is on. The flag inverts the route decision.
+    assert.match(
+        body,
+        /!conciergeActive && shouldRouteSuprChatToProjectFlow/,
+        'shouldRoute must be AND-NOT-conciergeActive so Concierge always wins',
+    );
+});
+
+test('buildDirectSuprChatResponse emits a Concierge hint when the flag is set', () => {
+    const fnBody = chatActions.match(
+        /async function buildDirectSuprChatResponse[\s\S]*?\n\}/,
+    )?.[0] || '';
+    // The function must accept the flag and gate the Concierge
+    // branch on it.
+    assert.match(fnBody, /conciergeActive/);
+    // The Concierge branch must return a hint that mentions the
+    // protocol so the user knows what to do next.
+    assert.match(fnBody, /Concierge mode is on/);
+    assert.match(fnBody, /confirmation card/);
+});
+
+test('Concierge chat hint must NOT call routeIntakeToProjectFlow', () => {
+    // The Concierge branch returns a static hint instead of
+    // dispatching work. This is what makes the chat read-only.
+    const fnBody = chatActions.match(
+        /async function buildDirectSuprChatResponse[\s\S]*?\n\}/,
+    )?.[0] || '';
+    // The Concierge branch sits BEFORE the routeIntakeToProjectFlow
+    // try/catch and returns early. Verify the order.
+    const conciergeIdx = fnBody.indexOf('if (conciergeActive)');
+    const routeIdx = fnBody.indexOf('routeIntakeToProjectFlow');
+    assert.ok(conciergeIdx > 0, 'Concierge branch must exist');
+    assert.ok(routeIdx > 0, 'routeIntakeToProjectFlow must still exist for non-Concierge path');
+    assert.ok(
+        conciergeIdx < routeIdx,
+        'Concierge branch must short-circuit BEFORE the routeIntakeToProjectFlow call',
+    );
+});

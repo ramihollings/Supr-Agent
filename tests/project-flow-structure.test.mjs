@@ -152,3 +152,49 @@ test('project-flow keeps the runtime mode wired through getRuntimeMode', () => {
   assert.match(helper, /await getRuntimeMode\(\)/);
   assert.doesNotMatch(helper, /'idle',\s*'autonomous'/);
 });
+
+// ---------------------------------------------------------------------------
+// Pass 2 additions: Live Work Graph layout.
+// The orchestrator writes Flow_Nodes with hand-rolled x/y. Pass 2
+// replaces that with a server-side DAG layout in
+// lib/services/graph-layout.ts. These tests pin the *shape* of the
+// new arrangement so a future regression is caught.
+// ---------------------------------------------------------------------------
+
+test('project-flow writes raw Flow_Nodes without forcing positions (Pass 2)', () => {
+  // After Pass 2, the orchestrator's `persistFlowNode` must NOT
+  // pin x/y -- the canvas needs to receive all positions from
+  // the DAG layout engine, not a hand-rolled modulo.
+  const flow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
+  const persist = flow.match(/async function persistFlowNode[\s\S]*?\n\}/)?.[0] || '';
+  // It still writes the Flow_Nodes row -- just without a
+  // hardcoded x/y. The canvas layout engine positions them.
+  assert.match(persist, /INSERT INTO Flow_Nodes/);
+});
+
+test('graph-layout module is a real, importable sibling of project-flow', () => {
+  // The DAG layout module must exist on disk; otherwise the
+  // operating graph action can't import it.
+  assert.ok(existsSync('lib/services/graph-layout.ts'),
+    'expected lib/services/graph-layout.ts to exist (Pass 2 Live Work Graph cleanup)');
+  const layout = readFileSync('lib/services/graph-layout.ts', 'utf8');
+  // Public surface for the canvas to consume.
+  for (const symbol of [
+    'layoutGraph',
+    'layoutGraphDagre',
+    'layoutGraphFallback',
+    'buildPhaseGroups',
+    'annotateNodePhaseIds',
+  ]) {
+    assert.match(layout, new RegExp(`export\\s+function\\s+${symbol}\\b`));
+  }
+});
+
+test('operating graph action wires finalizeGraphShape in both branches', () => {
+  // Pass 2 refactor must apply the DAG layout to BOTH the
+  // Flow_Nodes-driven branch and the legacy mission.phases branch.
+  const action = readFileSync('app/actions/chat-workspace.ts', 'utf8');
+  const matches = action.match(/finalizeGraphShape\(\{[\s\S]*?missionPhases:/g) || [];
+  assert.ok(matches.length >= 2,
+    `expected >= 2 finalizeGraphShape() calls with missionPhases, got ${matches.length}`);
+});

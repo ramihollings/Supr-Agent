@@ -93,6 +93,101 @@ the legacy auto-spawn behaviour).
   identity, and the source surface (supr-chat, telegram, slack, ...).
 - Test coverage: `tests/concierge-handshake.test.mjs`.
 
+## Live Work Graph (Pass 2)
+
+The Mission Control canvas (`components/ProjectWorkflowCanvas.tsx`)
+renders a DAG of the active mission. Positions are no longer
+hand-rolled on the client or in the orchestrator -- they're
+produced server-side by `lib/services/graph-layout.ts` (dagre
+with a pure-JS fallback) and shipped to the client on every
+`fetchProjectOperatingGraphAction` call. The same module emits
+one `PhaseGroup` per canonical phase (Intake / Research / Build
+/ Verify / Deliver) so the canvas can render collapsed
+sub-graphs.
+
+### Layout Engine
+- `layoutGraphDagre(nodes, edges, opts)` -- runs `dagre` with
+  `rankdir: 'LR'`, `ranksep: 140`, `nodesep: 60`. Returns
+  positioned rectangles (top-left, not centre).
+- `layoutGraphFallback(nodes, edges, opts)` -- pure-JS
+  phase-column layout for environments where dagre is missing.
+  Same I/O contract.
+- `buildPhaseGroups({ nodePhase, positions, phaseStatus })` --
+  one `PhaseGroup` per canonical phase, with a bounding box
+  sized from the inner node positions + 12px padding + 32px
+  header. Active phase is always visible; future phases are
+  collapsed by default; the user clicks the band header to
+  expand.
+- `layoutGraph(nodes, edges, opts)` -- public entry point.
+  Wraps dagre in try/catch; logs a single warning the first
+  time it falls back.
+
+### Status Throttle Queue
+The canvas runs an in-memory queue for status transitions. When
+the SSE stream fires 10+ events at once, the human eye can't
+follow the work; the queue drains one entry every
+`transitionMs` (default 600ms) so the user sees each node
+flashing its new status individually instead of all of them at
+once. The drainer is single-flight: a new transition is only
+applied after the previous one finishes its CSS transition.
+`transitionMs = 0` drains the entire queue synchronously
+(used by tests).
+
+### Test Coverage
+- `tests/workflow-canvas-throttle.test.mjs` -- 15+ assertions
+  on the layout helpers, the canvas component shape, and the
+  throttle simulator.
+- `tests/project-flow-structure.test.mjs` -- three new tests
+  asserting that the orchestrator hands off positioning to the
+  layout engine and that `finalizeGraphShape` is wired in both
+  branches of `fetchProjectOperatingGraphAction`.
+
+## Concierge Chat Guard (Pass 3)
+
+The `sendChatMessageAction` in `app/actions/chat-workspace.ts`
+consults `isConciergeEnabled(settings.concierge_mode_enabled)`
+on every chat message. When Concierge mode is ON, the action
+forces the **direct (read-only) path** -- it does NOT call
+`routeIntakeToProjectFlow`, and the chat thread NEVER
+auto-spawns missions, even for substantive messages.
+
+### Behaviour
+- Operator enables Concierge (default ON).
+- User types "build me a coffee shop website" into the chat.
+- `sendChatMessageAction` runs, sets `conciergeActive = true`,
+  forces `shouldRoute = false`, and surfaces a hint:
+  ```
+  Concierge mode is on, so the chat thread is read-only --
+  nothing was auto-spawned.
+  To start work, describe your plan in plain language
+  (goal, audience, deliverable, constraints). I'll summarise
+  it as a confirmation card; once you click Approve, the
+  runtime spins up the right sub-agents.
+  ```
+- The user types a real plan, the chat UI stages it, and
+  clicking Approve calls `conciergeInitiateAction` -- the
+  only path that writes to `Missions` / `Glidepaths`.
+- Channel intakes (Telegram, Slack, Discord, API) still
+  auto-spawn as before; the Concierge protocol is scoped to
+  the chat surface only.
+
+### Audit Log
+- Every chat message under Concierge writes a single
+  `[Concierge] sendChatMessageAction: auto-spawn suppressed`
+  info line to the server console. Operators can grep for it
+  to confirm the gate is firing.
+- The chat thread's Supr_Chat_Messages row stores the hint
+  text verbatim, so the audit trail includes the user-visible
+  message that the chat returned.
+
+### Test Coverage
+- `tests/concierge-handshake.test.mjs` has three new tests
+  pinning the gate: `sendChatMessageAction` must reference
+  `isConciergeEnabled` and combine it with NOT (`!conciergeActive
+  && shouldRouteSuprChatToProjectFlow`); `buildDirectSuprChatResponse`
+  must accept the flag, emit the hint, and short-circuit
+  BEFORE the `routeIntakeToProjectFlow` call.
+
 ## Live CloakBrowser Integration
 
 The real CloakBrowser binary (CloakHQ) is integrated via `lib/tools/browser.ts` and exposed as the `web_scrape` tool. The Research page calls it directly through `/api/research/navigate` (rather than through the runtime registry) to avoid clashing with the lighter `web_scrape` defined in `lib/tools/project-flow.ts`. The tool accepts a `format` parameter:
