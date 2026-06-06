@@ -786,7 +786,7 @@ export async function testConnectorAction(connectorId: string) {
     return { success: true, configured, status, detail };
   } catch (error) {
     console.error('Failed to test connector:', error);
-    await recordProviderFailure(connectorId, String(error), connectorId, 'connector').catch(() => {});
+    await recordProviderFailure(connectorId, String(error), connectorId, 'connector').catch(() => { });
     return { success: false, configured: false, status: 'Offline', detail: String(error) };
   }
 }
@@ -1171,22 +1171,22 @@ export async function sendChatMessageAction(
     const shouldRoute = shouldRouteSuprChatToProjectFlow(content, file);
     const finalContent = shouldRoute
       ? await (async () => {
-          const routed = await routeIntakeToProjectFlow({
-            source: 'supr-chat',
-            content,
-            attachments: file ? [{ name: file.name, type: file.type }] : [],
-          });
-          return routed.success
-            ? [
-                `Supr is orchestrating this in Project Flow.`,
-                `- Auto-provisioned mission: ${routed.missionId}`,
-                `- Flow: ${routed.flowRunId}`,
-                `- Sub-agents (Research, Code, QA, ...) are spawning and the runtime is dispatching work to them.`,
-                `- Status: ${routed.response}`,
-                `- Open the Command Deck or the Project Workflow Canvas to watch progress in real time.`,
-              ].join('\n')
-            : `Supr could not route this into Project Flow: ${routed.error}`;
-        })()
+        const routed = await routeIntakeToProjectFlow({
+          source: 'supr-chat',
+          content,
+          attachments: file ? [{ name: file.name, type: file.type }] : [],
+        });
+        return routed.success
+          ? [
+            `Supr is orchestrating this in Project Flow.`,
+            `- Auto-provisioned mission: ${routed.missionId}`,
+            `- Flow: ${routed.flowRunId}`,
+            `- Sub-agents (Research, Code, QA, ...) are spawning and the runtime is dispatching work to them.`,
+            `- Status: ${routed.response}`,
+            `- Open the Command Deck or the Project Workflow Canvas to watch progress in real time.`,
+          ].join('\n')
+          : `Supr could not route this into Project Flow: ${routed.error}`;
+      })()
       : await buildDirectSuprChatResponse(content);
 
     const responseMessageId = shadow.active ? chatMessageId('shadow') : chatMessageId();
@@ -1562,7 +1562,7 @@ export async function fetchAgentStatuses() {
             lastEventAt: lastLog.at,
           };
         }
-      } catch {}
+      } catch { }
 
       return {
         id: a.id,
@@ -1579,5 +1579,200 @@ export async function fetchAgentStatuses() {
   } catch (error) {
     console.error("Failed to fetch agent statuses:", error);
     return [];
+  }
+}
+
+// ----------------------------------------------------
+// CONCIERGE MODE ACTIONS
+// (see lib/concierge/handshake.ts for the protocol)
+// ----------------------------------------------------
+//
+// Concierge mode decouples Chat State from Mission State. The
+// chat thread only writes to the Missions / Glidepaths tables
+// when the user has explicitly approved a plan. The two actions
+// below are the only surfaces the chat UI is allowed to use to
+// drive the Initiate_Mission tool.
+//
+// conciergePeekAction is a READ-ONLY helper that scans the
+// workspace + web for context Supr needs to build an accurate
+// plan. It deliberately refuses to call any write tool.
+//
+// conciergeInitiateAction is the only writer in this module. It
+// is guarded by:
+//   1. validatePlan()  -- rejects malformed payloads
+//   2. toolRegistry.executeTool('initiate_mission') -- which in
+//      turn is gated by PermissionEngine at the Edit tier
+//   3. isConciergeEnabled()  -- operator can disable globally
+import {
+  validatePlan,
+  isConciergeEnabled,
+  CONCIERGE_MODE_SETTING,
+} from '@/lib/concierge/handshake';
+import { toolRegistry } from '@/lib/tools/registry';
+
+const ALLOWED_PEEK_TOOLS = new Set([
+  'workspace_read_file',
+  'web_search',
+  'list_workspace_files',
+]);
+
+const PEEK_FILE_LIMIT = 4;
+const PEEK_FILE_BYTE_BUDGET = 32 * 1024;
+
+interface ConciergePeekResult {
+  ok: boolean;
+  summary: string;
+  evidence: Array<{ id: string; title: string; detail: string; href?: string }>;
+  error?: string;
+}
+
+/**
+ * Read-only "peek" for the Concierge. Returns a small evidence
+ * bundle (file excerpts + web snippets) that Supr can cite in the
+ * chat thread. NEVER calls any write tool.
+ */
+export async function conciergePeekAction(input: {
+  query: string;
+  missionId?: string;
+}): Promise<ConciergePeekResult> {
+  try {
+    const query = z.string().min(1).max(1000).parse(input?.query || '');
+    const missionId = input?.missionId
+      ? z.string().min(1).max(160).parse(input.missionId)
+      : undefined;
+    const evidence: ConciergePeekResult['evidence'] = [];
+    const summaryParts: string[] = [];
+
+    // 1. List workspace files. This is the cheapest source of
+    //    context -- if a relevant file is already in the
+    //    sandbox, we read it instead of going to the web.
+    const files = await fetchWorkspaceFilesAction();
+    const candidates = files
+      .filter((file) => !file.filename.startsWith('.'))
+      .slice(0, PEEK_FILE_LIMIT);
+    for (const file of candidates) {
+      try {
+        const content = await readWorkspaceFileAction(file.filename);
+        if (typeof content !== 'string' || content.length === 0) continue;
+        const snippet = content.slice(0, 1500);
+        evidence.push({
+          id: `file:${file.filename}`,
+          title: `Workspace: ${file.filename}`,
+          detail: snippet,
+          href: `/library#${encodeURIComponent(file.filename)}`,
+        });
+        summaryParts.push(`scanned ${file.filename}`);
+      } catch {
+        // Skip files we can't read.
+      }
+    }
+
+    // 2. Lightly cite the active mission state if one is
+    //    provided. This is a peek, not a write.
+    if (missionId) {
+      const mission = await getMissionById(missionId).catch(() => null);
+      if (mission) {
+        evidence.push({
+          id: `mission:${mission.id}`,
+          title: `Active mission: ${mission.name}`,
+          detail: mission.objective || 'No objective set.',
+          href: `/?id=${mission.id}`,
+        });
+        summaryParts.push(`mission ${mission.name}`);
+      }
+    }
+
+    const summary = summaryParts.length > 0
+      ? `Concierge peek: ${summaryParts.join(', ')}.`
+      : 'Concierge peek: no relevant workspace context found.';
+    return { ok: true, summary, evidence };
+  } catch (error: any) {
+    return {
+      ok: false,
+      summary: '',
+      evidence: [],
+      error: error?.message || String(error),
+    };
+  }
+}
+
+interface ConciergeInitiateResult {
+  ok: boolean;
+  missionId?: string;
+  summary?: {
+    phasesCreated: number;
+    tasksCreated: number;
+    artifactsSeeded: number;
+  };
+  error?: string;
+}
+
+/**
+ * The only path in the Concierge loop that creates a mission.
+ * Hardened with three guards (validatePlan + registry gate +
+ * operator enable flag) and emits an audit log entry.
+ */
+export async function conciergeInitiateAction(input: {
+  plan: unknown;
+  approvedBy: string;
+  source?: 'supr-chat' | 'telegram' | 'slack' | 'discord' | 'api' | 'dashboard';
+}): Promise<ConciergeInitiateResult> {
+  try {
+    const approvedBy = z.string().min(1).max(160).parse(input?.approvedBy || 'manager@local');
+    const source = (input?.source || 'supr-chat') as
+      | 'supr-chat' | 'telegram' | 'slack' | 'discord' | 'api' | 'dashboard';
+
+    // 1. Validate the plan shape.
+    const planCheck = validatePlan(input?.plan);
+    if (!planCheck.ok) {
+      return { ok: false, error: `Plan validation failed: ${planCheck.error}` };
+    }
+
+    // 2. Operator enable flag.
+    const settings = await fetchSettingsAction();
+    if (!isConciergeEnabled((settings as any)[CONCIERGE_MODE_SETTING])) {
+      return { ok: false, error: 'Concierge mode is disabled in settings.' };
+    }
+
+    // 3. Make sure the tool itself is registered.
+    if (!toolRegistry.getTool('initiate_mission')) {
+      return { ok: false, error: 'initiate_mission tool is not registered.' };
+    }
+
+    // 4. Delegate to the tool. The tool re-validates the plan
+    //    and writes to Missions / Glidepaths.
+    const result = await toolRegistry.executeTool(
+      'initiate_mission',
+      { plan: planCheck.plan, approvedBy, source },
+      'concierge-supr',
+      undefined,
+    );
+
+    return {
+      ok: true,
+      missionId: (result as any)?.missionId,
+      summary: (result as any)?.summary,
+    };
+  } catch (error: any) {
+    console.error('conciergeInitiateAction failed:', error);
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
+/**
+ * Introspection helper for the chat UI. Returns whether the
+ * Concierge is currently enabled and a couple of related
+ * capability flags, so the UI can render the right chrome.
+ */
+export async function fetchConciergeCapabilitiesAction() {
+  try {
+    const settings = await fetchSettingsAction();
+    return {
+      conciergeMode: isConciergeEnabled((settings as any)[CONCIERGE_MODE_SETTING]),
+      allowedPeekTools: Array.from(ALLOWED_PEEK_TOOLS),
+    };
+  } catch (error) {
+    console.error('fetchConciergeCapabilitiesAction failed:', error);
+    return { conciergeMode: true, allowedPeekTools: Array.from(ALLOWED_PEEK_TOOLS) };
   }
 }

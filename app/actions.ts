@@ -803,7 +803,7 @@ export async function fetchOrchestrationFeed(projectId?: string) {
       : await dbClient.query(sql);
     return rows.map(r => {
       let detail = '', targetAgent = '';
-      try { const m = JSON.parse(r.metadata); detail = m.detail || ''; targetAgent = m.targetAgent || ''; } catch(e){}
+      try { const m = JSON.parse(r.metadata); detail = m.detail || ''; targetAgent = m.targetAgent || ''; } catch (e) { }
       return {
         id: r.id,
         eventType: r.event_type,
@@ -891,3 +891,11 @@ export const exportOrganizationAction = chatWorkspace.exportOrganizationAction;
 export const importOrganizationAction = chatWorkspace.importOrganizationAction;
 export const duplicateMissionAction = chatWorkspace.duplicateMissionAction;
 export const fetchAgentStatuses = chatWorkspace.fetchAgentStatuses;
+
+// ----------------------------------------------------
+// CONCIERGE MODE ACTIONS
+// (re-exported from chat-workspace.ts -- see lib/concierge/handshake.ts)
+// ----------------------------------------------------
+export const conciergePeekAction = chatWorkspace.conciergePeekAction;
+export const conciergeInitiateAction = chatWorkspace.conciergeInitiateAction;
+export const fetchConciergeCapabilitiesAction = chatWorkspace.fetchConciergeCapabilitiesAction;

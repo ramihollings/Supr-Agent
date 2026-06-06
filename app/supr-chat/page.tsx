@@ -7,11 +7,11 @@ import { useSettingsSnapshot } from '@/hooks/useSettingsSnapshot';
 import { WorkspaceFilesPanel } from '@/components/WorkspaceFilesPanel';
 import { CanvasEditorPanel } from '@/components/CanvasEditorPanel';
 import { CanvasRunPanel } from '@/components/CanvasRunPanel';
-import { 
-  fetchChatMessagesAction, 
+import {
+  fetchChatMessagesAction,
   updateChatMessageAction,
   deleteChatMessageAction,
-  sendChatMessageAction, 
+  sendChatMessageAction,
   fetchWorkspaceFilesAction,
   readWorkspaceFileAction,
   writeWorkspaceFileAction,
@@ -21,8 +21,13 @@ import {
   fetchLiveProviderModelsAction,
   updateSettingAction,
   fetchAgentStatuses,
-  fetchMissionsAction
+  fetchMissionsAction,
+  conciergePeekAction,
+  conciergeInitiateAction,
+  fetchConciergeCapabilitiesAction,
 } from '@/app/actions';
+import { detectHandshakeIntent, type InitiateMissionPlan } from '@/lib/concierge/handshake';
+import { useRouter } from 'next/navigation';
 import { PROVIDER_MODEL_OPTIONS, PROVIDER_OPTIONS, defaultModelForProvider } from '@/lib/providers/catalog';
 
 interface ChatMessage {
@@ -87,11 +92,25 @@ export default function SuprChatPage() {
   const [canvasOpen, setCanvasOpen] = useState(true); // default open for 3-pane layout
   const [canvasTab, setCanvasTab] = useState<'preview' | 'run' | 'explorer'>('explorer');
   const [canvasFile, setCanvasFile] = useState<{ filename: string; content: string } | null>(null);
-  
+
   // Workspace files explorer list
   const [wsFiles, setWsFiles] = useState<WorkspaceFile[]>([]);
   const [runLoading, setRunLoading] = useState(false);
   const [runOutput, setRunOutput] = useState<{ success: boolean; stdout?: string; stderr?: string; error?: string } | null>(null);
+
+  // ---- Concierge Mode state -----------------------------------------
+  // chatPhase tracks where the conversation is in the Concierge loop:
+  //   'concierge'         -> default; user is discussing with Supr
+  //   'awaiting_handshake'-> Supr has proposed a plan; user must approve
+  //   'mission_live'     -> the Initiate_Mission tool has fired
+  const [chatPhase, setChatPhase] = useState<'concierge' | 'awaiting_handshake' | 'mission_live'>('concierge');
+  const [conciergeEnabled, setConciergeEnabled] = useState(true);
+  const [pendingPlan, setPendingPlan] = useState<InitiateMissionPlan | null>(null);
+  const [pendingPlanMessageId, setPendingPlanMessageId] = useState<string | null>(null);
+  const [initiateBusy, setInitiateBusy] = useState(false);
+  const [initiateError, setInitiateError] = useState<string | null>(null);
+  const router = useRouter();
+  // -------------------------------------------------------------------
 
   useEffect(() => {
     loadData();
@@ -102,6 +121,22 @@ export default function SuprChatPage() {
       clearInterval(wsInterval);
       clearInterval(agentInterval);
     };
+  }, []);
+
+  // Concierge: load capability flags once on mount so the header
+  // and confirmation card can render the right chrome.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const caps = await fetchConciergeCapabilitiesAction();
+        if (!cancelled) setConciergeEnabled(!!caps?.conciergeMode);
+      } catch {
+        // Default to true if the server is unreachable.
+        if (!cancelled) setConciergeEnabled(true);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -186,7 +221,7 @@ export default function SuprChatPage() {
     if (processedMsgs.length <= 1) {
       const activeProjCount = projectsList.filter(p => p.status === 'Active').length;
       const fileCount = filesList.length;
-      
+
       const welcomeText = `Hello Manager! I am Supr, your central coordinator. 
 I have initialized our secure session. 
 
@@ -237,13 +272,13 @@ How can I assist you today? You can query data, ask me to draft/run code files i
     setUploadLoading(true);
     const reader = new FileReader();
 
-    const isText = file.type.startsWith('text/') || 
-                   file.name.endsWith('.js') || 
-                   file.name.endsWith('.ts') || 
-                   file.name.endsWith('.py') || 
-                   file.name.endsWith('.json') || 
-                   file.name.endsWith('.csv') ||
-                   file.name.endsWith('.md');
+    const isText = file.type.startsWith('text/') ||
+      file.name.endsWith('.js') ||
+      file.name.endsWith('.ts') ||
+      file.name.endsWith('.py') ||
+      file.name.endsWith('.json') ||
+      file.name.endsWith('.csv') ||
+      file.name.endsWith('.md');
 
     reader.onload = () => {
       setSelectedFile({
@@ -268,9 +303,11 @@ How can I assist you today? You can query data, ask me to draft/run code files i
     setChatLoading(true);
     const textToSend = inputText;
     const fileToSend = selectedFile || undefined;
-    
+
     setInputText('');
     setSelectedFile(null);
+
+    const intent = conciergeEnabled ? detectHandshakeIntent(textToSend) : { kind: 'none' as const };
 
     setMessages(prev => [
       ...prev,
@@ -287,6 +324,39 @@ How can I assist you today? You can query data, ask me to draft/run code files i
     if (res.success) {
       await loadData();
       await loadWorkspace();
+
+      // Concierge Handshake: if the user just said "go" and the
+      // most recent Supr reply contains a ```plan``` JSON fence,
+      // extract the plan, validate it, and stage the confirmation
+      // card. The user still has to click "Approve & start mission"
+      // -- the only thing the chat auto-spawns is the card.
+      if (conciergeEnabled && intent.kind === 'go') {
+        try {
+          const latest = await fetchChatMessagesAction();
+          for (let i = latest.length - 1; i >= 0; i--) {
+            const m = latest[i];
+            if (m.sender !== 'supr') continue;
+            const plan = extractPlanFromMessage(m.content || '');
+            if (plan) {
+              setPendingPlan(plan);
+              setPendingPlanMessageId(m.id);
+              setChatPhase('awaiting_handshake');
+              break;
+            }
+          }
+          if (!pendingPlan) {
+            // No plan in the most recent Supr message; nudge the user.
+            alert('Supr has not yet proposed a plan in ```plan``` JSON form. Ask Supr to "propose a plan" first, then approve.');
+          }
+        } catch (err) {
+          console.error('Concierge plan extraction failed:', err);
+        }
+      } else if (conciergeEnabled && intent.kind === 'reject') {
+        // User changed their mind: drop any pending plan.
+        setPendingPlan(null);
+        setPendingPlanMessageId(null);
+        setChatPhase('concierge');
+      }
     } else {
       alert(`Chat execution failed: ${res.error}`);
     }
@@ -323,6 +393,64 @@ How can I assist you today? You can query data, ask me to draft/run code files i
       alert(`Message delete failed: ${res.error}`);
     }
   };
+
+  // ---- Concierge plan extraction & approval ----------------------
+  // Supr wraps a proposed plan in a ```plan``` JSON fence. We
+  // scan the most recent Supr message for the fence, parse the
+  // JSON, validate it, and stage it as pendingPlan. Anything that
+  // doesn't validate is left alone -- the user can keep iterating
+  // with Supr until a valid plan is emitted.
+  const PLAN_FENCE = /```plan\s*\n([\s\S]*?)```/m;
+  function extractPlanFromMessage(content: string): InitiateMissionPlan | null {
+    if (!content) return null;
+    const match = PLAN_FENCE.exec(content);
+    if (!match) return null;
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      // Re-validate against the canonical schema.
+      const { InitiateMissionPlanSchema } = require('@/lib/concierge/handshake');
+      const result = InitiateMissionPlanSchema.safeParse(parsed);
+      if (result.success) return result.data as InitiateMissionPlan;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  const handleApprovePlan = async () => {
+    if (!pendingPlan || initiateBusy) return;
+    setInitiateBusy(true);
+    setInitiateError(null);
+    try {
+      const res = await conciergeInitiateAction({
+        plan: pendingPlan,
+        approvedBy: 'manager@local',
+        source: 'supr-chat',
+      });
+      if (res.ok && res.missionId) {
+        setChatPhase('mission_live');
+        setPendingPlan(null);
+        setPendingPlanMessageId(null);
+        // Move the user to the Live Work Graph so they can watch
+        // the mission execute.
+        router.push(`/?id=${res.missionId}`);
+      } else {
+        setInitiateError(res.error || 'Concierge initiate failed.');
+      }
+    } catch (err: any) {
+      setInitiateError(err?.message || String(err));
+    } finally {
+      setInitiateBusy(false);
+    }
+  };
+
+  const handleRejectPlan = () => {
+    setPendingPlan(null);
+    setPendingPlanMessageId(null);
+    setChatPhase('concierge');
+    setInitiateError(null);
+  };
+  // ----------------------------------------------------------------
 
   const handleToggleSandboxKeys = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const checked = e.target.checked;
@@ -390,7 +518,7 @@ How can I assist you today? You can query data, ask me to draft/run code files i
     setRunLoading(true);
     setRunOutput(null);
     setCanvasTab('run');
-    
+
     const res = await executeCodeAction(canvasFile.filename, canvasFile.filename.endsWith('.py') ? 'python' : 'javascript');
     setRunOutput(res);
     setRunLoading(false);
@@ -424,7 +552,7 @@ How can I assist you today? You can query data, ask me to draft/run code files i
   const parseMessageContent = (content: string) => {
     const telemetryRegex = /```telemetry\n([\s\S]*?)```\n*/g;
     const match = telemetryRegex.exec(content);
-    
+
     if (match) {
       const logs = match[1].trim();
       const text = content.replace(telemetryRegex, '').trim();
@@ -435,7 +563,7 @@ How can I assist you today? You can query data, ask me to draft/run code files i
 
   return (
     <div className="flex-1 md:ml-64 flex min-h-screen bg-surface-container relative overflow-hidden">
-      
+
       {/* Pane 1: Left Settings and Squad Pane */}
       <aside className="w-[280px] border-r-4 border-primary bg-background shrink-0 flex flex-col h-screen overflow-y-auto custom-scrollbar z-10 p-5 space-y-6">
         <div>
@@ -446,8 +574,8 @@ How can I assist you today? You can query data, ask me to draft/run code files i
           <div className="space-y-4 text-xs">
             <div>
               <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Model Provider</label>
-              <select 
-                value={activeModel} 
+              <select
+                value={activeModel}
                 onChange={(e) => handleProviderChange(e.target.value)}
                 className="w-full bg-surface neo-border p-1.5 font-bold focus:outline-none"
               >
@@ -480,8 +608,8 @@ How can I assist you today? You can query data, ask me to draft/run code files i
 
             <div>
               <label className="block text-[9px] font-black uppercase text-on-surface-variant mb-1">Autonomy Clearance</label>
-              <select 
-                value={autonomyMode} 
+              <select
+                value={autonomyMode}
                 onChange={(e) => setAutonomyMode(e.target.value)}
                 className="w-full bg-surface neo-border p-1.5 font-bold focus:outline-none"
               >
@@ -493,19 +621,19 @@ How can I assist you today? You can query data, ask me to draft/run code files i
 
             {/* Sandbox keys allow toggle */}
             <div className="pt-2 border-t border-primary/20 flex items-center gap-2">
-              <input 
-                type="checkbox" 
+              <input
+                type="checkbox"
                 id="sandbox_allow_keys"
                 checked={sandboxAllowKeys}
                 onChange={handleToggleSandboxKeys}
-                className="w-4 h-4 accent-primary cursor-pointer border-2 border-primary" 
+                className="w-4 h-4 accent-primary cursor-pointer border-2 border-primary"
               />
               <label htmlFor="sandbox_allow_keys" className="font-bold text-[10px] uppercase text-primary cursor-pointer select-none">
                 Allow API keys in Sandbox
               </label>
             </div>
 
-            <button 
+            <button
               onClick={handleApplyChatSettings}
               className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-2 neo-border hover:bg-tertiary transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
             >
@@ -524,9 +652,8 @@ How can I assist you today? You can query data, ask me to draft/run code files i
               <div key={agent.id} className="p-2 border-2 border-primary bg-surface flex flex-col gap-1 text-on-surface">
                 <div className="flex justify-between items-center">
                   <span className="font-bold uppercase text-[10px]">{agent.name}</span>
-                  <span className={`px-1.5 py-0.5 text-[8px] font-black uppercase neo-border ${
-                    agent.status === 'Working' ? 'bg-secondary text-on-secondary animate-pulse' : 'bg-surface-variant text-on-surface-variant'
-                  }`}>
+                  <span className={`px-1.5 py-0.5 text-[8px] font-black uppercase neo-border ${agent.status === 'Working' ? 'bg-secondary text-on-secondary animate-pulse' : 'bg-surface-variant text-on-surface-variant'
+                    }`}>
                     {agent.status}
                   </span>
                 </div>
@@ -551,15 +678,28 @@ How can I assist you today? You can query data, ask me to draft/run code files i
           <div className="flex items-center space-x-4">
             <span className="material-symbols-outlined text-primary text-2xl">chat</span>
             <h2 className="font-headline font-bold text-lg md:text-xl uppercase tracking-tight">Supr-Chat</h2>
+            {conciergeEnabled && (
+              <span className={`px-2 py-0.5 font-headline font-black uppercase text-[9px] border-2 border-primary ${chatPhase === 'awaiting_handshake'
+                ? 'bg-secondary text-on-secondary animate-pulse'
+                : chatPhase === 'mission_live'
+                  ? 'bg-tertiary text-on-tertiary'
+                  : 'bg-primary text-on-primary'
+                }`} title="Concierge Mode: Supr will not start a mission until you approve a plan in chat.">
+                {chatPhase === 'awaiting_handshake'
+                  ? 'Awaiting Handshake'
+                  : chatPhase === 'mission_live'
+                    ? 'Mission Live'
+                    : 'Concierge'}
+              </span>
+            )}
           </div>
-          
+
           <div className="flex items-center space-x-3">
             {/* Toggle Canvas Button */}
-            <button 
+            <button
               onClick={() => setCanvasOpen(!canvasOpen)}
-              className={`p-2 border-2 border-primary flex items-center justify-center hover:bg-surface-container ${
-                canvasOpen ? 'bg-primary text-on-primary' : 'bg-background'
-              }`}
+              className={`p-2 border-2 border-primary flex items-center justify-center hover:bg-surface-container ${canvasOpen ? 'bg-primary text-on-primary' : 'bg-background'
+                }`}
               title="Toggle Workspace Canvas"
             >
               <span className="material-symbols-outlined text-sm">side_navigation</span>
@@ -572,10 +712,10 @@ How can I assist you today? You can query data, ask me to draft/run code files i
           {messages.map((msg) => {
             const { logs, text } = parseMessageContent(msg.content);
             const isUser = msg.sender === 'user';
-            
+
             return (
               <div key={msg.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-4xl ${isUser ? 'ml-auto' : 'mr-auto'} w-full`}>
-                
+
                 {/* 1. File Attachment Rendering */}
                 {msg.file && (
                   <div className={`mb-2 p-3 neo-border bg-background max-w-sm flex items-center gap-3 shadow-[2px_2px_0px_0px_var(--color-primary)]`}>
@@ -601,32 +741,29 @@ How can I assist you today? You can query data, ask me to draft/run code files i
                 )}
 
                 {/* 3. Text Message Bubble */}
-                <div className={`p-4 neo-border font-body text-sm leading-relaxed max-w-2xl group ${
-                  isUser 
-                    ? 'bg-primary text-on-primary shadow-[4px_4px_0px_0px_rgba(0,0,0,0.15)]' 
-                    : 'bg-background text-on-background shadow-[4px_4px_0px_0px_var(--color-primary)]'
-                }`}>
+                <div className={`p-4 neo-border font-body text-sm leading-relaxed max-w-2xl group ${isUser
+                  ? 'bg-primary text-on-primary shadow-[4px_4px_0px_0px_rgba(0,0,0,0.15)]'
+                  : 'bg-background text-on-background shadow-[4px_4px_0px_0px_var(--color-primary)]'
+                  }`}>
                   <div className="flex items-center justify-end gap-1 mb-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <button
                       type="button"
                       onClick={() => handleStartEditMessage(msg)}
-                      className={`border px-2 py-0.5 font-headline font-bold uppercase text-[8px] ${
-                        isUser ? 'border-on-primary text-on-primary hover:bg-on-primary hover:text-primary' : 'border-primary text-primary hover:bg-primary hover:text-on-primary'
-                      }`}
+                      className={`border px-2 py-0.5 font-headline font-bold uppercase text-[8px] ${isUser ? 'border-on-primary text-on-primary hover:bg-on-primary hover:text-primary' : 'border-primary text-primary hover:bg-primary hover:text-on-primary'
+                        }`}
                     >
                       Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteMessage(msg.id)}
-                      className={`border px-2 py-0.5 font-headline font-bold uppercase text-[8px] ${
-                        isUser ? 'border-on-primary text-on-primary hover:bg-on-primary hover:text-primary' : 'border-error text-error hover:bg-error hover:text-on-error'
-                      }`}
+                      className={`border px-2 py-0.5 font-headline font-bold uppercase text-[8px] ${isUser ? 'border-on-primary text-on-primary hover:bg-on-primary hover:text-primary' : 'border-error text-error hover:bg-error hover:text-on-error'
+                        }`}
                     >
                       Delete
                     </button>
                   </div>
-                  
+
                   {/* Handle inline generated images */}
                   {msg.file?.type.startsWith('image/') && msg.file.content ? (
                     <div className="mb-3 neo-border bg-surface overflow-hidden max-w-md">
@@ -673,28 +810,106 @@ How can I assist you today? You can query data, ask me to draft/run code files i
                     <div className="whitespace-pre-wrap">{text}</div>
                   )}
                 </div>
-                
+
                 <span className="text-[8px] text-on-surface-variant font-mono mt-1 px-1">
-                  {new Date(msg.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
             );
           })}
-          
+
+          {/* Concierge Handshake Confirmation Card
+              Rendered ONLY when a plan is staged. The Approve button
+              is the ONLY path that invokes the Initiate_Mission tool. */}
+          {pendingPlan && (
+            <div className="max-w-3xl mx-auto p-5 neo-border bg-background shadow-[6px_6px_0px_0px_rgba(26,26,26,1)] border-l-8 border-l-secondary">
+              <div className="flex items-center gap-2 mb-3 border-b-2 border-primary pb-2">
+                <span className="material-symbols-outlined text-secondary text-xl">handshake</span>
+                <h3 className="font-headline font-black uppercase text-sm text-primary">Concierge Handshake</h3>
+                <span className="ml-auto px-2 py-0.5 bg-secondary text-on-secondary font-headline font-black uppercase text-[9px] animate-pulse">
+                  Awaiting Approval
+                </span>
+              </div>
+              <p className="font-body text-xs text-on-surface-variant mb-3 leading-relaxed">
+                Supr has proposed a plan. <strong>Review it carefully.</strong> Clicking <em>Approve & start mission</em> will create the mission in SQLite and wake up the Live Work Graph. Nothing runs until you approve.
+              </p>
+              <div className="bg-surface-container border-2 border-primary p-3 mb-3">
+                <p className="font-headline font-black uppercase text-[10px] text-primary">Mission</p>
+                <p className="font-body text-sm font-bold">{pendingPlan.name}</p>
+                <p className="font-body text-[11px] text-on-surface-variant mt-1 leading-relaxed">{pendingPlan.objective}</p>
+                <div className="mt-3">
+                  <p className="font-headline font-black uppercase text-[10px] text-primary mb-1">
+                    Phases ({pendingPlan.phases.length}) &middot; Tasks ({pendingPlan.phases.reduce((sum, p) => sum + p.tasks.length, 0)})
+                  </p>
+                  <ul className="space-y-1.5">
+                    {pendingPlan.phases.map((phase, idx) => (
+                      <li key={idx} className="border-l-4 border-tertiary pl-2 py-1 bg-background">
+                        <p className="font-headline font-black uppercase text-[10px] text-primary">{phase.name}</p>
+                        <ul className="mt-1 space-y-0.5">
+                          {phase.tasks.map((task, tidx) => (
+                            <li key={tidx} className="font-body text-[10px] text-on-surface-variant">
+                              &middot; {task.title} <span className="text-on-surface-variant/60">({task.agentRole}, {task.riskLevel})</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              {initiateError && (
+                <div className="mb-3 p-2 border-2 border-error bg-error/10 text-error font-body text-xs">
+                  <strong>Initiate failed:</strong> {initiateError}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleApprovePlan}
+                  disabled={initiateBusy}
+                  className="flex-1 min-w-[180px] bg-primary text-on-primary font-headline font-black uppercase text-xs py-3 neo-border neo-shadow hover:bg-tertiary hover:text-on-tertiary disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {initiateBusy ? (
+                    <>
+                      <span className="material-symbols-outlined animate-spin text-sm">sync</span>
+                      Initiating Mission...
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-sm">rocket_launch</span>
+                      Approve & Start Mission
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRejectPlan}
+                  disabled={initiateBusy}
+                  className="bg-background border-2 border-primary text-primary font-headline font-bold uppercase text-xs py-3 px-4 neo-border hover:bg-surface-container disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+              <p className="mt-3 font-mono text-[9px] text-on-surface-variant">
+                Approved by: <strong>manager@local</strong> &middot; Source: <strong>supr-chat</strong> &middot; Plan ref: <code>{pendingPlanMessageId ?? 'pending'}</code>
+              </p>
+            </div>
+          )}
+
           {chatLoading && (
             <div className="flex items-center gap-3 p-4 max-w-sm neo-border bg-background shadow-[4px_4px_0px_0px_var(--color-primary)]">
               <span className="material-symbols-outlined animate-spin text-primary">sync</span>
               <span className="font-headline font-bold text-xs uppercase text-primary">Supr is orchestrating...</span>
             </div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </div>
 
         {/* Input Dock */}
         <div className="flex-none p-4 md:p-6 border-t-4 border-primary bg-background z-20">
           <form onSubmit={handleSend} className="max-w-4xl mx-auto flex flex-col gap-3">
-            
+
             {/* Selected File Preview Box */}
             {selectedFile && (
               <div className="flex items-center justify-between p-2.5 neo-border bg-surface-container max-w-md text-xs">
@@ -704,8 +919,8 @@ How can I assist you today? You can query data, ask me to draft/run code files i
                   </span>
                   <span className="font-bold truncate">{selectedFile.name}</span>
                 </div>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => setSelectedFile(null)}
                   className="text-error font-bold uppercase hover:underline text-[10px]"
                 >
@@ -716,24 +931,24 @@ How can I assist you today? You can query data, ask me to draft/run code files i
 
             <div className="flex gap-3">
               {/* Attachment Button */}
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={handleFileUploadClick}
                 disabled={uploadLoading}
                 className="px-4 py-3 neo-border bg-background hover:bg-surface-container flex items-center justify-center transition-colors disabled:opacity-50"
               >
                 <span className="material-symbols-outlined">attachment</span>
               </button>
-              <input 
-                type="file" 
+              <input
+                type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                className="hidden" 
+                className="hidden"
               />
 
               {/* Message input */}
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="Ask Supr to fetch data, generate image, draft mail, create sandbox code..."
@@ -742,7 +957,7 @@ How can I assist you today? You can query data, ask me to draft/run code files i
               />
 
               {/* Submit */}
-              <button 
+              <button
                 type="submit"
                 disabled={chatLoading || (!inputText.trim() && !selectedFile)}
                 className="px-6 py-3 bg-primary text-on-primary font-headline font-black uppercase text-sm neo-border neo-shadow hover:bg-tertiary hover:text-on-tertiary active:translate-x-1 active:translate-y-1 transition-all disabled:opacity-50 disabled:pointer-events-none"
@@ -764,14 +979,13 @@ How can I assist you today? You can query data, ask me to draft/run code files i
               { id: 'preview', label: 'Editor Preview', icon: 'description' },
               { id: 'run', label: 'Terminal output', icon: 'terminal' },
             ].map((tab) => (
-              <button 
+              <button
                 key={tab.id}
                 onClick={() => setCanvasTab(tab.id as any)}
-                className={`flex-1 p-3 font-headline font-bold uppercase text-[10px] flex items-center justify-center gap-1.5 border-r-2 border-primary last:border-r-0 ${
-                  canvasTab === tab.id 
-                    ? 'bg-background text-primary border-b-4 border-b-transparent' 
-                    : 'bg-surface-variant hover:bg-surface-container text-on-surface-variant'
-                }`}
+                className={`flex-1 p-3 font-headline font-bold uppercase text-[10px] flex items-center justify-center gap-1.5 border-r-2 border-primary last:border-r-0 ${canvasTab === tab.id
+                  ? 'bg-background text-primary border-b-4 border-b-transparent'
+                  : 'bg-surface-variant hover:bg-surface-container text-on-surface-variant'
+                  }`}
               >
                 <span className="material-symbols-outlined text-xs">{tab.icon}</span>
                 {tab.label}
@@ -781,7 +995,7 @@ How can I assist you today? You can query data, ask me to draft/run code files i
 
           {/* Drawer Body content */}
           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 bg-surface-container-low flex flex-col">
-            
+
             {/* Workspace Files Explorer */}
             {canvasTab === 'explorer' && (
               <WorkspaceFilesPanel
