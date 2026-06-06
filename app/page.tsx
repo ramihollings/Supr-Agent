@@ -124,6 +124,17 @@ function DashboardContent() {
   // status are always up to date when the page loads or refreshes).
   const [activeTeamCount, setActiveTeamCount] = useState(0);
   const [recentTeamCount, setRecentTeamCount] = useState(0);
+  // Live streaming progress for the currently-running team, fed
+  // by SSE `team_progress` / `team_completed` / `team_failed`
+  // events. Cleared after 8s once the team has settled.
+  const [liveTeamProgress, setLiveTeamProgress] = useState<{
+    name: string;
+    memberName: string | null;
+    completed: number | null;
+    total: number | null;
+    status: string | null;
+    tone: 'running' | 'completed' | 'failure';
+  } | null>(null);
   const [liveEvent, setLiveEvent] = useState<{ summary: string; at: string; tone: 'success' | 'failure' | 'system' } | null>(null);
   const { showToast } = useToast();
 
@@ -497,13 +508,69 @@ function DashboardContent() {
         // ignore
       }
     };
+    // Sub-agent team events surface as a "Team '<name>': X of Y members
+    // done" chip in the live status bar. `team_progress` fires per
+    // member; `team_completed` / `team_failed` flip the chip color
+    // and clear the running message.
+    const handleTeamEvent = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data);
+        const reason = payload?.reason as string | undefined;
+        const name = payload?.name as string | undefined;
+        const p = payload?.payload as Record<string, unknown> | undefined;
+        if (!reason || !name || !p) return;
+        if (reason === 'team_progress') {
+          const completed = typeof p.completedCount === 'number' ? p.completedCount : null;
+          const total = typeof p.total === 'number' ? p.total : null;
+          const memberName = p.memberName as string | undefined;
+          setLiveTeamProgress({
+            name,
+            memberName: memberName ?? null,
+            completed,
+            total,
+            status: (p.status as string) ?? null,
+            tone: p.status === 'failed' ? 'failure' : 'running',
+          });
+        } else if (reason === 'team_completed') {
+          setLiveTeamProgress({
+            name,
+            memberName: null,
+            completed: typeof p.completedCount === 'number' ? p.completedCount : null,
+            total: typeof p.memberCount === 'number' ? p.memberCount : null,
+            status: 'completed',
+            tone: 'completed',
+          });
+          // The 10s poll will reconcile the count back to the
+          // canonical state.
+          setTimeout(() => setLiveTeamProgress(null), 8000);
+        } else if (reason === 'team_failed') {
+          setLiveTeamProgress({
+            name,
+            memberName: null,
+            completed: typeof p.completedCount === 'number' ? p.completedCount : null,
+            total: typeof p.memberCount === 'number' ? p.memberCount : null,
+            status: 'failed',
+            tone: 'failure',
+          });
+          setTimeout(() => setLiveTeamProgress(null), 8000);
+        }
+      } catch {
+        // ignore
+      }
+    };
     source.addEventListener('open', () => setSseStatus('open'));
     source.addEventListener('error', () => setSseStatus('closed'));
     source.addEventListener('mission', handleMissionEvent);
     source.addEventListener('tool', handleToolEvent);
+    source.addEventListener('team_progress', handleTeamEvent);
+    source.addEventListener('team_completed', handleTeamEvent);
+    source.addEventListener('team_failed', handleTeamEvent);
     return () => {
       source.removeEventListener('mission', handleMissionEvent);
       source.removeEventListener('tool', handleToolEvent);
+      source.removeEventListener('team_progress', handleTeamEvent);
+      source.removeEventListener('team_completed', handleTeamEvent);
+      source.removeEventListener('team_failed', handleTeamEvent);
       source.close();
       setSseStatus('closed');
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -560,6 +627,7 @@ function DashboardContent() {
         liveEvent={liveEvent}
         activeTeamCount={activeTeamCount}
         recentTeamCount={recentTeamCount}
+        liveTeamProgress={liveTeamProgress}
       />
 
       <div className="xl:hidden bg-background border-b-4 border-primary grid grid-cols-3">
@@ -665,6 +733,7 @@ function LiveStatusBar({
   liveEvent,
   activeTeamCount,
   recentTeamCount,
+  liveTeamProgress,
 }: {
   sseStatus: 'connecting' | 'open' | 'closed';
   sseLastEventAt: string | null;
@@ -672,6 +741,14 @@ function LiveStatusBar({
   liveEvent: { summary: string; at: string; tone: 'success' | 'failure' | 'system' } | null;
   activeTeamCount: number;
   recentTeamCount: number;
+  liveTeamProgress: {
+    name: string;
+    memberName: string | null;
+    completed: number | null;
+    total: number | null;
+    status: string | null;
+    tone: 'running' | 'completed' | 'failure';
+  } | null;
 }) {
   const statusLabel = sseStatus === 'open' ? 'Live' : sseStatus === 'connecting' ? 'Connecting…' : 'Offline';
   const statusTone =
@@ -704,6 +781,25 @@ function LiveStatusBar({
         <span className="material-symbols-outlined text-[12px]">groups</span>
         {activeTeamCount} active team{activeTeamCount === 1 ? '' : 's'} / {recentTeamCount} recent
       </span>
+      {liveTeamProgress && (
+        <span
+          className={`px-2 py-0.5 border-2 border-primary font-headline font-bold uppercase text-[9px] truncate max-w-[36rem] ${
+            liveTeamProgress.tone === 'failure'
+              ? 'bg-error text-on-error'
+              : liveTeamProgress.tone === 'completed'
+                ? 'bg-tertiary text-on-tertiary'
+                : 'bg-secondary text-on-primary animate-pulse'
+          }`}
+          title={`Team "${liveTeamProgress.name}" is running. Most recent member: ${liveTeamProgress.memberName ?? '—'} (${liveTeamProgress.status ?? 'running'}).`}
+        >
+          Team '{liveTeamProgress.name}': {liveTeamProgress.memberName ?? '…'}
+          {liveTeamProgress.completed != null && liveTeamProgress.total != null
+            ? ` (${liveTeamProgress.completed}/${liveTeamProgress.total})`
+            : liveTeamProgress.status === 'completed' || liveTeamProgress.status === 'failed'
+              ? ` ${liveTeamProgress.status}`
+              : ''}
+        </span>
+      )}
       {liveEvent && (
         <span
           className={`ml-2 px-2 py-0.5 border-2 border-primary font-headline font-bold uppercase text-[9px] truncate max-w-[40rem] ${

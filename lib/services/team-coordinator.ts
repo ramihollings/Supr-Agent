@@ -26,7 +26,9 @@ import { getActiveProvider } from '@/lib/providers/model';
 import dbClient from '@/lib/database/db_client';
 import { AgentLifecycleManager } from '@/lib/services/agent-lifecycle';
 import { assembleSubagentContext } from '@/lib/context/budget';
-import { addActivityLog } from '@/lib/db';
+import { addActivityLog, addArtifact } from '@/lib/db';
+import { notifyTeamEvent } from '@/lib/events/team-bus';
+import { parseStructuredMemberOutput } from '@/lib/ide/team-parser';
 
 export type TeamSlot = 'qa' | 'planner' | 'research' | 'supervisor' | 'extra';
 
@@ -228,21 +230,15 @@ async function runOneMember(
       systemInstruction: `You are ${spec.name}, acting as the ${spec.role}. Provide a detailed, premium solution. Only respond with original, high-quality work.`,
     });
     output = response;
-    // Parse <work>...</work> and <context>...</context> out of the response.
-    const workMatch = response.match(/<work>([\s\S]*?)<\/work>/i);
-    const ctxMatch = response.match(/<context>([\s\S]*?)<\/context>/i);
-    const work = workMatch ? workMatch[1].trim() : response;
-    if (ctxMatch) {
-      for (const line of ctxMatch[1].split('\n')) {
-        const eq = line.indexOf('=');
-        if (eq < 0) continue;
-        const key = line.slice(0, eq).trim();
-        const value = line.slice(eq + 1).trim();
-        if (key) {
-          await writeContext(spec.teamId, key, value, spec.memberId);
-          writtenKeys.push(key);
-        }
-      }
+    // Parse the structured payload. The parser is tolerant of
+    // JSON, fenced JSON, legacy <work>/<context> tags, and
+    // free-form prose (in which case the whole response is work).
+    const parsed = parseStructuredMemberOutput(response);
+    const work = parsed.work;
+    const writtenKeys: string[] = [];
+    for (const [key, value] of Object.entries(parsed.context)) {
+      await writeContext(spec.teamId, key, value, spec.memberId);
+      writtenKeys.push(key);
     }
     await updateMember(spec.memberId, {
       status: 'completed',
@@ -250,6 +246,20 @@ async function runOneMember(
       completed_at: new Date().toISOString(),
     });
     await postMessage(spec.teamId, spec.memberId, '*', 'output', `${spec.name} finished: ${work.slice(0, 160)}`);
+    notifyTeamEvent({
+      teamId: spec.teamId,
+      missionId: (spec as any).missionId ?? null,
+      name: (spec as any).teamName ?? '',
+      reason: 'team_progress',
+      payload: {
+        memberId: spec.memberId,
+        memberName: spec.name,
+        slot: spec.slot,
+        status: 'completed',
+        contextKeysWritten: writtenKeys,
+        outputPreview: work.slice(0, 200),
+      },
+    });
     return { memberId: spec.memberId, slot: spec.slot, name: spec.name, role: spec.role, status: 'completed', output: work, contextKeysWritten: writtenKeys };
   } catch (error: any) {
     await updateMember(spec.memberId, {
@@ -258,6 +268,24 @@ async function runOneMember(
       completed_at: new Date().toISOString(),
     });
     await postMessage(spec.teamId, spec.memberId, '*', 'error', `${spec.name} failed: ${error.message || error}`);
+    // Publish a per-member progress event so the SSE stream can
+    // surface a live "X of Y members done" bar in Mission Control.
+    // The `total` is filled in by TeamCoordinator.run via a
+    // post-hoc patch (we don't know it here) -- the SSE handler
+    // is tolerant of unknown total.
+    notifyTeamEvent({
+      teamId: spec.teamId,
+      missionId: (spec as any).missionId ?? null,
+      name: (spec as any).teamName ?? '',
+      reason: 'team_progress',
+      payload: {
+        memberId: spec.memberId,
+        memberName: spec.name,
+        slot: spec.slot,
+        status: 'failed',
+        error: error.message || String(error),
+      },
+    });
     return { memberId: spec.memberId, slot: spec.slot, name: spec.name, role: spec.role, status: 'failed', output: '', error: error.message || String(error), contextKeysWritten: writtenKeys };
   }
 }
@@ -316,29 +344,49 @@ export class TeamCoordinator {
     const ordered = input.coordinationMode === 'chain'
       ? [input.members.find((m) => m.slot === 'planner')!, ...input.members.filter((m) => m.slot !== 'planner')]
       : input.members;
+    // Run every member concurrently. `Promise.allSettled` is the
+    // right shape here — we want every member to complete (or fail)
+    // independently and we aggregate at the end. The previous
+    // sequential `for` loop serialized every LLM call, so a 6-member
+    // team took ~6x longer than necessary. Each member's own
+    // try/catch inside `runOneMember` ensures one bad member can't
+    // take down the others.
+    const settled = await Promise.allSettled(
+      ordered.map(async (m) => {
+        const memberId = (await dbClient.query<{ member_id: string }>(
+          `SELECT member_id FROM Team_Members WHERE team_id = ? AND name = ? AND slot = ? LIMIT 1`,
+          [input.teamId, m.name, m.slot],
+        ) as any[])[0]?.member_id;
+        if (!memberId) {
+          return { ok: false as const, error: `No member_id for ${m.name} (${m.slot}).` };
+        }
+        await AgentLifecycleManager.hireAgent(
+          input.missionId,
+          memberId,
+          m.name,
+          m.role,
+          m.permissionTier,
+          m.tools,
+          `Team member of '${input.name}': ${m.task}`,
+        ).catch(() => 'unavailable');
+        try {
+          const result = await runOneMember({ ...m, teamId: input.teamId, missionId: input.missionId, memberId });
+          return { ok: true as const, result, memberId };
+        } finally {
+          await AgentLifecycleManager.terminateAgent(input.missionId, memberId, m.name).catch(() => {});
+        }
+      }),
+    );
     const memberResults: Array<{ memberId: string; slot: TeamSlot; name: string; role: string; status: 'completed' | 'failed'; output: string; error?: string; contextKeysWritten: string[] }> = [];
     let teamStatus: 'completed' | 'failed' = 'completed';
-    for (const m of ordered) {
-      const memberId = (await dbClient.query<{ member_id: string }>(
-        `SELECT member_id FROM Team_Members WHERE team_id = ? AND name = ? AND slot = ? LIMIT 1`,
-        [input.teamId, m.name, m.slot],
-      ) as any[])[0]?.member_id;
-      if (!memberId) continue;
-      const profilePath = await AgentLifecycleManager.hireAgent(
-        input.missionId,
-        memberId,
-        m.name,
-        m.role,
-        m.permissionTier,
-        m.tools,
-        `Team member of '${input.name}': ${m.task}`,
-      ).catch(() => 'unavailable');
-      try {
-        const result = await runOneMember({ ...m, teamId: input.teamId, missionId: input.missionId, memberId });
-        memberResults.push(result);
-        if (result.status === 'failed') teamStatus = 'failed';
-      } finally {
-        await AgentLifecycleManager.terminateAgent(input.missionId, memberId, m.name).catch(() => {});
+    for (const s of settled) {
+      if (s.status === 'fulfilled' && s.value.ok) {
+        memberResults.push(s.value.result);
+        if (s.value.result.status === 'failed') teamStatus = 'failed';
+      } else if (s.status === 'fulfilled' && !s.value.ok) {
+        teamStatus = 'failed';
+      } else {
+        teamStatus = 'failed';
       }
     }
 
@@ -411,6 +459,36 @@ export class TeamCoordinator {
       `UPDATE Team_Runs SET status = ?, result = ?, checksum = ?, completed_at = ? WHERE team_id = ?`,
       [teamStatus, coordinatorSummary.slice(0, 64_000), finalChecksum, completedAt, input.teamId],
     );
+    // Publish the run-level event. Mission Control's SSE handler
+    // listens for this to flip the team chip from "running" to
+    // "completed" or "failed" and to clear the live progress bar.
+    notifyTeamEvent({
+      teamId: input.teamId,
+      missionId: input.missionId,
+      name: input.name,
+      reason: teamStatus === 'completed' ? 'team_completed' : 'team_failed',
+      payload: {
+        status: teamStatus,
+        checksum: finalChecksum,
+        durationMs: new Date(completedAt).getTime() - new Date(startedAt).getTime(),
+        memberCount: memberResults.length,
+        completedCount: memberResults.filter((m) => m.status === 'completed').length,
+        failedCount: memberResults.filter((m) => m.status === 'failed').length,
+      },
+    });
+    // Persist the team report as a Brief artifact so the Library,
+    // downstream agents, and the project export all see it. A
+    // failed run also gets an artifact (with the failure summary)
+    // so the operator can still inspect what the team produced.
+    try {
+      await addArtifact(input.missionId, {
+        type: 'markdown',
+        filename: `[Team] ${input.name} (${teamStatus})`,
+        content: coordinatorSummary,
+      });
+    } catch (artErr) {
+      console.warn(`[TeamCoordinator] Failed to write team artifact for ${input.name}:`, artErr);
+    }
     await addActivityLog(input.missionId, {
       eventType: teamStatus === 'completed' ? 'agent_action' : 'failure',
       actor: 'Team Coordinator',

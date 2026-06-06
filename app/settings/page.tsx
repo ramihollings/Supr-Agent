@@ -683,6 +683,37 @@ export default function SettingsPage() {
     void handleUpdateSetting(key, value, label);
   };
   const handleSaveComposioBridge = () => handleUpdateSetting('integrations_composio', integrationComposio, 'Composio bridge key saved ✓');
+
+  const [composioTestResult, setComposioTestResult] = useState<{
+    state: 'idle' | 'testing' | 'ok' | 'error';
+    elapsedMs?: number;
+    appCount?: number;
+    firstApps?: Array<{ key: string; name: string }>;
+    error?: string;
+  }>({ state: 'idle' });
+  const handleTestComposioBridge = async () => {
+    setComposioTestResult({ state: 'testing' });
+    try {
+      const res = await fetch('/api/composio/test', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok) {
+        setComposioTestResult({
+          state: 'ok',
+          elapsedMs: data.elapsedMs,
+          appCount: data.appCount,
+          firstApps: data.firstApps,
+        });
+      } else {
+        setComposioTestResult({
+          state: 'error',
+          elapsedMs: data?.elapsedMs,
+          error: data?.error || `HTTP ${res.status}`,
+        });
+      }
+    } catch (err: any) {
+      setComposioTestResult({ state: 'error', error: err.message || String(err) });
+    }
+  };
   const onSaveBackupConfig = async () => {
     // Going through handleUpdateSetting ensures the cross-tab
     // settings sentinel is broadcast on every save, so the chat
@@ -1074,7 +1105,48 @@ export default function SettingsPage() {
                     onClick={handleSaveComposioBridge}
                     className="bg-tertiary text-on-tertiary font-bold uppercase text-xs px-4 neo-border hover:bg-primary hover:text-on-primary transition-colors"
                   >Save &amp; Invalidate</button>
+                  <button
+                    onClick={handleTestComposioBridge}
+                    disabled={composioTestResult.state === 'testing'}
+                    className="bg-secondary text-on-secondary font-bold uppercase text-xs px-4 neo-border hover:bg-primary hover:text-on-primary transition-colors disabled:opacity-50 flex items-center gap-1"
+                    title="Calls listApps() against the live bridge to confirm the key works."
+                  >
+                    <span className={`material-symbols-outlined text-[14px] ${composioTestResult.state === 'testing' ? 'animate-spin' : ''}`}>
+                      {composioTestResult.state === 'testing' ? 'sync' : 'network_check'}
+                    </span>
+                    {composioTestResult.state === 'testing' ? 'Testing…' : 'Test'}
+                  </button>
                 </div>
+                {composioTestResult.state !== 'idle' && (
+                  <div
+                    className={`p-2 border-2 font-mono text-[10px] ${
+                      composioTestResult.state === 'ok'
+                        ? 'border-tertiary bg-tertiary-container text-on-tertiary-container'
+                        : composioTestResult.state === 'error'
+                          ? 'border-error bg-error-container text-on-error-container'
+                          : 'border-primary bg-surface text-on-surface-variant'
+                    }`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {composioTestResult.state === 'ok' && (
+                      <>
+                        <strong>OK</strong> ({composioTestResult.elapsedMs}ms) — {composioTestResult.appCount} apps reachable
+                        {composioTestResult.firstApps && composioTestResult.firstApps.length > 0 && (
+                          <span className="block mt-1 opacity-80">
+                            e.g. {composioTestResult.firstApps.map((a) => a.name).join(', ')}
+                          </span>
+                        )}
+                      </>
+                    )}
+                    {composioTestResult.state === 'error' && (
+                      <>
+                        <strong>Failed</strong> ({composioTestResult.elapsedMs ?? 0}ms) — {composioTestResult.error}
+                      </>
+                    )}
+                    {composioTestResult.state === 'testing' && <span>Calling /api/composio/test…</span>}
+                  </div>
+                )}
               </div>
 
               {/* GitHub */}

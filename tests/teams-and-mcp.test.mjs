@@ -138,3 +138,87 @@ test('Mission Control live status bar surfaces active sub-agent teams', () => {
   assert.match(page, /active team/);
   assert.match(page, /activeTeamCount/);
 });
+
+test('Team coordinator parallelizes member execution (Promise.allSettled, not sequential for-loop)', () => {
+  const coord = read('lib/services/team-coordinator.ts');
+  // The old sequential pattern is gone
+  assert.doesNotMatch(coord, /for \(const m of ordered\) \{[\s\S]{0,400}runOneMember/);
+  // The new parallel pattern is in place
+  assert.match(coord, /Promise\.allSettled/);
+});
+
+test('Team coordinator publishes team_progress + team_completed + team_failed events', () => {
+  const coord = read('lib/services/team-coordinator.ts');
+  const bus = read('lib/events/team-bus.ts');
+  assert.match(bus, /notifyTeamEvent/);
+  assert.match(bus, /team_progress/);
+  assert.match(bus, /team_completed/);
+  assert.match(bus, /team_failed/);
+  // The coordinator calls notifyTeamEvent at least 3 times
+  // (one per member status, one on team done)
+  const calls = (coord.match(/notifyTeamEvent\(/g) || []).length;
+  assert.ok(calls >= 3, `Expected >= 3 notifyTeamEvent calls, found ${calls}`);
+  // The SSE route forwards them
+  const sse = read('app/api/mission/stream/route.ts');
+  assert.match(sse, /teamEventBus/);
+  assert.match(sse, /onTeamEvent/);
+  assert.match(sse, /team_progress/);
+  assert.match(sse, /team_completed/);
+  assert.match(sse, /team_failed/);
+});
+
+test('Member response parser handles JSON, fenced JSON, legacy tags, and free-form prose', () => {
+  const parser = read('lib/ide/team-parser.ts');
+  assert.match(parser, /parseStructuredMemberOutput/);
+  // All four shapes are handled
+  assert.match(parser, /STRICT_JSON_RE/);
+  assert.match(parser, /FENCED_JSON_RE/);
+  assert.match(parser, /WORK_TAG_RE/);
+  assert.match(parser, /CONTEXT_TAG_RE/);
+  // Tolerant of nested closing tags (we strip them defensively)
+  assert.match(parser, /replace\(/);
+});
+
+test('Team coordinator writes a Brief artifact on run completion', () => {
+  const coord = read('lib/services/team-coordinator.ts');
+  assert.match(coord, /addArtifact/);
+  assert.match(coord, /\[Team\]/);
+});
+
+test('Teams page exposes the list + detail (members/context/messages) views', () => {
+  const page = read('app/teams/page.tsx');
+  assert.match(page, /Sub-Agent Teams/);
+  assert.match(page, /TeamDetail/);
+  assert.match(page, /members/);
+  assert.match(page, /context/);
+  assert.match(page, /messages/);
+  // Subscribes to the team_progress / team_completed / team_failed events
+  assert.match(page, /addEventListener\('team_progress'/);
+  assert.match(page, /addEventListener\('team_completed'/);
+  assert.match(page, /addEventListener\('team_failed'/);
+  // And a per-team detail API route
+  const detailRoute = read('app/api/teams/[teamId]/route.ts');
+  assert.match(detailRoute, /Team_Members/);
+  assert.match(detailRoute, /Team_Context/);
+  assert.match(detailRoute, /Team_Messages/);
+});
+
+test('Supervisor page surfaces per-MCP-server health (CloakBrowser + MCP cards)', () => {
+  const sup = read('app/supervisor/page.tsx');
+  assert.match(sup, /MCP Servers/);
+  assert.match(sup, /mcpServers/);
+  // The health endpoint returns the mcpServers array
+  const health = read('lib/production-health.ts');
+  assert.match(health, /mcpServers/);
+  assert.match(health, /loadMcpRegistrySafe/);
+});
+
+test('Composio Settings card has a Test Connection button that hits the test route', () => {
+  const settings = read('app/settings/page.tsx');
+  assert.match(settings, /handleTestComposioBridge/);
+  assert.match(settings, /\/api\/composio\/test/);
+  // And the test route exists
+  const testRoute = read('app/api/composio/test/route.ts');
+  assert.match(testRoute, /composioBridge\.listApps/);
+  assert.match(testRoute, /appCount/);
+});

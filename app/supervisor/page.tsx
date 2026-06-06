@@ -293,6 +293,33 @@ function SupervisorConsoleContent() {
                     </div>
                   </dl>
                 </article>
+                <article className="bg-surface-container border-2 border-primary p-3">
+                  <h3 className="font-headline font-black uppercase text-primary text-sm flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">hub</span>
+                    MCP Servers
+                  </h3>
+                  <ul className="mt-2 space-y-1 font-mono text-[10px]">
+                    {(productionHealth?.mcpServers || []).length === 0 && (
+                      <li className="text-on-surface-variant italic">No MCP servers reported.</li>
+                    )}
+                    {(productionHealth?.mcpServers || []).map((s: any) => {
+                      const tone = s.enabled
+                        ? s.envKeysOk
+                          ? 'text-tertiary'
+                          : 'text-amber-500'
+                        : 'text-on-surface-variant';
+                      return (
+                        <li key={s.id} className="flex items-center gap-2" title={`${s.id} · transport ${s.transport}`}>
+                          <span className={`material-symbols-outlined text-[10px] ${tone}`}>
+                            {s.enabled ? (s.envKeysOk ? 'check_circle' : 'key_off') : 'remove_circle'}
+                          </span>
+                          <span className={`font-bold uppercase ${tone}`}>{s.id}</span>
+                          <span className="ml-auto text-on-surface-variant">{s.transport}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </article>
                 <article className="md:col-span-2 bg-surface-container border-2 border-primary p-3">
                   <h3 className="font-headline font-black uppercase text-primary text-sm">Warnings</h3>
                   <div className="mt-2 space-y-1 font-body text-[11px] text-on-surface-variant max-h-32 overflow-y-auto custom-scrollbar">

@@ -13,6 +13,23 @@ function isPlaceholder(value?: string | null) {
   return /your_|placeholder|change[_-]?me|admin123|password|example|^sk-?test/i.test(value);
 }
 
+// Lazy import the MCP registry so production-health doesn't pull
+// in the stdio transport on every health check. The registry
+// function is safe to call from the supervisor console because it
+// only reads the static JSON config — it never launches a process.
+let cachedMcpRegistry: ReturnType<typeof import('@/lib/mcp/registry').loadMcpRegistry> | null = null;
+function loadMcpRegistrySafe() {
+  if (cachedMcpRegistry) return cachedMcpRegistry;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { loadMcpRegistry } = require('@/lib/mcp/registry');
+    cachedMcpRegistry = loadMcpRegistry();
+    return cachedMcpRegistry;
+  } catch {
+    return { version: 0, description: '', servers: [] };
+  }
+}
+
 function stateFromIssues(failures: unknown[], warnings: unknown[]): HealthState {
   if (failures.length > 0) return 'fail';
   if (warnings.length > 0) return 'warn';
@@ -75,6 +92,7 @@ export async function getProductionHealth(options: { probeModel?: boolean } = {}
   // supervisor console) — we just verify the configured binary exists
   // and is executable. The Research page does a real launch probe.
   const cloakPath = process.env.CLOAKBROWSER_PATH || null;
+
   let cloakBrowser: { configured: boolean; path: string | null; exists: boolean; executable: boolean; note?: string } = {
     configured: false,
     path: null,
@@ -203,6 +221,24 @@ export async function getProductionHealth(options: { probeModel?: boolean } = {}
     channels,
     defaultChannel,
     cloakBrowser,
+    // Per-MCP-server health so the supervisor can see at a glance
+    // which servers are enabled, which need env keys, and which
+    // transports are in use. We don't try to launch the servers
+    // here (the supervisor refreshes on user action); we just
+    // report the registry's static state.
+    mcpServers: (loadMcpRegistrySafe()?.servers ?? []).map((s: any) => {
+      const envKeys: string[] = s.env_keys ?? [];
+      const envKeysOk = envKeys.every((k: string) => !!process.env[k]);
+      return {
+        id: s.id,
+        name: s.name,
+        transport: s.transport,
+        enabled: s.enabled,
+        envKeys,
+        envKeysOk,
+        requiredTier: s.required_tier,
+      };
+    }),
     recentFailures: recentFailures.map((row) => ({
       id: row.id,
       status: row.status,

@@ -11,6 +11,7 @@ const navItems = [
   { href: '/', icon: 'dashboard', label: 'Dashboard', minMode: 'mobile' },
   { href: '/supr-chat', icon: 'chat', label: 'Supr-Chat', minMode: 'mobile' },
   { href: '/orchestration', icon: 'visibility', label: 'Observability', minMode: 'pro' },
+  { href: '/teams', icon: 'groups', label: 'Teams', minMode: 'pro' },
   { href: '/supervisor', icon: 'admin_panel_settings', label: 'Supervisor', minMode: 'pro' },
   { href: '/agents', icon: 'smart_toy', label: 'Agents', minMode: 'pro' },
   { href: '/skills', icon: 'construction', label: 'Skills', minMode: 'pro' },

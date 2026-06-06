@@ -4,6 +4,7 @@ import { Mission } from '@/types';
 import { requireApiAuth } from '@/lib/auth';
 import { missionEventBus, type MissionChangeEvent } from '@/lib/events/bus';
 import { sessionEventBus, type SessionEvent } from '@/lib/runtime/agent-session';
+import { teamEventBus, type TeamEvent } from '@/lib/events/team-bus';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,6 +92,21 @@ export async function GET(req: NextRequest) {
       };
       sessionEventBus.onEvent(onSessionEvent);
 
+      // Sub-agent team events. The team coordinator emits
+      // `team_progress` after every member finishes and
+      // `team_completed`/`team_failed` when the run is fully
+      // reduced. Mission Control's live status bar subscribes to
+      // these to render a streaming progress chip without polling.
+      const onTeamEvent = (event: TeamEvent) => {
+        if (projectId && event.missionId && event.missionId !== projectId) return;
+        try {
+          controller.enqueue(encoder.encode(`event: ${event.reason}\ndata: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      teamEventBus.onTeamEvent(onTeamEvent);
+
       const refetchAndSend = async (kind: 'event' | 'poll', reason: string) => {
         if (closed) return;
         try {
@@ -126,6 +142,7 @@ export async function GET(req: NextRequest) {
         clearInterval(keepalive);
         missionEventBus.off('change', onChange);
         sessionEventBus.off('event', onSessionEvent);
+        teamEventBus.off('event', onTeamEvent);
         try {
           controller.close();
         } catch {
