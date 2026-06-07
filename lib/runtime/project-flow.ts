@@ -1,6 +1,6 @@
 import dbClient from '@/lib/database/db_client';
 import { addActivityLog, getActiveMission, getMissionById, createMission } from '@/lib/db';
-import { createAgentAction, resumeAgentActionFromApproval } from './agent-actions';
+import { createAgentAction, decideApprovalOnce } from './agent-actions';
 import { runAgentRuntimeAction } from './agent-runtime-runner';
 import { getActiveProvider } from '@/lib/providers/model';
 import { getRuntimeMode, hasConfiguredModelProvider } from './runtime-mode';
@@ -210,14 +210,14 @@ async function ensureAgentCapability(agentId: string, capabilityName: string) {
   const capability = await dbClient.queryOne<any>(`SELECT id FROM Capabilities WHERE name = ?`, [capabilityName]);
   if (!capability) return;
   await dbClient.execute(
-    `INSERT OR IGNORE INTO Agent_Capabilities (agent_id, capability_id, allowed) VALUES (?, ?, 1)`,
+    `INSERT INTO Agent_Capabilities (agent_id, capability_id, allowed) VALUES (?, ?, 1) ON CONFLICT DO NOTHING`,
     [agentId, capability.id],
   );
 }
 
 async function getOrCreateFlowRun(missionId: string, source = 'project_flow') {
   const existing = await dbClient.queryOne<any>(
-    `SELECT * FROM Flow_Runs WHERE mission_id = ? AND status IN ('idle','running','paused') ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    `SELECT * FROM Flow_Runs WHERE mission_id = ? AND status IN ('idle','running','paused') ORDER BY created_at DESC, id DESC LIMIT 1`,
     [missionId],
   );
   if (existing) return existing;
@@ -859,7 +859,7 @@ export async function runProjectFlow(projectId: string) {
   const actions = await dbClient.query<any>(
     `SELECT * FROM Agent_Actions
      WHERE mission_id = ? AND status IN ('draft','approved','failed')
-     ORDER BY created_at ASC, rowid ASC`,
+     ORDER BY created_at ASC, id ASC`,
     [projectId],
   );
   let completed = 0;
@@ -984,15 +984,13 @@ export async function approveLowRiskActions(projectId: string) {
     `SELECT * FROM Approvals WHERE mission_id = ? AND status = 'pending' AND risk_level IN ('Low','Medium')`,
     [projectId],
   );
-  for (const approval of approvals) {
-    await dbClient.execute(`UPDATE Approvals SET status = 'approved', decision = 'approved' WHERE id = ?`, [approval.id]);
-    await resumeAgentActionFromApproval(approval.id, 'approved');
-  }
+  const decisions = await Promise.all(approvals.map((approval) => decideApprovalOnce(approval.id, 'approved')));
+  const approved = decisions.filter((decision) => decision.decided).length;
   const flowRun = await getOrCreateFlowRun(projectId);
   await syncFlowNodes(flowRun.id, projectId);
-  await logFlowEvent(projectId, 'approval', 'Supr', 'Approved low-risk work', `${approvals.length} low/medium-risk approval(s) cleared.`);
+  await logFlowEvent(projectId, 'approval', 'Supr', 'Approved low-risk work', `${approved} low/medium-risk approval(s) cleared.`);
   notifyMissionChanged(projectId, 'approval_decision');
-  return { success: true, approved: approvals.length, flowRunId: flowRun.id };
+  return { success: true, approved, flowRunId: flowRun.id };
 }
 
 /**

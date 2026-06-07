@@ -25,8 +25,8 @@ test('config/mcp-servers.json parses and contains 9 servers', () => {
   assert.equal(REGISTRY.servers.length, 9, 'expected 9 server entries');
 });
 
-test('all four in-process servers remain enabled', () => {
-  const ids = ['supr-internal', 'supr-skills', 'supr-memory', 'supr-composio'];
+test('certified in-process servers remain enabled', () => {
+  const ids = ['supr-internal', 'supr-skills', 'supr-memory'];
   for (const id of ids) {
     const s = REGISTRY.servers.find((entry) => entry.id === id);
     assert.ok(s, `${id} must be in the registry`);
@@ -36,39 +36,36 @@ test('all four in-process servers remain enabled', () => {
   }
 });
 
-test('github-mcp and postgres-mcp are enabled by default', () => {
-  for (const id of ['github-mcp', 'postgres-mcp']) {
+test('beta external MCP servers are disabled by default without runtime npx', () => {
+  for (const id of ['github-mcp', 'postgres-mcp', 'filesystem-mcp', 'brave-search-mcp']) {
     const s = REGISTRY.servers.find((entry) => entry.id === id);
     assert.ok(s, `${id} must be in the registry`);
     assert.equal(s.transport, 'stdio');
-    assert.equal(s.enabled, true, `${id} should be enabled by default`);
-    assert.ok(Array.isArray(s.env_keys) && s.env_keys.length > 0, `${id} must declare env_keys`);
+    assert.equal(s.enabled, false, `${id} should remain beta until certified`);
+    assert.notEqual(s.command, 'npx');
+    assert.ok(!s.args?.includes('-y'));
     assert.ok(s.description, `${id} must have a description`);
   }
 });
 
-test('filesystem-mcp is registered as a stdio Edit-tier server', () => {
+test('filesystem-mcp remains registered as a disabled Edit-tier beta server', () => {
   const s = REGISTRY.servers.find((entry) => entry.id === 'filesystem-mcp');
   assert.ok(s, 'filesystem-mcp must be in the registry');
   assert.equal(s.transport, 'stdio');
   assert.equal(s.required_tier, 'Edit');
-  assert.equal(s.enabled, true);
-  assert.equal(s.command, 'npx');
-  assert.ok(Array.isArray(s.args) && s.args.includes('-y'));
-  assert.ok(s.args.includes('@modelcontextprotocol/server-filesystem'));
+  assert.equal(s.enabled, false);
+  assert.equal(s.command, undefined);
   assert.ok(Array.isArray(s.env_keys) && s.env_keys.length === 0, 'filesystem-mcp has no env_keys');
   assert.ok(s.description, 'filesystem-mcp must have a description');
 });
 
-test('brave-search-mcp is registered as a stdio Draft-tier server', () => {
+test('brave-search-mcp remains registered as a disabled Draft-tier beta server', () => {
   const s = REGISTRY.servers.find((entry) => entry.id === 'brave-search-mcp');
   assert.ok(s, 'brave-search-mcp must be in the registry');
   assert.equal(s.transport, 'stdio');
   assert.equal(s.required_tier, 'Draft');
-  assert.equal(s.enabled, true);
-  assert.equal(s.command, 'npx');
-  assert.ok(Array.isArray(s.args) && s.args.includes('-y'));
-  assert.ok(s.args.includes('@modelcontextprotocol/server-brave-search'));
+  assert.equal(s.enabled, false);
+  assert.equal(s.command, undefined);
   assert.deepEqual(s.env_keys, ['BRAVE_API_KEY']);
   assert.ok(s.description, 'brave-search-mcp must have a description');
 });

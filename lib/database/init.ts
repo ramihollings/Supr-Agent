@@ -144,6 +144,8 @@ export function initDatabase() {
       reason TEXT,
       status TEXT, -- pending, approved, rejected, revised
       decision TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(mission_id) REFERENCES Missions(id),
       FOREIGN KEY(task_id) REFERENCES Tasks(id),
       FOREIGN KEY(requesting_agent_id) REFERENCES Agents(id)
@@ -253,12 +255,6 @@ export function initDatabase() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
-  // ---- Schema migrations ----
-  // Apply every registered migration that hasn't been recorded in
-  // _migrations yet. The runner is idempotent: re-running it on a
-  // fully-migrated database is a no-op.
-  applyMigrations(dbInstance, migrations);
 
   // 13. Supr_Chat_Messages Table
   dbInstance.exec(`
@@ -935,6 +931,11 @@ export function initDatabase() {
       FOREIGN KEY(policy_id) REFERENCES Budget_Policies(id)
     )
   `);
+
+  // Apply versioned migrations only after every base table exists. Some
+  // migrations alter tables declared late in this initializer, so running
+  // them halfway through base-schema creation breaks true fresh installs.
+  applyMigrations(dbInstance, migrations);
 
   _initialized = true;
   console.log('[init.ts] Database initialization complete.');

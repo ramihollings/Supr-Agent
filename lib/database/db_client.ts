@@ -111,6 +111,17 @@ export const dbClient = {
       });
       transaction(operations);
     }
+  },
+
+  async close(): Promise<void> {
+    if (pgPool) {
+      await pgPool.end();
+      pgPool = null;
+    }
+    if (!isPostgres && isSqliteInitialized) {
+      getSqliteDb().close();
+      isSqliteInitialized = false;
+    }
   }
 };
 

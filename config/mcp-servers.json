@@ -38,51 +38,43 @@
       "description": "Bridges to third-party SaaS apps (GitHub, Slack, Notion, Gmail, etc.) via the Composio API. The composioBridge resolves the API key from Settings on every call.",
       "required_tier": "External_Act",
       "tools": "auto:composio",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "github-mcp",
       "name": "GitHub",
       "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
       "required_tier": "Edit",
       "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
-      "description": "Standard MCP server for GitHub. Pulls repos, creates issues, and manages task branches. Requires a PAT.",
-      "enabled": true
+      "description": "Beta GitHub MCP entry. Disabled until a pinned executable passes adapter certification.",
+      "enabled": false
     },
     {
       "id": "postgres-mcp",
       "name": "PostgreSQL",
       "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres"],
       "required_tier": "Edit",
       "env_keys": ["POSTGRES_CONNECTION_STRING"],
-      "description": "Standard MCP server for PostgreSQL. Lets agents query the database schema and run read-only SQL. Requires a connection string.",
-      "enabled": true
+      "description": "Beta PostgreSQL MCP entry. Disabled until a pinned executable passes adapter certification.",
+      "enabled": false
     },
     {
       "id": "filesystem-mcp",
       "name": "Filesystem",
       "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${env:SUPR_FILESYSTEM_ROOT|default:/workspace}"],
       "required_tier": "Edit",
       "env_keys": [],
-      "description": "Governed file-system surface for the Code Agent. Rooted at $SUPR_FILESYSTEM_ROOT (default: /workspace). Operators can override the root by setting the env var before launching Supr.",
-      "enabled": true
+      "description": "Beta filesystem MCP entry. Disabled until a pinned executable passes adapter certification; native workspace tools remain available.",
+      "enabled": false
     },
     {
       "id": "brave-search-mcp",
       "name": "Brave Search",
       "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
       "required_tier": "Draft",
       "env_keys": ["BRAVE_API_KEY"],
-      "description": "Standard MCP server for Brave Search. Lets agents run web queries. Requires a BRAVE_API_KEY.",
-      "enabled": true
+      "description": "Beta Brave Search MCP entry. Disabled until a pinned executable passes adapter certification.",
+      "enabled": false
     },
     {
       "id": "context7-mcp",

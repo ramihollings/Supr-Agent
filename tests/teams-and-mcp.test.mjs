@@ -84,11 +84,13 @@ test('spawn_subagent_team team tool has its own two-phase audit + tool-name vali
   assert.match(tool, /Post-execution checksum/);
 });
 
-test('MCP bulk-up: github + postgres enabled, filesystem + brave-search added', () => {
+test('MCP bulk-up: external beta servers remain registered but disabled', () => {
   const cfg = JSON.parse(read('config/mcp-servers.json'));
   const byId = Object.fromEntries(cfg.servers.map((s) => [s.id, s]));
-  assert.equal(byId['github-mcp'].enabled, true);
-  assert.equal(byId['postgres-mcp'].enabled, true);
+  assert.equal(byId['github-mcp'].enabled, false);
+  assert.equal(byId['postgres-mcp'].enabled, false);
+  assert.equal(byId['filesystem-mcp'].enabled, false);
+  assert.equal(byId['brave-search-mcp'].enabled, false);
   assert.equal(byId['filesystem-mcp'].transport, 'stdio');
   assert.equal(byId['filesystem-mcp'].required_tier, 'Edit');
   assert.equal(byId['brave-search-mcp'].transport, 'stdio');
@@ -223,20 +225,13 @@ test('Composio Settings card has a Test Connection button that hits the test rou
   assert.match(testRoute, /appCount/);
 });
 
-test('Filesystem-mcp root is configurable via $SUPR_FILESYSTEM_ROOT env var', () => {
+test('Filesystem-mcp is disabled until a pinned executable is certified', () => {
   const cfg = JSON.parse(read('config/mcp-servers.json'));
   const fs = cfg.servers.find((s) => s.id === 'filesystem-mcp');
   assert.ok(fs, 'filesystem-mcp entry must exist');
-  // The last arg is the env|default placeholder, not a hard-coded path.
-  const last = fs.args[fs.args.length - 1];
-  assert.match(last, /\$\{env:SUPR_FILESYSTEM_ROOT\|default:\/workspace\}/);
-  // The registry must support the placeholder expansion
-  const reg = read('lib/mcp/registry.ts');
-  assert.match(reg, /expandMcpArgs/);
-  assert.match(reg, /\$\{env:([A-Z0-9_]+)/);
-  // And stdio.ts must use the expanded args
-  const stdio = read('lib/mcp/stdio.ts');
-  assert.match(stdio, /expandMcpArgs/);
+  assert.equal(fs.enabled, false);
+  assert.equal(fs.command, undefined);
+  assert.equal(fs.args, undefined);
 });
 
 test('MCP registry includes an HTTP transport example (context7)', () => {

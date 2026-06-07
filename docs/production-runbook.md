@@ -30,6 +30,14 @@ Tasks may retry it; the worker claim condition prevents concurrent ownership.
 Cancel an execution through `POST /api/internal/executions/cancel` only after
 confirming no irreversible external side effect is in flight.
 
+## Dead-Letter Executions
+
+After the configured retry limit, an execution remains `failed` with
+`dead_lettered_at` and `dead_letter_reason` populated. Diagnose the underlying
+integration or configuration failure, then call
+`POST /api/internal/executions/requeue` using the scheduler service identity.
+The conditional transition permits only one requeue for each dead-letter state.
+
 ## Secret Rotation
 
 Create a new Secret Manager version, deploy a new Cloud Run revision, verify

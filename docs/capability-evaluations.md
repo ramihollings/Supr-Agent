@@ -15,3 +15,17 @@ Required production scenarios:
 
 Each evaluation records its execution ID, session ID, tool invocations,
 evidence, approval decisions, final status, duration, and cost.
+
+Local release evidence is produced by:
+
+```text
+npm run test:prod
+npm run test:postgres
+terraform fmt -check -recursive
+terraform validate
+git diff --check
+```
+
+External acceptance evidence must include the staging project, execution IDs,
+Cloud Run revision IDs, and timestamps for every scenario. Local passing tests
+do not replace the required staging drills or 48-hour soak.

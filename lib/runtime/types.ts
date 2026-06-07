@@ -23,6 +23,7 @@ export interface AgentRuntimeBudget {
 
 export interface AgentRuntimeRunInput {
   actionId: string;
+  sessionId?: string;
   missionId?: string;
   agentId?: string;
   mode?: RuntimeMode;

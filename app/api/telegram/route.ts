@@ -13,13 +13,15 @@ import {
   startProjectFlow,
   resumeProjectFlow,
 } from '@/lib/runtime/project-flow';
-import { resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
+import { decideApprovalOnce } from '@/lib/runtime/agent-actions';
 import { submitExecution } from '@/lib/runtime/durable-executions';
 
 export const dynamic = 'force-dynamic';
 
 const DISABLED_CHANNEL_MAX = 5;
 const DISABLED_CHANNEL_WINDOW_MS = 60_000;
+const OPERATOR_CHANNEL_MAX = 60;
+const OPERATOR_CHANNEL_WINDOW_MS = 60_000;
 
 /**
  * Constant-time string comparison. Used to validate the Telegram
@@ -63,7 +65,7 @@ async function openTasks(projectId: string) {
     `SELECT t.title, t.status, a.name as agent_name
      FROM Tasks t LEFT JOIN Agents a ON a.id = t.owner_agent_id
      WHERE t.mission_id = ? AND t.status != 'Done'
-     ORDER BY t.rowid ASC LIMIT 8`,
+     ORDER BY t.title ASC, t.id ASC LIMIT 8`,
     [projectId],
   );
   if (rows.length === 0) return 'No open tasks.';
@@ -72,7 +74,7 @@ async function openTasks(projectId: string) {
 
 async function statusText(projectId: string) {
   const [flow, actions, approvals] = await Promise.all([
-    dbClient.queryOne<any>(`SELECT * FROM Flow_Runs WHERE mission_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`, [projectId]),
+    dbClient.queryOne<any>(`SELECT * FROM Flow_Runs WHERE mission_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, [projectId]),
     dbClient.queryOne<any>(`SELECT COUNT(*) as count FROM Agent_Actions WHERE mission_id = ? AND status IN ('draft','approved','running','pending_approval','failed')`, [projectId]),
     dbClient.queryOne<any>(`SELECT COUNT(*) as count FROM Approvals WHERE mission_id = ? AND status = 'pending'`, [projectId]),
   ]);
@@ -111,9 +113,8 @@ async function handleCommand(text: string, projectHint?: string | null) {
   }
   if (command === '/approve') {
     if (!arg) return 'Usage: /approve <approval_id>';
-    await dbClient.execute(`UPDATE Approvals SET status = 'approved', decision = 'approved' WHERE id = ?`, [arg]);
-    await resumeAgentActionFromApproval(arg, 'approved');
-    return `Approved ${arg}.`;
+    const result = await decideApprovalOnce(arg, 'approved');
+    return result.decided ? `Approved ${arg}.` : `Approval ${arg} was already decided or does not exist.`;
   }
   if (command === '/status') return statusText(arg || projectId);
   if (command === '/open_tasks') return openTasks(arg || projectId);
@@ -129,7 +130,8 @@ async function handleCommand(text: string, projectHint?: string | null) {
 
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_telegram');
-  if (enabled !== 'true') {
+  const productionEnabled = process.env.SUPR_TELEGRAM_ENABLED === 'true';
+  if (enabled !== 'true' && !productionEnabled) {
     if (!await consumeDurable('telegram:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
       return Response.json({ ok: true, ignored: true, response: 'Telegram channel is disabled; rate limit reached.' });
     }
@@ -185,6 +187,9 @@ export async function POST(req: NextRequest) {
       [`cmd-${crypto.randomUUID()}`, text || '[non-text]', serializeChannelPayload(update), chatId, 'Unauthorized Telegram chat.'],
     );
     return Response.json({ ok: false, error: 'Unauthorized Telegram chat.' }, { status: 403 });
+  }
+  if (!await consumeDurable(`telegram:operator:${chatId}`, OPERATOR_CHANNEL_MAX, OPERATOR_CHANNEL_WINDOW_MS)) {
+    return Response.json({ ok: false, error: 'Telegram operator rate limit reached.' }, { status: 429 });
   }
 
   const responseText = text ? await handleCommand(text) : 'Send a text command or project request.';

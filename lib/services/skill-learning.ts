@@ -206,7 +206,7 @@ export class SkillLearningService {
 
   private async findSecurityReviewer(fallbackAgentId?: string | null) {
     const reviewer = await dbClient.queryOne<any>(
-      `SELECT id FROM Agents WHERE lower(name) LIKE '%security%' OR lower(role) LIKE '%security%' ORDER BY rowid ASC LIMIT 1`,
+      `SELECT id FROM Agents WHERE lower(name) LIKE '%security%' OR lower(role) LIKE '%security%' ORDER BY id ASC LIMIT 1`,
     );
     return reviewer?.id || fallbackAgentId || "security-agent";
   }
@@ -219,8 +219,8 @@ export class SkillLearningService {
     const approvalId = id("approval");
     await dbClient.execute(
       `INSERT INTO Approvals
-        (id, mission_id, requesting_agent_id, action, required_permission, risk_level, reason, status)
-       VALUES (?, ?, ?, 'governance_review', 'Edit', 'Medium', ?, 'pending')`,
+        (id, mission_id, requesting_agent_id, action, required_permission, risk_level, reason, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'governance_review', 'Edit', 'Medium', ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       [
         approvalId,
         draft.mission_id,
@@ -244,7 +244,7 @@ export class SkillLearningService {
       [reviewer, draftId],
     );
     if (draft.approval_id) {
-      await dbClient.execute(`UPDATE Approvals SET status = 'rejected', decision = 'rejected' WHERE id = ?`, [draft.approval_id]);
+      await dbClient.execute(`UPDATE Approvals SET status = 'rejected', decision = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [draft.approval_id]);
     }
     return this.mapDraft({ ...draft, status: "rejected", reviewer_agent_id: reviewer });
   }

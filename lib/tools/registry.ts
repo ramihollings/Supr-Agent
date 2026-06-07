@@ -10,6 +10,8 @@ import dbClient from '../database/db_client';
  * action.
  */
 export interface ToolExecutionContext {
+  /** Durable execution session owning the isolated workspace. */
+  sessionId?: string;
   /** Agent performing the call. */
   agentId?: string;
   /** Mission the call belongs to. */
@@ -20,6 +22,8 @@ export interface ToolExecutionContext {
    * bypassed. The id is the Agent_Actions row id.
    */
   trustedApprovedActionId?: string;
+  /** Aborted when the owning execution is cancelled or the adapter times out. */
+  signal?: AbortSignal;
 }
 
 export interface ToolDefinition<TParams = any, TResult = any> {
@@ -57,6 +61,8 @@ class ToolRegistry {
     agentId?: string,
     missionId?: string,
     agentActionId?: string,
+    signal?: AbortSignal,
+    sessionId?: string,
   ): Promise<any> {
     let tool = this.tools.get(name);
     if (!tool) {
@@ -109,6 +115,8 @@ class ToolRegistry {
       agentId,
       missionId,
       trustedApprovedActionId,
+      signal,
+      sessionId,
     });
   }
 

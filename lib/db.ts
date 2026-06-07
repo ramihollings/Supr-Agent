@@ -483,11 +483,14 @@ export async function addArtifact(missionId: string, artifact: Omit<Artifact, 'i
     VALUES (?, ?, ?, ?, ?)
   `;
   await dbClient.execute(sql, [id, missionId, artifact.type, artifact.filename, artifact.content]);
+  const versionId = newId('av');
   await dbClient.execute(
     `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [newId('av'), id, missionId, artifact.filename, artifact.type, artifact.content, 1, 'draft', 'Supr', `${artifact.content.split('\n').length} lines created`]
+    [versionId, id, missionId, artifact.filename, artifact.type, artifact.content, 1, 'draft', 'Supr', `${artifact.content.split('\n').length} lines created`]
   );
+  const { syncArtifactVersionToGcs } = await import('@/lib/services/artifact-storage');
+  await syncArtifactVersionToGcs(versionId);
 }
 
 export async function updateArtifact(missionId: string, title: string, content: string): Promise<void> {
@@ -495,11 +498,12 @@ export async function updateArtifact(missionId: string, title: string, content: 
   const latest = await dbClient.queryOne<any>(`SELECT MAX(version) as version FROM Artifact_Versions WHERE mission_id = ? AND title = ?`, [missionId, title]);
   const sql = `UPDATE Artifacts SET content = ? WHERE mission_id = ? AND title = ?`;
   await dbClient.execute(sql, [content, missionId, title]);
+  const versionId = newId('av');
   await dbClient.execute(
     `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      newId('av'),
+      versionId,
       artifact?.id || null,
       missionId,
       title,
@@ -511,6 +515,8 @@ export async function updateArtifact(missionId: string, title: string, content: 
       `${content.split('\n').length} lines updated`
     ]
   );
+  const { syncArtifactVersionToGcs } = await import('@/lib/services/artifact-storage');
+  await syncArtifactVersionToGcs(versionId);
 }
 
 export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'id'>): Promise<void> {

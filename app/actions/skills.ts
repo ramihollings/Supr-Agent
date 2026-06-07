@@ -8,6 +8,7 @@
  */
 import crypto from 'crypto';
 import dbClient from '@/lib/database/db_client';
+import { triggerScheduledJob } from '@/lib/runtime/durable-executions';
 
 function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -66,6 +67,12 @@ export async function fetchCronJobsState() {
       status: r.status,
       assignedAgentId: r.assigned_agent_id || null,
       associatedTaskId: r.associated_task_id || null,
+      scheduleExpression: r.schedule_expression || null,
+      timezone: r.timezone || 'UTC',
+      nextRunAt: r.next_run_at || null,
+      maxConcurrency: Number(r.max_concurrency || 1),
+      previousResult: r.previous_result || null,
+      lastError: r.last_error || null,
     }));
   } catch (error) {
     console.error("Failed to fetch cron jobs:", error);
@@ -86,9 +93,8 @@ export async function toggleCronJobAction(id: string, currentStatus: string) {
 
 export async function triggerCronJobAction(id: string) {
   try {
-    const timeNow = new Date().toISOString();
-    await dbClient.execute(`UPDATE Cron_Jobs SET last_run = ? WHERE id = ?`, [timeNow, id]);
-    return { success: true, lastRun: timeNow };
+    const execution = await triggerScheduledJob(id);
+    return { success: true, lastRun: execution.scheduledFor, executionId: execution.id };
   } catch (error) {
     console.error("Failed to trigger cron job:", error);
     return { success: false, error: String(error) };

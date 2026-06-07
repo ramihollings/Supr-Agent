@@ -28,22 +28,19 @@ export function consume(key: string, max: number, windowMs: number): boolean {
 export async function consumeDurable(key: string, max: number, windowMs: number): Promise<boolean> {
   const { default: dbClient } = await import('@/lib/database/db_client');
   const now = new Date();
-  const row = await dbClient.queryOne<{ count: number; reset_at: string }>(
-    'SELECT count, reset_at FROM Rate_Limits WHERE key = ?',
-    [key],
-  ).catch(() => undefined);
-  const resetAt = row?.reset_at ? new Date(row.reset_at) : null;
-  if (!row || !resetAt || resetAt <= now) {
-    await dbClient.execute(
-      `INSERT INTO Rate_Limits (key, count, reset_at, updated_at) VALUES (?, 1, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(key) DO UPDATE SET count = 1, reset_at = excluded.reset_at, updated_at = CURRENT_TIMESTAMP`,
-      [key, new Date(now.getTime() + windowMs).toISOString()],
-    );
-    return true;
-  }
-  if (Number(row.count) >= max) return false;
-  await dbClient.execute(`UPDATE Rate_Limits SET count = count + 1, updated_at = CURRENT_TIMESTAMP WHERE key = ?`, [key]);
-  return true;
+  const nowIso = now.toISOString();
+  const resetIso = new Date(now.getTime() + windowMs).toISOString();
+  const row = await dbClient.queryOne<{ count: number }>(
+    `INSERT INTO Rate_Limits (key, count, reset_at, updated_at)
+     VALUES (?, 1, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(key) DO UPDATE SET
+       count = CASE WHEN Rate_Limits.reset_at <= ? THEN 1 ELSE Rate_Limits.count + 1 END,
+       reset_at = CASE WHEN Rate_Limits.reset_at <= ? THEN excluded.reset_at ELSE Rate_Limits.reset_at END,
+       updated_at = CURRENT_TIMESTAMP
+     RETURNING count`,
+    [key, resetIso, nowIso, nowIso],
+  );
+  return Number(row?.count || 0) <= max;
 }
 
 /**

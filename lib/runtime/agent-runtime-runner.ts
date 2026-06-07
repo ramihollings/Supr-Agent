@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import dbClient from '@/lib/database/db_client';
-import { toolRegistry } from '@/lib/tools/registry';
+import { integrationRegistry } from '@/lib/integrations/registry';
 import { getActiveProvider } from '@/lib/providers/model';
 import { operationalMetrics } from '@/lib/services/operational-metrics';
 import { providerRouteDecisionService } from '@/lib/services/provider-route-decisions';
@@ -568,11 +568,22 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
             try {
               assertNotCancelled(normalized);
-              output = await withRuntimeTimeout(
-                toolRegistry.executeTool(response.toolName, response.arguments, action.agentId, action.missionId, action.id),
+              const adapterResult = await withRuntimeTimeout(
+                integrationRegistry.execute(response.toolName, {
+                  sessionId: normalized.sessionId,
+                  agentId: action.agentId,
+                  missionId: action.missionId,
+                  agentActionId: action.id,
+                }, response.arguments),
                 deadline,
                 `${response.toolName} tool call`,
               );
+              if (!adapterResult.ok) {
+                const adapterError = new Error(adapterResult.error || `${response.toolName} adapter failed.`);
+                (adapterError as any).detail = adapterResult.errorDetail;
+                throw adapterError;
+              }
+              output = adapterResult.output;
               if (!hasMeaningfulToolOutput(output)) {
                 throw new Error(`${response.toolName} returned empty output; refusing to treat it as durable execution evidence.`);
               }

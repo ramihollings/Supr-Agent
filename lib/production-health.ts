@@ -182,7 +182,7 @@ export async function getProductionHealth(options: { probeModel?: boolean } = {}
 
   const channels = await Promise.all(['telegram', 'slack', 'discord'].map(async (channel) => {
     const enabled = await getSettingValue(`channels_${channel}`);
-    const isEnabled = enabled === 'true';
+    const isEnabled = enabled === 'true' || (channel === 'telegram' && process.env.SUPR_TELEGRAM_ENABLED === 'true');
     return {
       id: channel,
       enabled: isEnabled,

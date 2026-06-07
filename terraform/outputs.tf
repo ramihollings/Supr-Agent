@@ -14,6 +14,10 @@ output "artifact_bucket" {
   value = google_storage_bucket.artifacts.name
 }
 
+output "workspace_snapshot_bucket" {
+  value = google_storage_bucket.workspace_snapshots.name
+}
+
 output "scheduler_service_account" {
   value = google_service_account.scheduler.email
 }

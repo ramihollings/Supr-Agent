@@ -93,9 +93,13 @@ export class PortabilityService {
     if (Array.isArray(data.missions)) {
       for (const m of data.missions) {
         operations.push({
-          sql: `INSERT OR REPLACE INTO Missions 
+          sql: `INSERT INTO Missions
                 (id, title, goal, workflow_type, autonomy_mode, status, current_phase_id, constraints, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET title = excluded.title, goal = excluded.goal,
+                workflow_type = excluded.workflow_type, autonomy_mode = excluded.autonomy_mode,
+                status = excluded.status, current_phase_id = excluded.current_phase_id,
+                constraints = excluded.constraints, updated_at = excluded.updated_at`,
           params: [m.id, m.title, m.goal, m.workflow_type, m.autonomy_mode, m.status, m.current_phase_id, m.constraints, m.created_at, m.updated_at]
         });
         stats.Missions++;
@@ -106,9 +110,14 @@ export class PortabilityService {
     if (Array.isArray(data.glidepaths)) {
       for (const gp of data.glidepaths) {
         operations.push({
-          sql: `INSERT OR REPLACE INTO Glidepaths 
+          sql: `INSERT INTO Glidepaths
                 (id, mission_id, phases, tasks, approval_gates, blockers, standards, decisions, risks, assumptions, progress, readiness_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET mission_id = excluded.mission_id,
+                phases = excluded.phases, tasks = excluded.tasks, approval_gates = excluded.approval_gates,
+                blockers = excluded.blockers, standards = excluded.standards, decisions = excluded.decisions,
+                risks = excluded.risks, assumptions = excluded.assumptions, progress = excluded.progress,
+                readiness_score = excluded.readiness_score`,
           params: [gp.id, gp.mission_id, gp.phases, gp.tasks, gp.approval_gates, gp.blockers, gp.standards, gp.decisions, gp.risks, gp.assumptions, gp.progress, gp.readiness_score]
         });
         stats.Glidepaths++;
@@ -119,9 +128,13 @@ export class PortabilityService {
     if (Array.isArray(data.agents)) {
       for (const a of data.agents) {
         operations.push({
-          sql: `INSERT OR REPLACE INTO Agents 
+          sql: `INSERT INTO Agents
                 (id, workspace_id, name, role, type, permission_tier, tools, status, current_task_id, retry_limit, retry_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, name = excluded.name,
+                role = excluded.role, type = excluded.type, permission_tier = excluded.permission_tier,
+                tools = excluded.tools, status = excluded.status, current_task_id = excluded.current_task_id,
+                retry_limit = excluded.retry_limit, retry_count = excluded.retry_count`,
           params: [a.id, a.workspace_id, a.name, a.role, a.type, a.permission_tier, a.tools, a.status, a.current_task_id, a.retry_limit, a.retry_count]
         });
         stats.Agents++;
@@ -132,9 +145,13 @@ export class PortabilityService {
     if (Array.isArray(data.tasks)) {
       for (const t of data.tasks) {
         operations.push({
-          sql: `INSERT OR REPLACE INTO Tasks 
+          sql: `INSERT INTO Tasks
                 (id, mission_id, phase_id, title, status, owner_agent_id, required_permission, retry_count, blocker_reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET mission_id = excluded.mission_id, phase_id = excluded.phase_id,
+                title = excluded.title, status = excluded.status, owner_agent_id = excluded.owner_agent_id,
+                required_permission = excluded.required_permission, retry_count = excluded.retry_count,
+                blocker_reason = excluded.blocker_reason`,
           params: [t.id, t.mission_id, t.phase_id, t.title, t.status, t.owner_agent_id, t.required_permission, t.retry_count, t.blocker_reason]
         });
         stats.Tasks++;
@@ -145,10 +162,15 @@ export class PortabilityService {
     if (Array.isArray(data.approvals)) {
       for (const ap of data.approvals) {
         operations.push({
-          sql: `INSERT OR REPLACE INTO Approvals 
-                (id, mission_id, task_id, requesting_agent_id, action, required_permission, risk_level, reason, status, decision)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          params: [ap.id, ap.mission_id, ap.task_id, ap.requesting_agent_id, ap.action, ap.required_permission, ap.risk_level, ap.reason, ap.status, ap.decision]
+          sql: `INSERT INTO Approvals
+                (id, mission_id, task_id, requesting_agent_id, action, required_permission, risk_level, reason, status, decision, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET mission_id = excluded.mission_id, task_id = excluded.task_id,
+                requesting_agent_id = excluded.requesting_agent_id, action = excluded.action,
+                required_permission = excluded.required_permission, risk_level = excluded.risk_level,
+                reason = excluded.reason, status = excluded.status, decision = excluded.decision,
+                created_at = excluded.created_at, updated_at = excluded.updated_at`,
+          params: [ap.id, ap.mission_id, ap.task_id, ap.requesting_agent_id, ap.action, ap.required_permission, ap.risk_level, ap.reason, ap.status, ap.decision, ap.created_at || new Date().toISOString(), ap.updated_at || ap.created_at || new Date().toISOString()]
         });
         stats.Approvals++;
       }
@@ -158,9 +180,13 @@ export class PortabilityService {
     if (Array.isArray(data.memoryItems)) {
       for (const m of data.memoryItems) {
         operations.push({
-          sql: `INSERT OR REPLACE INTO Memory_Items 
+          sql: `INSERT INTO Memory_Items
                 (id, workspace_id, mission_id, scope, type, content, source, importance, pinned, reviewed_at, reason, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, mission_id = excluded.mission_id,
+                scope = excluded.scope, type = excluded.type, content = excluded.content, source = excluded.source,
+                importance = excluded.importance, pinned = excluded.pinned, reviewed_at = excluded.reviewed_at,
+                reason = excluded.reason`,
           params: [m.id, m.workspace_id, m.mission_id, m.scope, m.type, m.content, m.source, m.importance, m.pinned || 0, m.reviewed_at, m.reason, m.created_at]
         });
         stats.Memory_Items++;
@@ -172,7 +198,8 @@ export class PortabilityService {
       for (const s of data.settings) {
         if (s.value === "[SCRUBBED]") continue;
         operations.push({
-          sql: `INSERT OR REPLACE INTO Settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+          sql: `INSERT INTO Settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
           params: [s.key, s.value]
         });
         stats.Settings++;

@@ -31,6 +31,7 @@ export function evaluateActionPolicy(
   requiredPermission: PermissionTier = 'Observe',
 ): ActionPolicyDecision {
   const command = String(args.command || args.cmd || args.CommandLine || '');
+  const operation = String(args.operation || args.action || '');
   if (DENIED_COMMANDS.some((pattern) => pattern.test(command))) {
     return {
       outcome: 'deny',
@@ -39,7 +40,11 @@ export function evaluateActionPolicy(
       requiredPermissions: [requiredPermission],
     };
   }
-  if (APPROVAL_TOOLS.test(toolName) || APPROVAL_COMMANDS.some((pattern) => pattern.test(command))) {
+  if (
+    APPROVAL_TOOLS.test(toolName)
+    || APPROVAL_TOOLS.test(operation)
+    || APPROVAL_COMMANDS.some((pattern) => pattern.test(command))
+  ) {
     return {
       outcome: 'require_approval',
       reason: 'The action can create an irreversible external or destructive side effect.',

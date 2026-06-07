@@ -103,11 +103,11 @@ test('MCP nav link is present in the TopNav', () => {
 });
 
 // 5. Composio as an MCP server
-test('Composio is registered as a working in-process MCP server', () => {
+test('Composio remains registered as a disabled beta in-process MCP server', () => {
   const composio = REGISTRY.servers.find((s) => s.id === 'supr-composio');
   assert.ok(composio, 'supr-composio server must be in the registry');
   assert.equal(composio.transport, 'in-process');
-  assert.equal(composio.enabled, true);
+  assert.equal(composio.enabled, false);
   // Composio actions are External_Act — they touch real third-party
   // services, so a Draft/E tier is not enough.
   assert.equal(composio.required_tier, 'External_Act');

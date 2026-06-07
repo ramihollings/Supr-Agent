@@ -114,6 +114,14 @@ export type PlanItem =
     | { kind: 'reflection'; label: string; basedOn: 'last_final'; }
     | { kind: 'noop'; label: string; };
 
+export interface AgentSessionContinuation {
+    nextPlanIndex: number;
+    plan: PlanItem[];
+    evidence: Record<string, string[]>;
+    transcriptIds: string[];
+    reflectionSummaries: string[];
+}
+
 export interface AgentSessionInput {
     sessionId?: string;
     missionId: string;
@@ -123,6 +131,9 @@ export interface AgentSessionInput {
         timeoutMs?: number;
         enableReflection?: boolean;
     };
+    cancellationToken?: { aborted?: boolean; reason?: string };
+    continuation?: AgentSessionContinuation | null;
+    onCheckpoint?: (continuation: AgentSessionContinuation) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +143,7 @@ export interface AgentSessionInput {
 export interface AgentSessionResult {
     sessionId: string;
     missionId: string;
-    status: 'completed' | 'failed' | 'partial' | 'needs_approval';
+    status: 'completed' | 'failed' | 'partial' | 'needs_approval' | 'cancelled';
     steps: number;
     finalSummary?: string;
     evidence: Record<string, string[]>;
@@ -147,6 +158,7 @@ export interface AgentSessionResult {
     startedAt: string;
     completedAt: string;
     durationMs: number;
+    continuation: AgentSessionContinuation;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,13 +351,14 @@ export async function runReflection(input: {
 export async function runAgentSession(input: AgentSessionInput): Promise<AgentSessionResult> {
     const sessionId = input.sessionId || safeId('session');
     const startedAt = new Date();
-    const plan = [...input.plan];
+    const plan = [...(input.continuation?.plan || input.plan)];
+    const startIndex = Math.max(0, Math.min(input.continuation?.nextPlanIndex || 0, plan.length));
     const maxSessionSteps = input.budget?.maxSessionSteps ?? Math.max(8, plan.length * 2);
     const enableReflection = input.budget?.enableReflection ?? true;
 
-    const evidence: Record<string, string[]> = { artifacts: [], memory: [], events: [], toolCalls: [] };
-    const transcriptIds: string[] = [];
-    const reflectionSummaries: string[] = [];
+    const evidence: Record<string, string[]> = input.continuation?.evidence || { artifacts: [], memory: [], events: [], toolCalls: [] };
+    const transcriptIds: string[] = [...(input.continuation?.transcriptIds || [])];
+    const reflectionSummaries: string[] = [...(input.continuation?.reflectionSummaries || [])];
     const perStep: AgentSessionResult['perStep'] = [];
 
     // Verify the mission still exists. A long-running session that
@@ -365,6 +378,13 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
             startedAt: startedAt.toISOString(),
             completedAt: new Date().toISOString(),
             durationMs: 0,
+            continuation: {
+                nextPlanIndex: startIndex,
+                plan,
+                evidence,
+                transcriptIds,
+                reflectionSummaries,
+            },
         };
     }
 
@@ -379,10 +399,32 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
     let stepsTaken = 0;
     let lastActionId: string | null = null;
 
-    for (let i = 0; i < plan.length; i += 1) {
+    let nextPlanIndex = startIndex;
+    const checkpoint = async (index: number) => {
+        nextPlanIndex = index;
+        await input.onCheckpoint?.({
+            nextPlanIndex,
+            plan: [...plan],
+            evidence,
+            transcriptIds: [...transcriptIds],
+            reflectionSummaries: [...reflectionSummaries],
+        });
+    };
+
+    for (let i = startIndex; i < plan.length; i += 1) {
+        if (input.cancellationToken?.aborted) {
+            overallStatus = 'cancelled';
+            telemetry.warn('session.cancelled', {
+                sessionId,
+                reason: input.cancellationToken.reason || 'Execution cancelled',
+            });
+            await checkpoint(i);
+            break;
+        }
         if (stepsTaken >= maxSessionSteps) {
             telemetry.warn('session.max_steps_reached', { sessionId, stepsTaken, maxSessionSteps });
             overallStatus = 'partial';
+            await checkpoint(i);
             break;
         }
 
@@ -400,6 +442,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                 kind: planItem.kind,
                 status: 'skipped',
             }));
+            await checkpoint(i + 1);
             continue;
         }
 
@@ -456,6 +499,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                 verdict: reflection.verdict,
                 guidance: reflection.guidance,
             }));
+            await checkpoint(i + 1);
             continue;
         }
 
@@ -470,6 +514,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                 status: 'skipped',
                 error: 'action not found',
             }));
+            await checkpoint(i + 1);
             continue;
         }
 
@@ -481,7 +526,9 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
             // session bag so subsequent steps see prior results.
             const execution: AgentRuntimeRunResult = await runAgentRuntimeAction({
                 actionId: planItem.actionId,
+                sessionId,
                 budget: input.budget?.timeoutMs ? { timeoutMs: input.budget.timeoutMs } : undefined,
+                cancellationToken: input.cancellationToken,
             });
 
             mergeEvidence(evidence, (execution.result as any)?.evidence || {});
@@ -516,6 +563,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                     status: 'failed',
                     error: execution.failureReason,
                 }));
+                await checkpoint(i);
                 break;
             }
 
@@ -531,6 +579,24 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                     kind: planItem.kind,
                     status: 'pending_approval',
                 }));
+                await checkpoint(i);
+                break;
+            }
+
+            if (execution.status !== 'completed') {
+                overallStatus = 'partial';
+                perStep[perStep.length - 1] = {
+                    planItem,
+                    status: 'skipped',
+                    summary: stepSummary,
+                    error: `Action is ${execution.status}; durable recovery will retry after the active claim clears.`,
+                };
+                sessionEventBus.emitEvent(sessionEvent(sessionId, input.missionId, 'plan_item_completed', {
+                    index: i,
+                    kind: planItem.kind,
+                    status: execution.status,
+                }));
+                await checkpoint(i);
                 break;
             }
 
@@ -550,6 +616,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                     basedOn: 'last_final',
                 });
             }
+            await checkpoint(i + 1);
         } catch (error: any) {
             perStep.push({
                 planItem,
@@ -563,6 +630,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                 status: 'failed',
                 error: error?.message || String(error),
             }));
+            await checkpoint(i);
             break;
         }
     }
@@ -597,6 +665,13 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
         startedAt: startedAt.toISOString(),
         completedAt: completedAt.toISOString(),
         durationMs,
+        continuation: {
+            nextPlanIndex,
+            plan,
+            evidence,
+            transcriptIds,
+            reflectionSummaries,
+        },
     };
 }
 
@@ -621,7 +696,7 @@ export async function buildSessionPlanFromMission(
   const actions = await dbClient.query<any>(
     `SELECT id, capability, intent FROM Agent_Actions
      WHERE mission_id = ? AND status IN ('draft','approved','failed')
-     ORDER BY created_at ASC, rowid ASC
+     ORDER BY created_at ASC, id ASC
      LIMIT 50`,
     [missionId],
   );

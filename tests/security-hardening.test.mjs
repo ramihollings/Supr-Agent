@@ -75,6 +75,20 @@ test('optional disabled channels are ignored without blocking live runtime and l
   assert.doesNotMatch(telegram + slack + discord, /JSON\.stringify\(update\)|JSON\.stringify\(payload\)/);
 });
 
+test('production Telegram requires explicit operator configuration and durable rate limiting', () => {
+  const telegram = readFileSync('app/api/telegram/route.ts', 'utf8');
+  const readiness = readFileSync('app/api/health/ready/route.ts', 'utf8');
+  const terraform = readFileSync('terraform/main.tf', 'utf8') + readFileSync('terraform/variables.tf', 'utf8');
+
+  assert.match(telegram, /SUPR_TELEGRAM_ENABLED/);
+  assert.match(telegram, /consumeDurable\(`telegram:operator:\$\{chatId\}`/);
+  assert.match(readiness, /TELEGRAM_BOT_TOKEN/);
+  assert.match(readiness, /TELEGRAM_WEBHOOK_SECRET/);
+  assert.match(readiness, /TELEGRAM_CHAT_ID/);
+  assert.match(terraform, /name\s+=\s+"TELEGRAM_CHAT_ID"/);
+  assert.match(terraform, /telegram_chat_id is required when enable_telegram is true/);
+});
+
 test('theme bootstrap only applies whitelisted appearance classes', () => {
   const layout = readFileSync('app/layout.tsx', 'utf8');
   const settingsPage = readFileSync('app/settings/page.tsx', 'utf8');
@@ -224,7 +238,7 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
   assert.match(runtime, /resumeAgentActionFromApproval/);
   assert.match(runtime, /evaluateActionPolicy/);
   assert.match(runner, /ModelToolResponse/);
-  assert.match(runner, /toolRegistry\.executeTool/);
+  assert.match(runner, /integrationRegistry\.execute/);
   // The runtime delegates JSON parsing to the pure helper
   // `parseModelToolResponse` in agent-runtime-pure.ts, which itself
   // calls `parseModelJson` after stripping provider thinking preambles.
@@ -299,7 +313,7 @@ test('timeline, approvals, and connector health read runtime state', () => {
   const actions = readFileSync('app/actions.ts', 'utf8') + readFileSync('app/actions/chat-workspace.ts', 'utf8');
 
   assert.match(actions, /fetchAgentActionsForMission/);
-  assert.match(actions, /resumeAgentActionFromApproval/);
+  assert.match(actions, /decideApprovalOnce/);
   assert.match(actions, /Provider_Health/);
   assert.match(actions, /recordProviderSuccess/);
   assert.match(actions, /recordProviderFailure/);
@@ -356,7 +370,7 @@ test('project flow runtime exposes controls, intake routing, and telegram comman
   assert.match(initSql, /insertAgentCap\.run\('a2', 'web_search'\)/);
   assert.match(runtime, /runAgentRuntimeAction/);
   assert.doesNotMatch(runtime, /executeConcreteAgentWork/);
-  assert.match(runner, /toolRegistry\.executeTool/);
+  assert.match(runner, /integrationRegistry\.execute/);
   assert.match(projectFlowTools, /workspaceWriteFileTool/);
   assert.match(projectFlowTools, /buildLineDiff/);
   assert.match(projectFlowTools, /```diff/);
@@ -470,7 +484,11 @@ test('broken harness hardening wires native governance, tools, heartbeat, and pl
     assert.match(nativeRegister, new RegExp(`\\.\\/${tool}`));
   }
   assert.doesNotMatch(nativeRegister, /\.\/plugin-dispatcher/);
-  assert.match(heartbeat, /runAgentRuntimeAction/);
+  assert.match(heartbeat, /createExecution/);
+  assert.match(heartbeat, /enqueueCloudTask/);
+  assert.match(heartbeat, /idempotencyKey: `heartbeat:/);
+  assert.doesNotMatch(heartbeat, /setInterval/);
+  assert.doesNotMatch(heartbeat, /runAgentRuntimeAction/);
   assert.doesNotMatch(heartbeat, /heartbeat_task/);
   assert.doesNotMatch(heartbeat, /createAgentAction/);
   assert.doesNotMatch(heartbeat, /Simulate work completion/);
@@ -554,7 +572,8 @@ test('organization import requires server-side overwrite confirmation', () => {
   assert.match(actions, /collisions/);
   assert.match(portability, /detectCollisions/);
   assert.match(portability, /!options\?\.allowOverwrite/);
-  assert.match(portability, /INSERT OR REPLACE/);
+  assert.doesNotMatch(portability, /INSERT OR REPLACE/);
+  assert.match(portability, /ON CONFLICT\(id\) DO UPDATE/);
   assert.match(settings, /importOrganizationAction\(JSON\.stringify\(importBundle\), \{ allowOverwrite: confirmOverwrite \}\)/);
 });
 
@@ -832,15 +851,15 @@ test('code workspace falls back to governed local execution when Docker is unava
   assert.match(actions, /dockerDesktopLinuxEngine|Cannot connect to the Docker daemon|docker daemon/);
 });
 
-test('research runtime avoids legacy approval timestamps and duplicate log ids', () => {
+test('research runtime uses provider-neutral approval ordering and duplicate-safe log ids', () => {
   const contextAssembler = readFileSync('lib/runtime/context-assembler.ts', 'utf8');
   const researchPage = readFileSync('app/research/page.tsx', 'utf8');
 
   assert.match(contextAssembler, /const skillCatalogModule = '@\/lib\/services\/' \+ 'skill-catalog'/);
   assert.match(contextAssembler, /await import\(skillCatalogModule\)/);
   assert.doesNotMatch(contextAssembler, /eval\('require'\)/);
-  assert.match(contextAssembler, /FROM Approvals WHERE mission_id = \? ORDER BY rowid DESC LIMIT 12/);
-  assert.doesNotMatch(contextAssembler, /FROM Approvals WHERE mission_id = \? ORDER BY created_at DESC/);
+  assert.match(contextAssembler, /FROM Approvals WHERE mission_id = \? ORDER BY created_at DESC, id DESC LIMIT 12/);
+  assert.doesNotMatch(contextAssembler, /ORDER BY rowid/);
   assert.match(researchPage, /const logCounterRef = useRef\(0\)/);
   assert.match(researchPage, /const nextLogId = \(\) => Date\.now\(\) \+ \(logCounterRef\.current\+\+ % 1000\) \/ 1000/);
   assert.doesNotMatch(researchPage, /id: Date\.now\(\)/);

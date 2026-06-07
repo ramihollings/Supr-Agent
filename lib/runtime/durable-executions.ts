@@ -2,7 +2,11 @@ import crypto from 'node:crypto';
 import { GoogleAuth } from 'google-auth-library';
 import dbClient from '@/lib/database/db_client';
 import { buildSessionPlanFromMission, runAgentSession } from '@/lib/runtime/agent-session';
+import type { AgentSessionContinuation } from '@/lib/runtime/agent-session';
 import { telemetry } from '@/lib/telemetry';
+import { nextScheduledRun } from '@/lib/runtime/schedule';
+import { restoreWorkspaceSnapshot, uploadWorkspaceSnapshot } from '@/lib/services/workspace-snapshots';
+import { syncMissionArtifactsToGcs } from '@/lib/services/artifact-storage';
 
 export type ExecutionSource = 'web' | 'telegram' | 'schedule' | 'api';
 export type ExecutionStatus = 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'needs_approval';
@@ -16,6 +20,8 @@ export interface ExecutionRecord {
   scheduledFor: string;
   attempt: number;
   error: string | null;
+  deadLetteredAt: string | null;
+  deadLetterReason: string | null;
 }
 
 function newId(prefix: string) {
@@ -32,7 +38,26 @@ function mapExecution(row: any): ExecutionRecord {
     scheduledFor: row.scheduled_for,
     attempt: Number(row.attempt || 0),
     error: row.error || null,
+    deadLetteredAt: row.dead_lettered_at || null,
+    deadLetterReason: row.dead_letter_reason || null,
   };
+}
+
+async function persistContinuation(sessionId: string, continuation: AgentSessionContinuation) {
+  const state = JSON.stringify(continuation);
+  await dbClient.runTransaction([
+    {
+      sql: `INSERT INTO Run_Continuations (id, session_id, state_data)
+            VALUES (?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET state_data = excluded.state_data, updated_at = CURRENT_TIMESTAMP`,
+      params: [newId('continuation'), sessionId, state],
+    },
+    {
+      sql: `UPDATE Agent_Sessions SET continuation = ?, plan = ?, evidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      params: [state, JSON.stringify(continuation.plan), JSON.stringify(continuation.evidence), sessionId],
+    },
+  ]);
+  await uploadWorkspaceSnapshot(sessionId);
 }
 
 export async function getExecution(id: string): Promise<ExecutionRecord | null> {
@@ -107,7 +132,8 @@ export async function enqueueCloudTask(execution: ExecutionRecord): Promise<{ en
   const parent = `projects/${project}/locations/${location}/queues/${queue}`;
   const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
   const client = await auth.getClient();
-  const taskName = `${parent}/tasks/${execution.id.replace(/[^A-Za-z0-9_-]/g, '-')}`;
+  const dispatchId = crypto.randomUUID().replace(/-/g, '');
+  const taskName = `${parent}/tasks/${execution.id.replace(/[^A-Za-z0-9_-]/g, '-')}-${dispatchId}`;
   try {
     const response = await client.request<any>({
       url: `https://cloudtasks.googleapis.com/v2/${parent}/tasks`,
@@ -134,93 +160,228 @@ export async function enqueueCloudTask(execution: ExecutionRecord): Promise<{ en
   }
 }
 
-export async function runExecution(executionId: string, workerId = `worker-${crypto.randomUUID()}`) {
-  const leaseMs = Number(process.env.EXECUTION_LEASE_MS || 35 * 60_000);
-  const leaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+export async function requeueDeadLetterExecution(executionId: string) {
+  const row = await dbClient.queryOne<any>(
+    `UPDATE Job_Executions SET status = 'queued', error = NULL, dead_lettered_at = NULL,
+       dead_letter_reason = NULL, claimed_by = NULL, lease_expires_at = NULL,
+       updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status = 'failed' AND dead_lettered_at IS NOT NULL
+     RETURNING *`,
+    [executionId],
+  );
+  if (!row) return { requeued: false, execution: await getExecution(executionId) };
   await dbClient.execute(
+    `UPDATE Agent_Sessions SET status = 'queued', claimed_by = NULL, lease_expires_at = NULL,
+     updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    [row.session_id],
+  );
+  const execution = mapExecution(row);
+  const dispatch = await enqueueCloudTask(execution);
+  telemetry.info('execution.dead_letter_requeued', { executionId, sessionId: row.session_id, dispatched: dispatch.enqueued });
+  return { requeued: true, execution, dispatched: dispatch.enqueued };
+}
+
+export async function claimExecution(
+  executionId: string,
+  workerId: string,
+  now = new Date(),
+  leaseMs = Number(process.env.EXECUTION_LEASE_MS || 35 * 60_000),
+) {
+  const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+  return dbClient.queryOne<any>(
     `UPDATE Job_Executions SET status = 'running', claimed_by = ?, lease_expires_at = ?,
        attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND (status = 'queued' OR (status = 'running' AND lease_expires_at < ?))`,
-    [workerId, leaseExpiresAt, executionId, new Date().toISOString()],
+     WHERE id = ? AND (status = 'queued' OR (status = 'running' AND lease_expires_at < ?))
+     RETURNING *`,
+    [workerId, leaseExpiresAt, executionId, now.toISOString()],
   );
-  const row = await dbClient.queryOne<any>('SELECT * FROM Job_Executions WHERE id = ?', [executionId]);
-  if (!row) throw new Error(`Execution not found: ${executionId}`);
-  if (row.claimed_by !== workerId) return { accepted: false, execution: mapExecution(row) };
+}
+
+export async function runExecution(executionId: string, workerId = `worker-${crypto.randomUUID()}`) {
+  const row = await claimExecution(executionId, workerId);
+  if (!row) {
+    const existing = await dbClient.queryOne<any>('SELECT * FROM Job_Executions WHERE id = ?', [executionId]);
+    if (!existing) throw new Error(`Execution not found: ${executionId}`);
+    return { accepted: false, execution: mapExecution(existing) };
+  }
+  if (row.claimed_by !== workerId) {
+    const existing = await dbClient.queryOne<any>('SELECT * FROM Job_Executions WHERE id = ?', [executionId]);
+    return { accepted: false, execution: existing ? mapExecution(existing) : null };
+  }
   telemetry.info('execution.claimed', { executionId, sessionId: row.session_id, workerId, attempt: row.attempt });
 
   const session = await dbClient.queryOne<any>('SELECT * FROM Agent_Sessions WHERE id = ?', [row.session_id]);
   if (!session) throw new Error(`Session not found: ${row.session_id}`);
+  const leaseExpiresAt = row.lease_expires_at;
   await dbClient.execute(
     `UPDATE Agent_Sessions SET status = 'running', claimed_by = ?, lease_expires_at = ?,
        attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [workerId, leaseExpiresAt, session.id],
   );
 
+  const cancellationToken: { aborted?: boolean; reason?: string } = {};
+  const cancellationPoll = setInterval(() => {
+    void dbClient.queryOne<{ status: string }>('SELECT status FROM Job_Executions WHERE id = ?', [executionId])
+      .then((current) => {
+        if (current?.status === 'cancelled') {
+          cancellationToken.aborted = true;
+          cancellationToken.reason = 'Execution cancelled by operator';
+        }
+      })
+      .catch((error) => telemetry.warn('execution.cancellation_poll_failed', { executionId, error: String(error) }));
+  }, 2_000);
+  cancellationPoll.unref?.();
+
   try {
+    await restoreWorkspaceSnapshot(session.id);
+    const durableContinuation = await dbClient.queryOne<{ state_data: string }>(
+      'SELECT state_data FROM Run_Continuations WHERE session_id = ?',
+      [session.id],
+    );
+    const continuation = durableContinuation?.state_data
+      ? JSON.parse(durableContinuation.state_data) as AgentSessionContinuation
+      : session.continuation
+        ? JSON.parse(session.continuation) as AgentSessionContinuation
+        : null;
     const result = await runAgentSession({
       sessionId: session.id,
       missionId: session.mission_id,
       plan: JSON.parse(session.plan || '[]'),
+      cancellationToken,
+      continuation,
+      onCheckpoint: (state) => persistContinuation(session.id, state),
     });
+    const current = await dbClient.queryOne<{ status: string }>('SELECT status FROM Job_Executions WHERE id = ?', [executionId]);
+    const finalStatus = current?.status === 'cancelled' ? 'cancelled' : result.status;
+    if (finalStatus === 'completed') {
+      await syncMissionArtifactsToGcs(session.mission_id);
+      await uploadWorkspaceSnapshot(session.id);
+    }
     await dbClient.runTransaction([
       {
         sql: `UPDATE Agent_Sessions SET status = ?, result = ?, evidence = ?, claimed_by = NULL,
               lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        params: [result.status, JSON.stringify(result), JSON.stringify(result.evidence), session.id],
+        params: [finalStatus, JSON.stringify(result), JSON.stringify(result.evidence), session.id],
       },
       {
         sql: `UPDATE Job_Executions SET status = ?, error = NULL, claimed_by = NULL,
-              lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        params: [result.status, executionId],
+              lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status <> 'cancelled'`,
+        params: [finalStatus, executionId],
       },
     ]);
-    if (row.cron_job_id) {
+    if (finalStatus === 'completed' || finalStatus === 'cancelled') {
+      await dbClient.runTransaction([
+        { sql: 'DELETE FROM Run_Continuations WHERE session_id = ?', params: [session.id] },
+        { sql: 'UPDATE Agent_Sessions SET continuation = NULL WHERE id = ?', params: [session.id] },
+      ]);
+    } else {
+      await persistContinuation(session.id, result.continuation);
+    }
+    if (row.cron_job_id && finalStatus !== 'cancelled') {
       await dbClient.execute(
-        `UPDATE Cron_Jobs SET last_success_at = CURRENT_TIMESTAMP, last_error = NULL WHERE id = ?`,
-        [row.cron_job_id],
+        `UPDATE Cron_Jobs SET last_success_at = CURRENT_TIMESTAMP, last_error = NULL,
+         previous_result = ?, last_execution_id = ? WHERE id = ?`,
+        [JSON.stringify(result), executionId, row.cron_job_id],
       );
     }
-    telemetry.info('execution.completed', { executionId, sessionId: session.id, status: result.status, steps: result.steps });
-    return { accepted: true, result };
+    telemetry.info('execution.completed', { executionId, sessionId: session.id, status: finalStatus, steps: result.steps });
+    return { accepted: true, result: { ...result, status: finalStatus } };
   } catch (error: any) {
     const message = error?.message || String(error);
+    const current = await dbClient.queryOne<{ status: string }>('SELECT status FROM Job_Executions WHERE id = ?', [executionId]);
+    if (current?.status === 'cancelled') {
+      await dbClient.execute(
+        `UPDATE Agent_Sessions SET status = 'cancelled', result = ?, claimed_by = NULL,
+         lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [JSON.stringify({ error: message }), session.id],
+      );
+      return { accepted: true, result: { status: 'cancelled', error: message } };
+    }
+    const maxAttempts = Number(process.env.MAX_EXECUTION_ATTEMPTS || 5);
+    const retry = Number(row.attempt || 0) < maxAttempts;
+    const nextStatus = retry ? 'queued' : 'failed';
+    const deadLetteredAt = retry ? null : new Date().toISOString();
     await dbClient.runTransaction([
-      { sql: `UPDATE Agent_Sessions SET status = 'failed', result = ?, claimed_by = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, params: [JSON.stringify({ error: message }), session.id] },
-      { sql: `UPDATE Job_Executions SET status = 'failed', error = ?, claimed_by = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, params: [message, executionId] },
+      { sql: `UPDATE Agent_Sessions SET status = ?, result = ?, claimed_by = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, params: [nextStatus, JSON.stringify({ error: message }), session.id] },
+      { sql: `UPDATE Job_Executions SET status = ?, error = ?, dead_lettered_at = ?,
+              dead_letter_reason = ?, claimed_by = NULL, lease_expires_at = NULL,
+              updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        params: [nextStatus, message, deadLetteredAt, retry ? null : message, executionId] },
     ]);
     if (row.cron_job_id) {
       await dbClient.execute(`UPDATE Cron_Jobs SET last_error = ? WHERE id = ?`, [message, row.cron_job_id]);
     }
-    telemetry.error('execution.failed', error, { executionId, sessionId: session.id, attempt: row.attempt });
+    telemetry.error(retry ? 'execution.retry_scheduled' : 'execution.failed', error, {
+      executionId,
+      sessionId: session.id,
+      attempt: row.attempt,
+      maxAttempts,
+      deadLettered: !retry,
+    });
     throw error;
+  } finally {
+    clearInterval(cancellationPoll);
   }
 }
 
-function nextRun(last: Date, interval: string): Date {
-  const value = interval.toLowerCase();
-  const minutes = value.includes('hour') ? 60 : value.includes('daily') ? 1440 : Number(value.match(/\d+/)?.[0] || 10);
-  return new Date(last.getTime() + minutes * 60_000);
+async function resolveCronMission(job: any): Promise<string | null> {
+  if (job.associated_task_id) {
+    const task = await dbClient.queryOne<any>('SELECT mission_id FROM Tasks WHERE id = ?', [job.associated_task_id]);
+    if (task?.mission_id) return task.mission_id;
+  }
+  if (typeof job.target_action === 'string') {
+    const candidate = job.target_action.startsWith('mission:') ? job.target_action.slice('mission:'.length) : job.target_action;
+    const mission = await dbClient.queryOne<any>('SELECT id FROM Missions WHERE id = ?', [candidate]);
+    if (mission?.id) return mission.id;
+  }
+  return null;
+}
+
+export async function triggerScheduledJob(jobId: string): Promise<ExecutionRecord> {
+  const job = await dbClient.queryOne<any>('SELECT * FROM Cron_Jobs WHERE id = ?', [jobId]);
+  if (!job) throw new Error(`Scheduled job not found: ${jobId}`);
+  const missionId = await resolveCronMission(job);
+  if (!missionId) throw new Error('Routine is not linked to a mission or mission task.');
+  const now = new Date();
+  const execution = await createExecution({
+    missionId,
+    source: 'schedule',
+    cronJobId: job.id,
+    scheduledFor: now.toISOString(),
+    idempotencyKey: `manual:${job.id}:${crypto.randomUUID()}`,
+  });
+  await enqueueCloudTask(execution);
+  await dbClient.execute(
+    `UPDATE Cron_Jobs SET last_run = ?, last_execution_id = ?, last_error = NULL WHERE id = ?`,
+    [now.toISOString(), execution.id, job.id],
+  );
+  return execution;
 }
 
 export async function schedulerTick(now = new Date()) {
   const due = await dbClient.query<any>(
-    `SELECT * FROM Cron_Jobs WHERE status = 'Active' AND (next_run_at IS NULL OR next_run_at <= ?) ORDER BY next_run_at ASC LIMIT 50`,
+    `SELECT * FROM Cron_Jobs WHERE status = 'Active' AND enabled <> 0
+     AND (next_run_at IS NULL OR next_run_at <= ?) ORDER BY next_run_at ASC LIMIT 50`,
     [now.toISOString()],
   );
   const executions: ExecutionRecord[] = [];
   for (const job of due) {
-    let missionId: string | null = null;
-    if (job.associated_task_id) {
-      const task = await dbClient.queryOne<any>('SELECT mission_id FROM Tasks WHERE id = ?', [job.associated_task_id]);
-      missionId = task?.mission_id || null;
-    }
-    if (!missionId && typeof job.target_action === 'string') {
-      const candidate = job.target_action.startsWith('mission:') ? job.target_action.slice('mission:'.length) : job.target_action;
-      const mission = await dbClient.queryOne<any>('SELECT id FROM Missions WHERE id = ?', [candidate]);
-      missionId = mission?.id || null;
-    }
+    const active = await dbClient.queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM Job_Executions
+       WHERE cron_job_id = ? AND status IN ('queued','running','needs_approval')`,
+      [job.id],
+    );
+    if (Number(active?.count || 0) >= Number(job.max_concurrency || 1)) continue;
+    const missionId = await resolveCronMission(job);
     if (!missionId) {
       await dbClient.execute(`UPDATE Cron_Jobs SET last_error = ? WHERE id = ?`, ['Routine is not linked to a mission or mission task.', job.id]);
+      continue;
+    }
+    let nextRun: Date;
+    try {
+      nextRun = nextScheduledRun(job, now);
+    } catch (error: any) {
+      await dbClient.execute(`UPDATE Cron_Jobs SET last_error = ? WHERE id = ?`, [error?.message || String(error), job.id]);
       continue;
     }
     const scheduledFor = job.next_run_at || now.toISOString();
@@ -234,9 +395,36 @@ export async function schedulerTick(now = new Date()) {
     executions.push(execution);
     await enqueueCloudTask(execution);
     await dbClient.execute(
-      `UPDATE Cron_Jobs SET last_run = ?, next_run_at = ?, last_error = NULL WHERE id = ?`,
-      [now.toISOString(), nextRun(now, job.interval || '10 minutes').toISOString(), job.id],
+      `UPDATE Cron_Jobs SET last_run = ?, next_run_at = ?, last_execution_id = ?, last_error = NULL WHERE id = ?`,
+      [now.toISOString(), nextRun.toISOString(), execution.id, job.id],
     );
   }
-  return { checkedAt: now.toISOString(), due: due.length, executions };
+  const queued = await dbClient.query<any>(
+    `SELECT * FROM Job_Executions
+     WHERE status = 'queued' AND scheduled_for <= ? ORDER BY scheduled_for ASC LIMIT 100`,
+    [now.toISOString()],
+  );
+  let dispatched = 0;
+  for (const row of queued) {
+    const result = await enqueueCloudTask(mapExecution(row));
+    if (result.enqueued) dispatched += 1;
+  }
+  const oldestQueued = await dbClient.queryOne<{ scheduled_for: string | null }>(
+    `SELECT scheduled_for FROM Job_Executions WHERE status = 'queued' ORDER BY scheduled_for ASC LIMIT 1`,
+  );
+  const stuckLeases = await dbClient.queryOne<{ count: number }>(
+    `SELECT COUNT(*) as count FROM Job_Executions WHERE status = 'running' AND lease_expires_at < ?`,
+    [now.toISOString()],
+  );
+  const queueAgeMs = oldestQueued?.scheduled_for
+    ? Math.max(0, now.getTime() - new Date(oldestQueued.scheduled_for).getTime())
+    : 0;
+  telemetry.info('scheduler.tick', {
+    due: due.length,
+    created: executions.length,
+    dispatched,
+    queueAgeMs,
+    stuckLeases: Number(stuckLeases?.count || 0),
+  });
+  return { checkedAt: now.toISOString(), due: due.length, executions, dispatched };
 }

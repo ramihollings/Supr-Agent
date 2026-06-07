@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import dbClient from "../../lib/database/db_client";
+import { telemetry } from "../../lib/telemetry";
 
 export type BudgetScopeType = "global" | "agent" | "mission";
 export type BudgetThresholdType = "soft" | "hard";
@@ -83,6 +84,13 @@ export class BudgetEngine {
        VALUES (?, ?, ?, ?, 'hard', ?, ?, 'open')`,
       [incidentId, policy.id, policy.scope_type, policy.scope_id, policy.limit_cents, observed]
     );
+    telemetry.error('budget.hard_limit_exceeded', undefined, {
+      policyId: policy.id,
+      scopeType: policy.scope_type,
+      scopeId: policy.scope_id,
+      limitCents: policy.limit_cents,
+      observedCents: observed,
+    });
 
     // Pause target scope
     if (policy.scope_type === "agent") {
@@ -128,6 +136,13 @@ export class BudgetEngine {
        VALUES (?, ?, ?, ?, 'soft', ?, ?, 'open')`,
       [incidentId, policy.id, policy.scope_type, policy.scope_id, policy.limit_cents, observed]
     );
+    telemetry.warn('budget.soft_limit_exceeded', {
+      policyId: policy.id,
+      scopeType: policy.scope_type,
+      scopeId: policy.scope_id,
+      limitCents: policy.limit_cents,
+      observedCents: observed,
+    });
   }
 
   /**

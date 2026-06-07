@@ -10,13 +10,6 @@ export function runMemoryDiagnostic() {
   
   const db = new Database('supr_local.db');
   
-  // We need a 'superseded' column in Memory_Items. Let's add it dynamically for the diagnostic if it doesn't exist.
-  try {
-    db.prepare(`ALTER TABLE Memory_Items ADD COLUMN superseded BOOLEAN DEFAULT 0`).run();
-  } catch (e) {
-    // Column already exists
-  }
-
   const missionId = `m-mem-${Date.now()}`;
   db.prepare(`INSERT INTO Missions (id, title, status) VALUES (?, ?, ?)`).run(missionId, 'Memory Test', 'Active');
 

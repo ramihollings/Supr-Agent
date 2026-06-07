@@ -33,7 +33,7 @@ import { getActiveProvider, invalidateProviderCache } from '@/lib/providers/mode
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
 import { DEFAULT_GEMINI_MODEL, OPENAI_COMPATIBLE_BASE_URLS } from '@/lib/providers/catalog';
 import { hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';
-import { createAgentAction as createRuntimeAgentAction, fetchAgentActionsForMission, resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
+import { createAgentAction as createRuntimeAgentAction, decideApprovalOnce, fetchAgentActionsForMission } from '@/lib/runtime/agent-actions';
 import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
 import {
   approveLowRiskActions,
@@ -204,7 +204,7 @@ export async function fetchMissionTimelineAction(projectId?: string) {
     if (!mission) return [];
     const [agentActions, approvals, toolInvocations] = await Promise.all([
       fetchAgentActionsForMission(mission.id),
-      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid DESC`, [mission.id]),
+      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY created_at DESC, id DESC`, [mission.id]),
       dbClient.query<any>(`SELECT * FROM Tool_Invocations WHERE mission_id = ? ORDER BY created_at DESC LIMIT 20`, [mission.id]),
     ]);
 
@@ -372,8 +372,8 @@ export async function fetchProjectOperatingGraphAction(projectId: string) {
 
     const [agentActions, approvalRows, flowRun, flowNodes, agentRuns, toolInvocations] = await Promise.all([
       fetchAgentActionsForMission(projectId),
-      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid ASC`, [projectId]),
-      dbClient.queryOne<any>(`SELECT * FROM Flow_Runs WHERE mission_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`, [projectId]),
+      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY created_at ASC, id ASC`, [projectId]),
+      dbClient.queryOne<any>(`SELECT * FROM Flow_Runs WHERE mission_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, [projectId]),
       dbClient.query<any>(`SELECT * FROM Flow_Nodes WHERE mission_id = ? ORDER BY y ASC, x ASC, created_at ASC`, [projectId]),
       dbClient.query<any>(`SELECT * FROM Agent_Runs WHERE mission_id = ? ORDER BY created_at DESC LIMIT 20`, [projectId]),
       dbClient.query<any>(`SELECT * FROM Tool_Invocations WHERE mission_id = ? ORDER BY created_at DESC LIMIT 30`, [projectId]),
@@ -670,8 +670,8 @@ export async function routeIntakeToProjectFlowAction(input: {
 export async function fetchApprovalCenterAction(projectId?: string) {
   try {
     const rows = projectId
-      ? await dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid DESC`, [projectId])
-      : await dbClient.query<any>(`SELECT * FROM Approvals ORDER BY rowid DESC`);
+      ? await dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY created_at DESC, id DESC`, [projectId])
+      : await dbClient.query<any>(`SELECT * FROM Approvals ORDER BY created_at DESC, id DESC`);
 
     const approvals = rows.map((row) => ({
       id: row.id,
@@ -716,9 +716,8 @@ export async function decideApprovalAction(id: string, decision: 'approved' | 'r
       return { success: true };
     }
 
-    await dbClient.execute(`UPDATE Approvals SET status = ?, decision = ? WHERE id = ?`, [decision, decision, id]);
-    await resumeAgentActionFromApproval(id, decision);
-    return { success: true };
+    const result = await decideApprovalOnce(id, decision);
+    return { success: true, ...result };
   } catch (error) {
     console.error('Failed to decide approval:', error);
     return { success: false, error: String(error) };

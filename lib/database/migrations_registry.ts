@@ -31,6 +31,11 @@ import { addMcpInvocations } from './migrations/011__mcp_invocations';
 import { addCostEventsReported } from './migrations/012__cost_events_reported';
 import { addDurableExecutions } from './migrations/013__durable_executions';
 import { addRateLimitsRepair } from './migrations/014__rate_limits_repair';
+import { addSchedulerControls } from './migrations/015__scheduler_controls';
+import { addMemorySuperseded } from './migrations/016__memory_superseded';
+import { addExecutionDeadLetters } from './migrations/017__execution_dead_letters';
+import { addArtifactStorageUri } from './migrations/018__artifact_storage_uri';
+import { addApprovalTimestamps } from './migrations/019__approval_timestamps';
 
 export const migrations: Migration[] = [
   addCronJobsAssignedAgentId,
@@ -47,4 +52,9 @@ export const migrations: Migration[] = [
   addCostEventsReported,
   addDurableExecutions,
   addRateLimitsRepair,
+  addSchedulerControls,
+  addMemorySuperseded,
+  addExecutionDeadLetters,
+  addArtifactStorageUri,
+  addApprovalTimestamps,
 ];

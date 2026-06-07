@@ -578,7 +578,7 @@ export async function exportMissionBundleAction(missionId: string) {
     const id = z.string().min(1).max(160).parse(missionId);
     const [mission, approvals, actions, flowRuns, flowNodes, agentRuns, tools, artifactVersions, memorySections, groups, metrics, events] = await Promise.all([
       getMissionById(id),
-      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY rowid ASC`, [id]),
+      dbClient.query<any>(`SELECT * FROM Approvals WHERE mission_id = ? ORDER BY created_at ASC, id ASC`, [id]),
       dbClient.query<any>(`SELECT * FROM Agent_Actions WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
       dbClient.query<any>(`SELECT * FROM Flow_Runs WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
       dbClient.query<any>(`SELECT * FROM Flow_Nodes WHERE mission_id = ? ORDER BY created_at ASC`, [id]),
@@ -723,7 +723,7 @@ export async function spawnProjectAgentAction(input: {
     const capabilityRow = await dbClient.queryOne<any>(`SELECT id FROM Capabilities WHERE name = ?`, [data.capability]);
     if (capabilityRow) {
       await dbClient.execute(
-        `INSERT OR IGNORE INTO Agent_Capabilities (agent_id, capability_id, allowed) VALUES (?, ?, 1)`,
+        `INSERT INTO Agent_Capabilities (agent_id, capability_id, allowed) VALUES (?, ?, 1) ON CONFLICT DO NOTHING`,
         [createdAgent.id, capabilityRow.id],
       );
     }

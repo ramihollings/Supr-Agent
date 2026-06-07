@@ -135,3 +135,32 @@ jobs:
           name: playwright-report
           path: playwright-report
           retention-days: 7
+
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: supr
+          POSTGRES_PASSWORD: supr-test-password
+          POSTGRES_DB: supr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U supr -d supr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://supr:supr-test-password@127.0.0.1:5432/supr
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: PostgreSQL migration and runtime integration
+        run: npm run test:postgres
