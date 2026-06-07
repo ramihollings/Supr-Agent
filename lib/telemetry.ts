@@ -30,8 +30,18 @@ export interface TelemetryEvent {
 export type TelemetrySink = (event: TelemetryEvent) => void;
 
 const noop: TelemetrySink = () => {};
+const productionConsoleSink: TelemetrySink = (event) => {
+  const payload = JSON.stringify({
+    type: 'telemetry',
+    ...event,
+    error: event.error instanceof Error ? event.error.message : event.error,
+  });
+  if (event.level === 'error') console.error(payload);
+  else if (event.level === 'warn') console.warn(payload);
+  else console.log(payload);
+};
 
-let currentSink: TelemetrySink = noop;
+let currentSink: TelemetrySink = process.env.NODE_ENV === 'production' ? productionConsoleSink : noop;
 
 /** Replace the global sink. Pass `null` to disable. */
 export function setTelemetrySink(sink: TelemetrySink | null | undefined): void {

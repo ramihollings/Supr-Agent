@@ -25,6 +25,27 @@ export function consume(key: string, max: number, windowMs: number): boolean {
   return true;
 }
 
+export async function consumeDurable(key: string, max: number, windowMs: number): Promise<boolean> {
+  const { default: dbClient } = await import('@/lib/database/db_client');
+  const now = new Date();
+  const row = await dbClient.queryOne<{ count: number; reset_at: string }>(
+    'SELECT count, reset_at FROM Rate_Limits WHERE key = ?',
+    [key],
+  ).catch(() => undefined);
+  const resetAt = row?.reset_at ? new Date(row.reset_at) : null;
+  if (!row || !resetAt || resetAt <= now) {
+    await dbClient.execute(
+      `INSERT INTO Rate_Limits (key, count, reset_at, updated_at) VALUES (?, 1, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET count = 1, reset_at = excluded.reset_at, updated_at = CURRENT_TIMESTAMP`,
+      [key, new Date(now.getTime() + windowMs).toISOString()],
+    );
+    return true;
+  }
+  if (Number(row.count) >= max) return false;
+  await dbClient.execute(`UPDATE Rate_Limits SET count = count + 1, updated_at = CURRENT_TIMESTAMP WHERE key = ?`, [key]);
+  return true;
+}
+
 /**
  * Check the `channels_<name>_debug` setting. When enabled, disabled-
  * channel webhooks persist their ignored payload to Channel_Commands so

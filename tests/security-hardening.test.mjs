@@ -222,7 +222,7 @@ test('agent runtime orchestration is backed by shared tables and modules', () =>
   }
   assert.ok(pkg.dependencies['@langchain/langgraph']);
   assert.match(runtime, /resumeAgentActionFromApproval/);
-  assert.match(runtime, /humanGateRequired/);
+  assert.match(runtime, /evaluateActionPolicy/);
   assert.match(runner, /ModelToolResponse/);
   assert.match(runner, /toolRegistry\.executeTool/);
   // The runtime delegates JSON parsing to the pure helper

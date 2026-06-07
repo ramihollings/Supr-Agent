@@ -71,7 +71,7 @@ test('MCP router never lets a subagent attach to a stdio server directly', () =>
 // 2. MCP HTTP routes
 test('MCP status route lists servers, tools, and resources', () => {
   assert.match(MCP_STATUS_SOURCE, /loadMcpRegistry/);
-  assert.match(MCP_STATUS_SOURCE, /listAllTools/);
+  assert.match(MCP_STATUS_SOURCE, /listPassiveTools/);
   assert.match(MCP_STATUS_SOURCE, /listServerResources/);
   // Must require auth like the rest of the API.
   assert.match(MCP_STATUS_SOURCE, /requireApiAuth/);

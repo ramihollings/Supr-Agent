@@ -21,7 +21,6 @@ let cachedMcpRegistry: ReturnType<typeof import('@/lib/mcp/registry').loadMcpReg
 function loadMcpRegistrySafe() {
   if (cachedMcpRegistry) return cachedMcpRegistry;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { loadMcpRegistry } = require('@/lib/mcp/registry');
     cachedMcpRegistry = loadMcpRegistry();
     return cachedMcpRegistry;

@@ -27,9 +27,7 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 10_000,
     pool: 'forks',
-    poolOptions: {
-      forks: { singleFork: true },
-    },
+    maxWorkers: 1,
   },
   resolve: {
     alias: {

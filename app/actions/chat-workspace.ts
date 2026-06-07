@@ -41,7 +41,6 @@ import {
   resumeProjectFlow,
   retryFailedFlowNodes,
   routeIntakeToProjectFlow,
-  runProjectFlow,
   startProjectFlow,
 } from '@/lib/runtime/project-flow';
 
@@ -600,7 +599,8 @@ export async function startProjectFlowAction(projectId: string) {
 export async function runProjectFlowAction(projectId: string) {
   try {
     z.string().min(1).parse(projectId);
-    return await runProjectFlow(projectId);
+    const { submitExecution } = await import('@/lib/runtime/durable-executions');
+    return await submitExecution({ missionId: projectId, source: 'web' });
   } catch (error) {
     console.error('Failed to run project flow:', error);
     return { success: false, error: String(error) };

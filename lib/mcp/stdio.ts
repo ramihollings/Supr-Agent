@@ -126,6 +126,7 @@ export class StdioMcpSession {
       : (expandedArgs || []);
     this.child = spawn(command, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.startedAt = Date.now();
+    this.crashed = false;
     this.child.stdout.on('data', (data) => this.handleStdout(data.toString()));
     this.child.stderr.on('data', (data) => {
       // Forward server stderr to the application log at
@@ -138,6 +139,14 @@ export class StdioMcpSession {
       for (const [id, p] of this.pending) {
         clearTimeout(p.timer);
         p.reject(new Error(`MCP server '${this.server.id}' exited (code=${code}, signal=${signal}) before responding to request ${id}.`));
+      }
+      this.pending.clear();
+    });
+    this.child.on('error', (error) => {
+      this.crashed = true;
+      for (const [, pending] of this.pending) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error(`MCP server '${this.server.id}' failed to start: ${error.message}`));
       }
       this.pending.clear();
     });
@@ -207,7 +216,7 @@ export class StdioMcpSession {
           this.pending.delete(id);
           reject(new Error(`MCP request '${method}' timed out after 30s.`));
         }
-      }, 30_000);
+      }, Number(process.env.MCP_REQUEST_TIMEOUT_MS || 8_000));
       this.pending.set(id, { resolve, reject, timer });
       try {
         this.child!.stdin.write(JSON.stringify(message) + '\n');

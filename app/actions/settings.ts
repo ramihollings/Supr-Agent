@@ -69,14 +69,18 @@ export async function fetchBootstrapStateAction(): Promise<{
   return { wizardRequired, hasProvider, wizardCompleted, reason };
 }
 
-export async function updateSettingAction(key: string, value: string) {
-  try {
+  export async function updateSettingAction(key: string, value: string) {
+    try {
     z.string().min(1).max(128).regex(/^[a-z0-9_]+$/i).parse(key);
     z.string().max(isSecretSettingKey(key) ? 8192 : 2048).parse(value);
 
-    if (key.endsWith('_configured')) {
-      return { success: false, error: 'Configured flags are read-only.' };
-    }
+      if (key.endsWith('_configured')) {
+        return { success: false, error: 'Configured flags are read-only.' };
+      }
+
+      if (process.env.NODE_ENV === 'production' && isSecretSettingKey(key)) {
+        return { success: false, error: 'Production secrets must be configured through Secret Manager.' };
+      }
 
     if (isSecretSettingKey(key) && value.trim() === '') {
       return { success: true, unchanged: true };

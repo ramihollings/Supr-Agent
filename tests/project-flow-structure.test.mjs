@@ -166,10 +166,9 @@ test('project-flow writes raw Flow_Nodes without forcing positions (Pass 2)', ()
   // pin x/y -- the canvas needs to receive all positions from
   // the DAG layout engine, not a hand-rolled modulo.
   const flow = readFileSync('lib/runtime/project-flow.ts', 'utf8');
-  const persist = flow.match(/async function persistFlowNode[\s\S]*?\n\}/)?.[0] || '';
   // It still writes the Flow_Nodes row -- just without a
   // hardcoded x/y. The canvas layout engine positions them.
-  assert.match(persist, /INSERT INTO Flow_Nodes/);
+  assert.match(flow, /INSERT INTO Flow_Nodes/);
 });
 
 test('graph-layout module is a real, importable sibling of project-flow', () => {

@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/exhaustive-deps -- workspace bootstrap and editor callbacks intentionally retain stable event identities */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useToast } from '@/components/ToastProvider';
@@ -102,7 +103,6 @@ export default function CodePage() {
     return () => {
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab?.content, activeTab?.lastSavedContent, activeFile]);
 
   // -- Crash recovery: persist a session snapshot (open tabs, active file,
@@ -276,10 +276,6 @@ export default function CodePage() {
       }
     }
   };
-
-  useEffect(() => {
-    loadWorkspace();
-  }, []);
 
   const handleToggleApiKeys = async (checked: boolean) => {
     setAllowApiKeys(checked);

@@ -1,312 +1,452 @@
-terraform {
-  required_version = ">= 1.3.0"
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = ">= 4.50.0"
-    }
-  }
-  # Remote state. The `BUCKET` placeholder is substituted at init time
-  # via `terraform init -backend-config="bucket=..."`; we keep the
-  # default empty so a missing backend blows up loud at init rather
-  # than silently writing state to a local file. See README and
-  # deploy.sh for the bootstrap command.
-  backend "gcs" {
-    bucket = "supr-terraform-state-REPLACE_WITH_PROJECT_ID"
-    prefix = "terraform/state"
-  }
-}
-
 provider "google" {
   project = var.project_id
   region  = var.region
 }
 
-# ==========================================
-# 0. Customer-Managed Encryption Key (CMEK)
-# ==========================================
-# All bucket, Cloud SQL, and Secret Manager resources are encrypted
-# with this KMS key. The key never leaves Google Cloud; the GKE
-# service account is granted `roles/cloudkms.cryptoKeyEncrypterDecrypter`
-# so the orchestrator can write to the bucket and the database.
-# Rotation period is 90 days per Supr's secret-rotation policy.
-resource "google_kms_key_ring" "supr" {
-  name     = "supr-keyring"
-  location = var.region
+locals {
+  services = toset([
+    "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "run.googleapis.com",
+    "sqladmin.googleapis.com",
+    "cloudtasks.googleapis.com",
+    "cloudscheduler.googleapis.com",
+    "secretmanager.googleapis.com",
+  ])
 }
 
-resource "google_kms_crypto_key" "supr" {
-  name     = "supr-cmek"
-  key_ring = google_kms_key_ring.supr.id
-  rotation_period = "7776000s" # 90 days
-
-  version_template {
-    algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION"
-  }
+resource "google_project_service" "required" {
+  for_each           = local.services
+  project            = var.project_id
+  service            = each.value
+  disable_on_destroy = false
 }
 
-# ==========================================
-# 1. VPC & Networking Setup
-# ==========================================
-
-resource "google_compute_network" "supr_vpc" {
-  name                    = "supr-vpc"
-  auto_create_subnetworks = false
+resource "google_artifact_registry_repository" "supr" {
+  location      = var.region
+  repository_id = "supr"
+  format        = "DOCKER"
+  depends_on    = [google_project_service.required]
 }
 
-resource "google_compute_subnetwork" "supr_subnet" {
-  name          = "supr-subnet"
-  ip_cidr_range = "10.0.0.0/20"
-  network       = google_compute_network.supr_vpc.id
-  region        = var.region
-
-  private_ip_google_access = true
+resource "google_service_account" "web" {
+  account_id   = "supr-web"
+  display_name = "Supr web service"
 }
 
-# Allocate private IP ranges for Cloud SQL connectivity
-resource "google_compute_global_address" "private_ip_alloc" {
-  name          = "supr-private-ip-alloc"
-  purpose       = "VPC_PEERING"
-  address_type  = "INTERNAL"
-  prefix_length = 16
-  network       = google_compute_network.supr_vpc.id
+resource "google_service_account" "worker" {
+  account_id   = "supr-worker"
+  display_name = "Supr worker service"
 }
 
-# Create Private Service Connection to route DB traffic inside VPC
-resource "google_service_networking_connection" "vpc_connection" {
-  network                 = google_compute_network.supr_vpc.id
-  service                 = "servicenetworking.googleapis.com"
-  reserved_peering_ranges = [google_compute_global_address.private_ip_alloc.name]
+resource "google_service_account" "scheduler" {
+  account_id   = "supr-scheduler"
+  display_name = "Supr scheduler invoker"
 }
 
-# ==========================================
-# 2. Cloud SQL PostgreSQL Database
-# ==========================================
-# High Availability: `availability_type = REGIONAL` provisions a
-# synchronous standby in a second zone. Failover is automatic.
-# Disk is SSD (vs HDD) for the small per-instance footprint.
-# Deletion protection: enabled so a `terraform destroy` cannot wipe
-# the production database. Operators must explicitly set
-# `deletion_protection = false` in an override to drop the DB.
-# Backups: automated daily + 7-day retention. Point-in-time recovery
-# is enabled for the first 7 days.
-resource "google_sql_database_instance" "postgres_instance" {
-  name             = "supr-postgres-instance"
-  database_version = "POSTGRES_15"
-  region           = var.region
+resource "google_sql_database_instance" "postgres" {
+  name                = "supr-postgres"
+  database_version    = "POSTGRES_16"
+  region              = var.region
   deletion_protection = true
-
-  depends_on = [google_service_networking_connection.vpc_connection]
+  depends_on          = [google_project_service.required]
 
   settings {
-    tier = "db-g1-small" # Move off db-f1-micro for production; gives HA headroom.
-    availability_type = "REGIONAL" # HA: synchronous standby in another zone.
+    tier              = var.database_tier
+    availability_type = var.environment == "production" ? "REGIONAL" : "ZONAL"
+    disk_type         = "PD_SSD"
+    disk_size         = 20
+    disk_autoresize   = true
 
     ip_configuration {
-      ipv4_enabled    = false
-      private_network = google_compute_network.supr_vpc.id
+      ipv4_enabled = true
     }
 
     backup_configuration {
-      enabled            = true
-      start_time         = "02:00"
+      enabled                        = true
       point_in_time_recovery_enabled = true
+      start_time                     = "02:00"
       backup_retention_settings {
-        retained_backups = 7
+        retained_backups = 14
         retention_unit   = "COUNT"
       }
     }
-
-    disk_type       = "PD_SSD"
-    disk_size       = 20
-    disk_autoresize = true
-
-    # Customer-managed encryption at rest. The instance's service
-    # account is granted encrypter/decrypter on the key in IAM
-    # below; without that grant Postgres falls back to Google's
-    # managed key, which defeats the purpose of having CMEK.
-    encryption_configuration {
-      kms_key_name = google_kms_crypto_key.supr.id
-    }
   }
 }
 
-resource "google_sql_database" "supr_db" {
-  name     = "supr_saas_db"
-  instance = google_sql_database_instance.postgres_instance.name
+resource "google_sql_database" "supr" {
+  name     = "supr"
+  instance = google_sql_database_instance.postgres.name
 }
 
-resource "google_sql_user" "db_admin" {
-  name     = "supr_admin"
-  instance = google_sql_database_instance.postgres_instance.name
+resource "google_sql_user" "supr" {
+  name     = "supr"
+  instance = google_sql_database_instance.postgres.name
   password = var.db_password
 }
 
-# ==========================================
-# 3. Cloud Storage (GCS) State Bucket
-# ==========================================
-# Encrypted with the same CMEK key as the database. Uniform
-# bucket-level access is on (no per-object ACLs). Versioning is
-# on so a bad object write can be rolled back via `gcloud`.
-# Lifecycle: 30-day soft delete for the workspace tarballs.
-resource "google_storage_bucket" "state_bucket" {
-  name          = "${var.project_id}-supr-state"
-  location      = var.region
-  force_destroy = false
-  default_event_based_hold = false
-
+resource "google_storage_bucket" "artifacts" {
+  name                        = "${var.project_id}-supr-artifacts"
+  location                    = var.region
   uniform_bucket_level_access = true
-
-  versioning {
-    enabled = true
-  }
-
+  force_destroy               = false
+  versioning { enabled = true }
   lifecycle_rule {
-    condition {
-      age = 30
-    }
-    action {
-      type = "Delete"
-    }
-  }
-
-  encryption {
-    default_kms_key_name = google_kms_crypto_key.supr.id
+    condition { age = 90 }
+    action { type = "Delete" }
   }
 }
 
-# ==========================================
-# 4. GKE Autopilot Cluster Setup
-# ==========================================
-
-resource "google_container_cluster" "gke_cluster" {
-  name     = "supr-gke-cluster"
-  location = var.region
-  enable_autopilot = true
-
-  network    = google_compute_network.supr_vpc.name
-  subnetwork = google_compute_subnetwork.supr_subnet.name
-
-  addons_config {
-    gcs_fuse_csi_driver_config {
-      enabled = true
-    }
-  }
-
-  # Cluster-level deletion protection. An explicit
-  # `--enable-deletion-protection=false` override is required to
-  # tear down the cluster.
-  deletion_protection = true
-
-  ip_allocation_policy {}
-}
-
-# ==========================================
-# 5. Secret Manager Setup
-# ==========================================
-# Three secrets: DATABASE_URL, GEMINI_API_KEY, APP_PASSWORD.
-# All use the same CMEK key as the bucket and the database so
-# the same key-rotation policy applies to all of them.
-resource "google_secret_manager_secret" "db_url_secret" {
-  secret_id = "DATABASE_URL"
+resource "google_secret_manager_secret" "secrets" {
+  for_each  = toset(["DB_PASSWORD", "APP_PASSWORD", "AUTH_SECRET", "GEMINI_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET"])
+  secret_id = each.value
   replication {
-    automatic = true
+    auto {}
   }
-  encryption {
-    kms_key_name = google_kms_crypto_key.supr.id
-  }
+  depends_on = [google_project_service.required]
 }
 
-resource "google_secret_manager_secret_version" "db_url_val" {
-  secret      = google_secret_manager_secret.db_url_secret.id
-  secret_data = "postgresql://supr_admin:${var.db_password}@${google_sql_database_instance.postgres_instance.private_ip_address}:5432/${google_sql_database.supr_db.name}"
+resource "google_secret_manager_secret_version" "db_password" {
+  secret      = google_secret_manager_secret.secrets["DB_PASSWORD"].id
+  secret_data = var.db_password
 }
 
-resource "google_secret_manager_secret" "gemini_secret" {
-  secret_id = "GEMINI_API_KEY"
-  replication {
-    automatic = true
-  }
-  encryption {
-    kms_key_name = google_kms_crypto_key.supr.id
-  }
-}
-
-resource "google_secret_manager_secret_version" "gemini_val" {
-  secret      = google_secret_manager_secret.gemini_secret.id
-  secret_data = var.gemini_api_key
-}
-
-resource "google_secret_manager_secret" "app_pw_secret" {
-  secret_id = "APP_PASSWORD"
-  replication {
-    automatic = true
-  }
-  encryption {
-    kms_key_name = google_kms_crypto_key.supr.id
-  }
-}
-
-resource "google_secret_manager_secret_version" "app_pw_val" {
-  secret      = google_secret_manager_secret.app_pw_secret.id
+resource "google_secret_manager_secret_version" "app_password" {
+  secret      = google_secret_manager_secret.secrets["APP_PASSWORD"].id
   secret_data = var.app_password
 }
 
-# ==========================================
-# 6. IAM Configuration for GKE Pod Access
-# ==========================================
-
-# Dedicated IAM service account for GKE Pod identity mapping
-resource "google_iam_service_account" "orchestrator_sa" {
-  account_id   = "supr-orchestrator-sa"
-  display_name = "Supr Orchestrator GKE Pod Identity"
+resource "google_secret_manager_secret_version" "auth_secret" {
+  secret      = google_secret_manager_secret.secrets["AUTH_SECRET"].id
+  secret_data = var.auth_secret
 }
 
-# Cloud SQL Client so the SA can connect (in addition to the
-# secret accessor grants).
-resource "google_project_iam_member" "orchestrator_sql_client" {
-  project = var.project_id
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_iam_service_account.orchestrator_sa.email}"
+resource "google_secret_manager_secret_version" "gemini" {
+  count       = var.enable_gemini ? 1 : 0
+  secret      = google_secret_manager_secret.secrets["GEMINI_API_KEY"].id
+  secret_data = var.gemini_api_key
 }
 
-# CMEK encrypter/decrypter for the orchestrator SA. Without this
-# the SA cannot write to the bucket or read secrets.
-resource "google_kms_crypto_key_iam_member" "orchestrator_cmek" {
-  crypto_key_id = google_kms_crypto_key.supr.id
-  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
-  member        = "serviceAccount:${google_iam_service_account.orchestrator_sa.email}"
+resource "google_secret_manager_secret_version" "telegram_token" {
+  count       = var.enable_telegram ? 1 : 0
+  secret      = google_secret_manager_secret.secrets["TELEGRAM_BOT_TOKEN"].id
+  secret_data = var.telegram_bot_token
 }
 
-# Grant GCS access to the orchestrator service account
-resource "google_storage_bucket_iam_member" "gcs_access" {
-  bucket = google_storage_bucket.state_bucket.name
+resource "google_secret_manager_secret_version" "telegram_secret" {
+  count       = var.enable_telegram ? 1 : 0
+  secret      = google_secret_manager_secret.secrets["TELEGRAM_WEBHOOK_SECRET"].id
+  secret_data = var.telegram_webhook_secret
+}
+
+resource "google_project_iam_member" "sql_client" {
+  for_each = toset([google_service_account.web.email, google_service_account.worker.email])
+  project  = var.project_id
+  role     = "roles/cloudsql.client"
+  member   = "serviceAccount:${each.value}"
+}
+
+resource "google_project_iam_member" "secret_accessor" {
+  for_each = toset([google_service_account.web.email, google_service_account.worker.email])
+  project  = var.project_id
+  role     = "roles/secretmanager.secretAccessor"
+  member   = "serviceAccount:${each.value}"
+}
+
+resource "google_storage_bucket_iam_member" "artifact_access" {
+  bucket = google_storage_bucket.artifacts.name
   role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_iam_service_account.orchestrator_sa.email}"
+  member = "serviceAccount:${google_service_account.worker.email}"
 }
 
-# Grant Secret Manager Access to the orchestrator service account
-resource "google_secret_manager_secret_iam_member" "db_url_access" {
-  secret_id = google_secret_manager_secret.db_url_secret.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_iam_service_account.orchestrator_sa.email}"
+resource "google_cloud_tasks_queue" "executions" {
+  name     = "supr-executions"
+  location = var.region
+  rate_limits {
+    max_concurrent_dispatches = var.worker_max_instances * var.worker_concurrency
+    max_dispatches_per_second = 5
+  }
+  retry_config {
+    max_attempts       = 5
+    max_retry_duration = "3600s"
+    min_backoff        = "10s"
+    max_backoff        = "300s"
+  }
+  depends_on = [google_project_service.required]
 }
 
-resource "google_secret_manager_secret_iam_member" "gemini_access" {
-  secret_id = google_secret_manager_secret.gemini_secret.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_iam_service_account.orchestrator_sa.email}"
+resource "google_project_iam_member" "task_enqueuer" {
+  project = var.project_id
+  role    = "roles/cloudtasks.enqueuer"
+  member  = "serviceAccount:${google_service_account.web.email}"
 }
 
-resource "google_secret_manager_secret_iam_member" "app_pw_access" {
-  secret_id = google_secret_manager_secret.app_pw_secret.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_iam_service_account.orchestrator_sa.email}"
+resource "google_service_account_iam_member" "web_can_mint_task_identity" {
+  service_account_id = google_service_account.scheduler.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.web.email}"
 }
 
-# Map K8s service account in GKE to GCP service account via Workload Identity
-resource "google_service_account_iam_member" "workload_identity_user" {
-  service_account_id = google_iam_service_account.orchestrator_sa.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.project_id}.svc.id.goog[supr/supr-sa]"
+resource "google_cloud_run_v2_service" "worker" {
+  name                = "supr-worker"
+  location            = var.region
+  deletion_protection = var.environment == "production"
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  depends_on          = [google_project_service.required]
+
+  template {
+    service_account                  = google_service_account.worker.email
+    timeout                          = "1800s"
+    max_instance_request_concurrency = var.worker_concurrency
+    scaling {
+      min_instance_count = 0
+      max_instance_count = var.worker_max_instances
+    }
+    containers {
+      image = var.image
+      resources {
+        limits = { cpu = "2", memory = "4Gi" }
+      }
+      env {
+        name  = "SUPR_SERVICE_ROLE"
+        value = "worker"
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+      env {
+        name  = "SUPR_INTERNAL_SERVICE_ACCOUNT"
+        value = google_service_account.scheduler.email
+      }
+      env {
+        name  = "PGHOST"
+        value = "/cloudsql/${google_sql_database_instance.postgres.connection_name}"
+      }
+      env {
+        name  = "PGUSER"
+        value = google_sql_user.supr.name
+      }
+      env {
+        name  = "PGDATABASE"
+        value = google_sql_database.supr.name
+      }
+      env {
+        name  = "SUPR_ARTIFACT_BUCKET"
+        value = google_storage_bucket.artifacts.name
+      }
+      env {
+        name = "PGPASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secrets["DB_PASSWORD"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secrets["AUTH_SECRET"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.enable_gemini ? ["enabled"] : []
+        content {
+          name = "GEMINI_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.secrets["GEMINI_API_KEY"].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
+      }
+    }
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance { instances = [google_sql_database_instance.postgres.connection_name] }
+    }
+  }
+}
+
+resource "google_cloud_run_v2_service" "web" {
+  name                = "supr-web"
+  location            = var.region
+  deletion_protection = var.environment == "production"
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  depends_on          = [google_project_service.required]
+
+  template {
+    service_account                  = google_service_account.web.email
+    timeout                          = "300s"
+    max_instance_request_concurrency = 40
+    scaling {
+      min_instance_count = var.environment == "production" ? 1 : 0
+      max_instance_count = 5
+    }
+    containers {
+      image = var.image
+      resources {
+        limits = { cpu = "2", memory = "2Gi" }
+      }
+      env {
+        name  = "SUPR_SERVICE_ROLE"
+        value = "web"
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+      env {
+        name  = "PGHOST"
+        value = "/cloudsql/${google_sql_database_instance.postgres.connection_name}"
+      }
+      env {
+        name  = "PGUSER"
+        value = google_sql_user.supr.name
+      }
+      env {
+        name  = "PGDATABASE"
+        value = google_sql_database.supr.name
+      }
+      env {
+        name  = "CLOUD_TASKS_LOCATION"
+        value = var.region
+      }
+      env {
+        name  = "CLOUD_TASKS_QUEUE"
+        value = google_cloud_tasks_queue.executions.name
+      }
+      env {
+        name  = "CLOUD_TASKS_SERVICE_ACCOUNT"
+        value = google_service_account.scheduler.email
+      }
+      env {
+        name  = "SUPR_WORKER_URL"
+        value = google_cloud_run_v2_service.worker.uri
+      }
+      env {
+        name  = "SUPR_INTERNAL_SERVICE_ACCOUNT"
+        value = google_service_account.scheduler.email
+      }
+      env {
+        name = "PGPASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secrets["DB_PASSWORD"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "APP_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secrets["APP_PASSWORD"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secrets["AUTH_SECRET"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.enable_gemini ? ["enabled"] : []
+        content {
+          name = "GEMINI_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.secrets["GEMINI_API_KEY"].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.enable_telegram ? ["enabled"] : []
+        content {
+          name = "TELEGRAM_BOT_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.secrets["TELEGRAM_BOT_TOKEN"].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.enable_telegram ? ["enabled"] : []
+        content {
+          name = "TELEGRAM_WEBHOOK_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.secrets["TELEGRAM_WEBHOOK_SECRET"].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
+      }
+    }
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance { instances = [google_sql_database_instance.postgres.connection_name] }
+    }
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "public_web" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.web.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "worker_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.worker.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
+}
+
+resource "google_cloud_scheduler_job" "tick" {
+  name      = "supr-scheduler-tick"
+  region    = var.region
+  schedule  = "* * * * *"
+  time_zone = "UTC"
+  http_target {
+    uri         = "${google_cloud_run_v2_service.web.uri}/api/internal/scheduler/tick"
+    http_method = "POST"
+    oidc_token {
+      service_account_email = google_service_account.scheduler.email
+      audience              = google_cloud_run_v2_service.web.uri
+    }
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "scheduler_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.web.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
 }

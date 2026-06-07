@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/exhaustive-deps -- textarea editor callbacks intentionally retain stable DOM event identities */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CodeAgentChatPanel } from './ide/CodeAgentChatPanel';
@@ -464,13 +465,9 @@ export function LightIDE(props: LightIDEProps) {
       { id: 'diagnose', label: 'Code Agent: Diagnose & Fix', description: 'Ask the Code Agent to repair the active file', group: 'Code Agent', icon: 'psychology', run: () => activeTab && onDiagnoseFix(activeTab.filename) },
       { id: 'chat', label: 'Toggle Code Agent Chat', description: 'Open a streaming chat with the Code Agent', group: 'Code Agent', icon: 'forum', keywords: ['chat', 'llm', 'agent'], run: () => setChatOpen((v) => !v) },
     ];
-    if (onJumpToResearch) {
-      const filename = activeFile;
-      // eslint-disable-next-line react-hooks/refs
-      list.push({ id: 'research', label: 'Open Research Brief', group: 'Code Agent', icon: 'travel_explore', run: () => onJumpToResearch(filename) });
-    }
-    return list;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return onJumpToResearch
+      ? [...list, { id: 'research', label: 'Open Research Brief', group: 'Code Agent', icon: 'travel_explore', run: () => onJumpToResearch(activeFile) }]
+      : list;
   }, [activeTab, activeFile, onSaveFile, onNewFile, onCloseTab, onRunCode, onLint, onBuild, onDiagnoseFix, onJumpToResearch, setChatOpen]);
 
   // Sync textarea + gutter sizes

@@ -4,17 +4,17 @@ import { serializeChannelPayload } from '@/lib/channel-logging';
 import dbClient from '@/lib/database/db_client';
 import { getActiveMission } from '@/lib/db';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
-import { consume, isChannelDebugEnabled } from '@/lib/route-rate-limit';
+import { consumeDurable, isChannelDebugEnabled } from '@/lib/route-rate-limit';
 import {
   approveLowRiskActions,
   pauseProjectFlow,
   retryFailedFlowNodes,
   routeIntakeToProjectFlow,
-  runProjectFlow,
   startProjectFlow,
   resumeProjectFlow,
 } from '@/lib/runtime/project-flow';
 import { resumeAgentActionFromApproval } from '@/lib/runtime/agent-actions';
+import { submitExecution } from '@/lib/runtime/durable-executions';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,8 +90,8 @@ async function handleCommand(text: string, projectHint?: string | null) {
     const target = arg || projectId;
     const started = await startProjectFlow(target, 'telegram');
     if (!started.success) return started.error || 'Unable to start flow.';
-    const run = await runProjectFlow(target);
-    return `Started Project Flow.\n${JSON.stringify(run)}`;
+    const run = await submitExecution({ missionId: target, source: 'telegram' });
+    return `Queued Project Flow.\nExecution: ${run.executionId}`;
   }
   if (command === '/pause') {
     await pauseProjectFlow(arg || projectId);
@@ -130,7 +130,7 @@ async function handleCommand(text: string, projectHint?: string | null) {
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_telegram');
   if (enabled !== 'true') {
-    if (!consume('telegram:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
+    if (!await consumeDurable('telegram:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
       return Response.json({ ok: true, ignored: true, response: 'Telegram channel is disabled; rate limit reached.' });
     }
     const debug = await isChannelDebugEnabled('telegram');

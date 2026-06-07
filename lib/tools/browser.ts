@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { chromium, BrowserContext, Page } from 'playwright-core';
 import { ToolDefinition, toolRegistry } from './registry';
+import { assertSafeUrl } from '@/lib/net/safe-fetch';
 
 // Schema for the web scraper. The `format` field is additive: existing
 // callers that omit it still get the legacy string response, while the
@@ -48,25 +49,35 @@ export const webScrapeTool: ToolDefinition<WebScrapeParamsType, string | CloakBr
 
     let browser;
     try {
+      await assertSafeUrl(params.url);
       browser = await chromium.launch({
         executablePath: executablePath,
         headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-blink-features=AutomationControlled' // Additional standard flag, though CloakBrowser handles this natively
-        ]
+        args: ['--disable-blink-features=AutomationControlled']
       });
 
       const context: BrowserContext = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         viewport: { width: 1920, height: 1080 }
       });
+      await context.route('**/*', async (route) => {
+        const url = route.request().url();
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          try {
+            await assertSafeUrl(url);
+          } catch {
+            await route.abort('blockedbyclient');
+            return;
+          }
+        }
+        await route.continue();
+      });
 
       const page: Page = await context.newPage();
 
       // Wait until network is mostly idle to ensure JS renders
       const response = await page.goto(params.url, { waitUntil: 'networkidle', timeout: 30000 });
+      await assertSafeUrl(page.url());
 
       let text = '';
       let html = '';

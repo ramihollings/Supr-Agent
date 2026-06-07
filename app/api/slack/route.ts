@@ -4,7 +4,7 @@ import { serializeChannelPayload } from '@/lib/channel-logging';
 import dbClient from '@/lib/database/db_client';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
 import { routeIntakeToProjectFlow } from '@/lib/runtime/project-flow';
-import { consume, isChannelDebugEnabled } from '@/lib/route-rate-limit';
+import { consumeDurable, isChannelDebugEnabled } from '@/lib/route-rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   if (enabled !== 'true') {
     // Rate-limit unauthenticated traffic on disabled channels so a
     // noisy bot cannot fill the DB. The token bucket is per-process.
-    if (!consume('slack:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
+    if (!await consumeDurable('slack:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
       return Response.json({ ok: true, ignored: true, response: 'Slack channel is disabled; rate limit reached.' });
     }
     // Default: do NOT persist the payload. Operators can opt in via

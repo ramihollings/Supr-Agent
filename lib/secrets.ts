@@ -18,6 +18,7 @@ export async function getSettingValue(key: string) {
 }
 
 export async function getSecretSetting(key: string, envFallback?: string) {
+  if (process.env.NODE_ENV === 'production') return envFallback || null;
   return await getSettingValue(key) || envFallback || null;
 }
 
@@ -33,4 +34,3 @@ export function redactSettings(rows: Array<{ key: string; value: string }>) {
   }
   return settingsObj;
 }
-

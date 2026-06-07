@@ -39,8 +39,7 @@ RUN apk add --no-cache \
     ttf-freefont \
     bash \
     curl \
-    openssl \
-    docker-cli
+    openssl
 
 # CloakBrowser can be supplied as a verified build argument. By default, use the
 # packaged Chromium wrapper so production builds never fetch unsigned binaries.
@@ -73,8 +72,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Note: In production, .agents and supr_workspaces must be mounted as GCS FUSE volumes.
-# We create empty directories here so the mount has a target.
+# Execution workspaces are ephemeral. Durable artifacts are uploaded to GCS.
 RUN mkdir -p /app/.agents && chown nextjs:nodejs /app/.agents
 RUN mkdir -p /app/supr_workspaces && chown nextjs:nodejs /app/supr_workspaces
 

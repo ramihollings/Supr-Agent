@@ -50,7 +50,7 @@ async function waitForServer(child) {
   let lastError;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`next start exited early with code ${child.exitCode}`);
+      throw new Error(`standalone server exited early with code ${child.exitCode}`);
     }
     try {
       const res = await fetch(`${BASE_URL}/login`, { redirect: "manual" });
@@ -120,10 +120,14 @@ function extractSessionCookie(setCookies) {
 }
 
 async function main() {
-  log(`starting next start on :${PORT}`);
+  const standaloneServer = resolve(REPO_ROOT, ".next", "standalone", "server.js");
+  if (!existsSync(standaloneServer)) {
+    throw new Error("standalone build is missing; run npm run build before npm run smoke");
+  }
+  log(`starting standalone server on :${PORT}`);
   const child = spawn(
     "node",
-    ["--disable-warning=DEP0205", "node_modules/next/dist/bin/next", "start", "-p", String(PORT)],
+    ["--disable-warning=DEP0205", standaloneServer],
     {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
@@ -194,7 +198,8 @@ async function main() {
     }
     const authHeaders = { Cookie: cookieValue };
 
-    const health = await probe("/api/health/production", { expectStatus: 200, headers: authHeaders });
+    await probe("/api/health/live", { expectStatus: 200, expectJson: { status: "pass" } });
+    const health = await probe("/api/health/ready", { expectStatus: 200 });
     const healthStatus = health.body?.status;
     if (healthStatus !== "pass" && healthStatus !== "warn") {
       throw new Error(

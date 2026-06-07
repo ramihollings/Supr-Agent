@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requireApiAuth } from '@/lib/auth';
-import { loadMcpRegistry, listServerResources, listAllTools } from '@/lib/mcp/registry';
+import { loadMcpRegistry, listServerResources, listPassiveTools } from '@/lib/mcp/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   if (authError) return authError;
 
   const registry = loadMcpRegistry();
-  const tools = await listAllTools();
+  const tools = await listPassiveTools();
   const resources: Array<{ server_id: string; server_name: string; items: Array<{ uri: string; name: string; description?: string }> }> = [];
   for (const server of registry.servers) {
     if (!server.enabled) continue;

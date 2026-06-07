@@ -3,6 +3,7 @@ import dbClient from '@/lib/database/db_client';
 import { PermissionEngine } from '@/lib/services/governance';
 import type { AgentActionInput, AgentActionRecord, AgentActionStatus, ExecutionResult } from './types';
 import { notifyMissionChanged } from '@/lib/events/bus';
+import { evaluateActionPolicy } from '@/lib/governance/action-policy';
 
 function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -187,20 +188,19 @@ export async function evaluateAgentAction(actionId: string): Promise<ExecutionRe
   if (action.status === 'pending_approval') return { status: action.status, action, approvalId: action.approvalId };
 
   const decision = await PermissionEngine.evaluateActionDynamic(action.agentId, action.capability, action.missionId);
-  const humanGateRequired = action.riskLevel === 'High' || action.riskLevel === 'Critical';
+  const actionPolicy = evaluateActionPolicy(action.capability, action.inputs || {}, action.requiredPermission);
 
-  if (decision.status === 'Denied') {
-    await updateActionStatus(action.id, 'failed', { error: decision.reason });
+  if (decision.status === 'Denied' || actionPolicy.outcome === 'deny') {
+    const reason = actionPolicy.outcome === 'deny' ? actionPolicy.reason : decision.reason;
+    await updateActionStatus(action.id, 'failed', { error: reason });
     const failed = await getAgentAction(action.id);
-    if (failed) await emitActionTimelineEvent(failed, 'agent_action_denied', `Denied ${action.capability}`, decision.reason);
-    return { status: 'failed', action: failed || action, reason: decision.reason };
+    if (failed) await emitActionTimelineEvent(failed, 'agent_action_denied', `Denied ${action.capability}`, reason);
+    return { status: 'failed', action: failed || action, reason };
   }
 
-  if (decision.status === 'RequiresApproval' || humanGateRequired) {
+  if (decision.status === 'RequiresApproval' || actionPolicy.outcome === 'require_approval') {
     const approvalId = id('gate');
-    const reason = humanGateRequired
-      ? `Action '${action.capability}' is ${action.riskLevel} risk. Human approval required before execution.`
-      : decision.reason;
+    const reason = actionPolicy.outcome === 'require_approval' ? actionPolicy.reason : decision.reason;
     await dbClient.execute(
       `INSERT INTO Approvals
         (id, mission_id, task_id, requesting_agent_id, action, required_permission, risk_level, reason, status, agent_action_id)

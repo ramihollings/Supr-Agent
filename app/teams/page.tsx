@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/exhaustive-deps -- SSE handlers intentionally refresh the active team selected at event time */
 
 import { TopNav } from '@/components/TopNav';
 import { useToast } from '@/components/ToastProvider';
@@ -145,7 +146,6 @@ export default function TeamsPage() {
       if (activeTeamId) void fetchDetail(activeTeamId);
     }, 15_000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTeamId]);
 
   return (

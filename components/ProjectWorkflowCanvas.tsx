@@ -305,7 +305,7 @@ export function ProjectWorkflowCanvas({
   // -------------------------------------------------------------------
   // Phase sub-graph expansion logic.
   // -------------------------------------------------------------------
-  const phaseGroups = graph?.phaseGroups || [];
+  const phaseGroups = useMemo(() => graph?.phaseGroups || [], [graph?.phaseGroups]);
   const togglePhase = useCallback((phaseId: string) => {
     setExpandedPhases((prev) => {
       const next = new Set(prev);

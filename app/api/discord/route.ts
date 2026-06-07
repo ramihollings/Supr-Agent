@@ -4,7 +4,7 @@ import dbClient from '@/lib/database/db_client';
 import { serializeChannelPayload } from '@/lib/channel-logging';
 import { getSecretSetting, getSettingValue } from '@/lib/secrets';
 import { routeIntakeToProjectFlow } from '@/lib/runtime/project-flow';
-import { consume, isChannelDebugEnabled } from '@/lib/route-rate-limit';
+import { consumeDurable, isChannelDebugEnabled } from '@/lib/route-rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,7 @@ async function verifyDiscordToken(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const enabled = await getSettingValue('channels_discord');
   if (enabled !== 'true') {
-    if (!consume('discord:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
+    if (!await consumeDurable('discord:disabled', DISABLED_CHANNEL_MAX, DISABLED_CHANNEL_WINDOW_MS)) {
       return Response.json({ ok: true, ignored: true, response: 'Discord channel is disabled; rate limit reached.' });
     }
     const debug = await isChannelDebugEnabled('discord');

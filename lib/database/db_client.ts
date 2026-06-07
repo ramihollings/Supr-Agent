@@ -35,8 +35,15 @@ function ensureSqliteInitialized() {
  */
 function translateQuery(sql: string): string {
   if (!isPostgres) return sql;
+  let translated = sql
+    .replace(/\browid\b/gi, 'id')
+    .replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO');
   let index = 1;
-  return sql.replace(/\?/g, () => `$${index++}`);
+  translated = translated.replace(/\?/g, () => `$${index++}`);
+  if (/^\s*INSERT\s+INTO/i.test(translated) && /INSERT\s+OR\s+IGNORE/i.test(sql)) {
+    translated = `${translated.replace(/;\s*$/, '')} ON CONFLICT DO NOTHING`;
+  }
+  return translated;
 }
 
 export const dbClient = {

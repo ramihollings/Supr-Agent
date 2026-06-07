@@ -346,6 +346,42 @@ export async function listAllTools(): Promise<McpToolDescriptor[]> {
 }
 
 /**
+ * Return the tool inventory without starting external MCP processes.
+ * Status and UI refreshes must remain cheap and side-effect free.
+ */
+export async function listPassiveTools(): Promise<McpToolDescriptor[]> {
+  const registry = loadMcpRegistry();
+  const out: McpToolDescriptor[] = [];
+  for (const server of registry.servers) {
+    if (!server.enabled) continue;
+    if (server.id === 'supr-internal') {
+      await toolRegistry.ensureNativeToolsRegistered();
+      for (const tool of toolRegistry.getAllTools()) {
+        out.push({
+          name: tool.name,
+          description: tool.description,
+          required_tier: tool.requiredTier,
+          server_id: server.id,
+          server_name: server.name,
+        });
+      }
+      continue;
+    }
+    const cached = stdioToolCache.get(server.id);
+    for (const name of cached?.tools || []) {
+      out.push({
+        name,
+        description: `Cached MCP tool from ${server.name}`,
+        required_tier: server.required_tier,
+        server_id: server.id,
+        server_name: server.name,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Forward a tool call to a non-internal MCP server (currently
  * stdio and http). The in-process server is handled by the
  * toolRegistry directly.

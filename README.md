@@ -1,148 +1,74 @@
 # Supr
 
-> An enterprise-grade AI Agent Supervisor and Collaboration Workspace.
+Supr is a governed autonomous-agent supervisor and collaboration workspace. It
+coordinates missions, tools, evidence, approvals, scheduled work, and operator
+channels without depending on OpenClaw or Hermes source code.
 
-Supr is a centralized orchestration layer that tracks, guides, and audits both
-**Permanent** and **Temporary** AI agents as they execute complex workflows —
-projects, code, research, and approvals. It runs locally on Windows/macOS or
-scales to production on a VPS or Google Cloud Run.
+## Local Development
 
----
-
-## Quickstart (local)
-
-Requires Node.js (LTS) and a MiniMax or Gemini API key.
+Requires Node.js 20 or newer.
 
 ```bash
-# 1. Install dependencies
-npm install
-
-# 2. Copy the env template and add your LLM key
+npm ci
 cp .env.example .env
-
-# 3. Run the dev server
 npm run dev
 ```
 
-Open `http://localhost:3001`. On first run Supr will walk you through a
-3-step bootstrap to set your AI provider key, runtime policy, and verify
-the live health probe.
+Open `http://localhost:3001`. SQLite is supported for local development only.
 
-> Tip: the default visual style is **Supr Clean** (rounded, soft borders).
-> Switch to **Neo-Brutalist** or any of the other 7 themes in
-> Settings → Appearance. 15 color palettes are available.
+## Production Architecture
 
----
+- `supr-web` on Cloud Run serves the UI, authenticated APIs, and Telegram webhook.
+- `supr-worker` on Cloud Run executes durable agent sessions.
+- Cloud SQL PostgreSQL is the authoritative application store.
+- Cloud Tasks dispatches idempotent executions; Cloud Scheduler creates due work.
+- GCS stores durable artifacts and workspace snapshots.
+- Secret Manager stores production credentials.
+- Local container files and process-local event streams are ephemeral.
 
-## Stack
+Web and Telegram are the certified v1 channels. Native tools plus selected
+GitHub, filesystem, browser, and MCP adapters are the certified integration
+surface. Other channels and integrations remain beta.
 
-- **Framework:** Next.js 16 (App Router, Server Actions, Standalone builds)
-- **Database:** SQLite (`better-sqlite3`, WAL). PostgreSQL is partially
-  supported in `lib/database/db_client.ts` but not production-validated —
-  all governance and runtime paths use the SQLite-backed `dbClient` adapter.
-- **AI:** MiniMax (primary) via `@google/genai`; Gemini, OpenAI, Anthropic,
-  xAI, OpenRouter, Groq, Mistral, and DeepSeek also supported
-- **Styling:** Tailwind CSS with 7 layout themes × 15 color palettes
-- **Sandbox runner:** Node.js child process (local) or Docker
+## Commands
 
----
-
-## Scripts
-
-| Command | What it does |
+| Command | Purpose |
 | --- | --- |
-| `npm run dev` | Next.js dev server on `:3001` |
-| `npm run build` | Production build |
-| `npm run start` | Serve the production build |
-| `npm run lint` | ESLint |
-| `npm run test:security` | 215+ server/security regression tests |
-| `npm run smoke` | Boots the prod build and probes `/login`, `/api/auth/status`, `/api/health/production` |
-| `npm run test:prod` | `lint` + `test:security` + `build` + `smoke` (full pre-deploy gate) |
+| `npm run dev` | Start the local Next.js development server |
+| `npm run build` | Build the standalone production artifact |
+| `npm run test:unit` | Run fast behavioral tests |
+| `npm run test:security` | Run security and architecture regressions |
+| `npm run smoke` | Boot and probe the standalone production server |
+| `npm run test:prod` | Run the complete local release gate |
+| `npm run db:migrate:postgres` | Create/import the full PostgreSQL schema |
 
----
+Use `npm run db:migrate:postgres -- --dry-run` to validate a migration without
+committing it.
 
-## Production deployment
+## Health Endpoints
 
-Three supported targets. Pick the one that matches your scale.
+- `GET /api/health/live`: dependency-free platform liveness.
+- `GET /api/health/ready`: database and required production configuration.
+- `GET /api/health/production`: authenticated deep diagnostics.
+- `GET /api/health/production?probe=model`: authenticated live model probe.
 
-### VPS (recommended for SQLite)
+## Deployment
 
-```bash
-APP_PASSWORD=<strong operator password>
-AUTH_SECRET=<long random secret>
-MINIMAX_API_KEY=<real MiniMax key>
-```
-
-```bash
-docker compose up -d --build
-```
-
-Reverse proxy with Caddy or Nginx for TLS. Health check:
-`GET https://yourdomain.com/api/health/production` (auth required, returns
-`pass` / `warn` / `fail`).
-
-### Google Cloud Run (serverless)
-
-For stateless containers, mount a Cloud Storage FUSE bucket for the SQLite
-file. See `INFRASTRUCTURE.md` for the full walkthrough.
+Terraform under `terraform/` provisions the two Cloud Run services, Cloud SQL,
+Cloud Tasks, Cloud Scheduler, GCS, IAM, Artifact Registry, and Secret Manager.
 
 ```bash
 chmod +x deploy.sh
-./deploy.sh
+PROJECT_ID=my-project STATE_BUCKET=my-terraform-state ./deploy.sh
 ```
 
-### Self-host without Docker
+Populate the required Terraform secret variables through an approved secret
+workflow. Do not store production values in committed `.tfvars` files.
 
-```bash
-NODE_ENV=production npm ci
-npm run build
-npm run start
-```
+## Safety Model
 
-Behind Nginx/Caddy, with `x-forwarded-proto=https` for secure session cookies.
-
----
-
-## Security baseline
-
-- **Auth gate:** when `APP_PASSWORD` is set, all routes except `/login` and
-  webhook endpoints require a valid `supr_auth_token` cookie. Rate-limited
-  to 10 login attempts / 15 min per IP.
-- **SSRF protection:** the research proxy (`/api/proxy`) rejects loopback
-  addresses and resolves DNS to check against RFC 1918 + link-local subnets.
-- **Workspace sandboxing:** all file reads/writes go through `path.basename`
-  to block directory traversal.
-- **Secrets:** store LLM and integration keys in `.env` or Secret Manager
-  in production; never commit them.
-
----
-
-## Architecture
-
-```
-app/                  # Next.js App Router pages, server actions, API routes
-components/           # Reusable React components
-lib/                  # Backend logic (db, auth, runtime, agents, tools)
-scripts/              # Build & smoke test scripts
-supr_workspaces/      # Physical folder for sandboxed script executions
-.agents/              # Persistent agent identity profiles (.md files)
-proxy.ts              # Auth middleware
-tests/                # Server/security regression tests
-```
-
-The runtime is structured around four stateful resources:
-
-1. **SQLite database** — missions, glidepaths, tasks, approvals, artifacts,
-   memory items, and the event log.
-2. **`.agents/`** — markdown identity profiles for each agent.
-3. **`supr_workspaces/`** — temp directories for code execution.
-4. **`.env`** — runtime config and secrets.
-
-For the full design, schema, and code reference see
-`SUPR_COMPLETE_REFERENCE_GUIDE.md.md`.
-
----
-
-## License
-
-Private / internal — not currently published to npm.
+Supr runs reversible research, edits, tests, and bounded commands autonomously.
+Irreversible actions such as destructive deletion, production deployment, git
+push, purchases, public publishing, and credential changes require approval.
+System destruction, secret exfiltration, sandbox escape, and metadata/private
+network access are denied.

@@ -48,7 +48,7 @@ test.describe("Supr happy path", () => {
     await expect(page).toHaveURL(/(\/|\?id=)/, { timeout: 10_000 });
 
     // The ToastProvider always mounts a status region in the DOM (currently null message).
-    const status = page.getByRole("status");
+    const status = page.locator('[role="status"].sr-only');
     await expect(status).toBeAttached();
   });
 });

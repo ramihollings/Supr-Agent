@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/exhaustive-deps -- SSE and polling callbacks intentionally read the latest selected project */
 
 import { TopNav } from '@/components/TopNav';
 import { useState, useEffect, useRef, startTransition, Suspense } from 'react';
@@ -110,7 +111,6 @@ function OrchestrationContent() {
       setSseStatus('closed');
       if (debounceTimer) clearTimeout(debounceTimer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId]);
 
   // The React Compiler handles memoization for us here, so we avoid
@@ -134,7 +134,6 @@ function OrchestrationContent() {
     void loadData();
     // loadData intentionally is not memoized (see comment above) so
     // the React Compiler can preserve the rest of the component.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadData]);
 
   // Safety-net poll for events the SSE stream may have missed while
@@ -145,7 +144,6 @@ function OrchestrationContent() {
       void loadData();
     }, 30000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadData]);
 
   const handleProjectFilterChange = (id: string) => {

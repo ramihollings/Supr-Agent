@@ -29,6 +29,8 @@ import {
 } from './migrations/010__team_runs';
 import { addMcpInvocations } from './migrations/011__mcp_invocations';
 import { addCostEventsReported } from './migrations/012__cost_events_reported';
+import { addDurableExecutions } from './migrations/013__durable_executions';
+import { addRateLimitsRepair } from './migrations/014__rate_limits_repair';
 
 export const migrations: Migration[] = [
   addCronJobsAssignedAgentId,
@@ -43,4 +45,6 @@ export const migrations: Migration[] = [
   addTeamMessages,
   addMcpInvocations,
   addCostEventsReported,
+  addDurableExecutions,
+  addRateLimitsRepair,
 ];

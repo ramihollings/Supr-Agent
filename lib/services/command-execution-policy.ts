@@ -1,5 +1,6 @@
 import dbClient from "../../lib/database/db_client";
 import type { CommandExecutionPolicy, RiskLevel } from "../../lib/runtime/types";
+import { evaluateActionPolicy } from "../../lib/governance/action-policy";
 
 function riskRank(risk: RiskLevel) {
   return { Low: 1, Medium: 2, High: 3, Critical: 4 }[risk] || 1;
@@ -24,6 +25,19 @@ export async function resolveCommandExecutionPolicy(input: {
   const remoteEnabled = (await getSetting("remote_execution_enabled")) === "true";
   const dockerAvailable = await isDockerAvailable();
   const requested = input.requestedEnvironment || (riskRank(riskLevel) >= 3 ? "docker" : "local");
+  const actionPolicy = evaluateActionPolicy("execute_command", { command: input.command }, "Execute");
+
+  if (actionPolicy.outcome === "deny") {
+    return {
+      requestedCommand: input.command,
+      agentId: input.agentId || null,
+      riskLevel,
+      selectedEnvironment: "blocked",
+      approvalRequired: false,
+      evidenceLabel: "hard_denied",
+      reason: actionPolicy.reason,
+    };
+  }
 
   if (requested === "remote" && !remoteEnabled) {
     return {
@@ -43,7 +57,7 @@ export async function resolveCommandExecutionPolicy(input: {
       agentId: input.agentId || null,
       riskLevel,
       selectedEnvironment: "local",
-      approvalRequired: riskRank(riskLevel) >= 3,
+      approvalRequired: actionPolicy.outcome === "require_approval",
       evidenceLabel: "docker_unavailable_local_policy",
       reason: "Docker sandbox was requested by policy, but docker_available is not enabled; using governed local execution label.",
     };
@@ -54,7 +68,7 @@ export async function resolveCommandExecutionPolicy(input: {
     agentId: input.agentId || null,
     riskLevel,
     selectedEnvironment: requested,
-    approvalRequired: riskRank(riskLevel) >= 3,
+    approvalRequired: actionPolicy.outcome === "require_approval",
     evidenceLabel: requested === "docker" ? "docker_available" : requested === "remote" ? "remote_configured" : "local_governed",
     reason: requested === "docker"
       ? "Command selected Docker sandbox execution by governance policy."

@@ -1,6 +1,7 @@
 export type PermissionTier = 'Observe' | 'Draft' | 'Edit' | 'Execute' | 'External_Act' | 'Root';
 import crypto from 'crypto';
 import dbClient from '@/lib/database/db_client';
+import { evaluateActionPolicy } from '@/lib/governance/action-policy';
 
 export interface AgentContext {
   id: string;
@@ -65,6 +66,9 @@ export class PermissionEngine {
   }
 
   static async evaluateToolRules(toolName: string, toolArgs: Record<string, any> = {}): Promise<GovernanceDecision> {
+    const actionPolicy = evaluateActionPolicy(toolName, toolArgs);
+    if (actionPolicy.outcome === 'deny') return { status: 'Denied', reason: actionPolicy.reason };
+    if (actionPolicy.outcome === 'require_approval') return { status: 'RequiresApproval', reason: actionPolicy.reason };
     await this.ensureNativeRules();
     try {
       const { safetyRuleEngine } = await import('../governance/SafetyRuleEngine');
@@ -88,12 +92,6 @@ export class PermissionEngine {
     }
 
     if (agentLevel >= requiredLevel) {
-      if (action.riskLevel === 'High' || action.riskLevel === 'Critical') {
-        return {
-          status: 'RequiresApproval',
-          reason: `Action '${action.name}' is within tier but flagged as ${action.riskLevel} risk. Human approval required.`
-        };
-      }
       return { status: 'Approved', reason: 'Agent meets required permission tier.' };
     }
 
@@ -156,9 +154,6 @@ export class PermissionEngine {
         if (agentLevel < requiredLevel) {
           decisionStatus = 'RequiresApproval';
           reason = `Agent tier '${agent.permission_tier}' is insufficient for capability '${capabilityName}' (requires '${capability.required_permission}'). Escalating to user.`;
-        } else if (capability.risk_level === 'High' || capability.risk_level === 'Critical') {
-          decisionStatus = 'RequiresApproval';
-          reason = `Capability '${capabilityName}' is within tier but flagged as ${capability.risk_level} risk. Human approval required.`;
         }
       }
 

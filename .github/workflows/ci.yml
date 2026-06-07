@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
@@ -66,6 +69,20 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Whitespace check
+        run: git diff --check
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Validate Terraform
+        run: |
+          terraform -chdir=terraform fmt -check -recursive
+          terraform -chdir=terraform init -backend=false -input=false
+          terraform -chdir=terraform validate
+
       # 4. Unit tests (vitest) — pure helpers + the new
       # reflection / cost-wiring contract tests.
       - name: Unit tests (vitest)
@@ -74,6 +91,9 @@ jobs:
       # 5. Security regression suite (215+ tests).
       - name: Security regression tests
         run: npm run test:security
+
+      - name: Diagnostics
+        run: npm run test:diagnostics
 
       # 6. Build. A type error or missing import surfaces here.
       - name: Build

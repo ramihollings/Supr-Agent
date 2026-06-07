@@ -52,6 +52,7 @@ import { getActiveProvider } from '@/lib/providers/model';
 import { notifyMissionChanged } from '@/lib/events/bus';
 import { parseModelJson } from './model-json';
 import { telemetry } from '@/lib/telemetry';
+import { evaluateActionPolicy } from '@/lib/governance/action-policy';
 import type { AgentActionRecord, AgentContextBundle, AgentRuntimeRunResult, ModelToolResponse } from './types';
 
 const REFLECTION_PROMPT_VERSION = 'reflection-v1';
@@ -338,7 +339,8 @@ export async function runReflection(input: {
 export async function runAgentSession(input: AgentSessionInput): Promise<AgentSessionResult> {
     const sessionId = input.sessionId || safeId('session');
     const startedAt = new Date();
-    const maxSessionSteps = input.budget?.maxSessionSteps ?? Math.max(8, input.plan.length * 2);
+    const plan = [...input.plan];
+    const maxSessionSteps = input.budget?.maxSessionSteps ?? Math.max(8, plan.length * 2);
     const enableReflection = input.budget?.enableReflection ?? true;
 
     const evidence: Record<string, string[]> = { artifacts: [], memory: [], events: [], toolCalls: [] };
@@ -359,7 +361,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
             evidence,
             transcriptIds,
             reflectionSummaries,
-            perStep: input.plan.map((p) => ({ planItem: p, status: 'skipped', error: 'Mission not found' })),
+            perStep: plan.map((p) => ({ planItem: p, status: 'skipped', error: 'Mission not found' })),
             startedAt: startedAt.toISOString(),
             completedAt: new Date().toISOString(),
             durationMs: 0,
@@ -367,7 +369,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
     }
 
     sessionEventBus.emitEvent(sessionEvent(sessionId, input.missionId, 'session_started', {
-        planSize: input.plan.length,
+        planSize: plan.length,
         missionName: mission.name,
     }));
     notifyMissionChanged(input.missionId, 'flow_started');
@@ -375,15 +377,16 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
     let overallStatus: AgentSessionResult['status'] = 'completed';
     let finalSummary: string | undefined;
     let stepsTaken = 0;
+    let lastActionId: string | null = null;
 
-    for (let i = 0; i < input.plan.length; i += 1) {
+    for (let i = 0; i < plan.length; i += 1) {
         if (stepsTaken >= maxSessionSteps) {
             telemetry.warn('session.max_steps_reached', { sessionId, stepsTaken, maxSessionSteps });
             overallStatus = 'partial';
             break;
         }
 
-        const planItem = input.plan[i];
+        const planItem = plan[i];
         sessionEventBus.emitEvent(sessionEvent(sessionId, input.missionId, 'plan_item_started', {
             index: i,
             kind: planItem.kind,
@@ -419,6 +422,29 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                 // session's reflection_summaries.
                 perStep.push({ planItem, status: 'completed', summary: reflection.summary, error: `retry: ${reflection.guidance}` });
                 overallStatus = 'partial';
+                if (lastActionId && stepsTaken < maxSessionSteps) {
+                    const action = await getAgentAction(lastActionId);
+                    const retryPolicy = action
+                        ? evaluateActionPolicy(action.capability, action.inputs, action.requiredPermission)
+                        : null;
+                    if (action && retryPolicy?.outcome === 'allow' && !retryPolicy.irreversible) {
+                        await dbClient.execute(
+                            `UPDATE Agent_Actions SET status = 'draft', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+                            [JSON.stringify({ ...(action.metadata || {}), reflectionGuidance: reflection.guidance }), lastActionId],
+                        );
+                        plan.splice(i + 1, 0, {
+                            kind: 'agent_action',
+                            actionId: lastActionId,
+                            label: `Reflection retry: ${reflection.guidance}`,
+                        });
+                    } else {
+                        telemetry.warn('session.reflection.retry_blocked_by_policy', {
+                            sessionId,
+                            actionId: lastActionId,
+                            policyOutcome: retryPolicy?.outcome || 'missing_action',
+                        });
+                    }
+                }
             } else {
                 perStep.push({ planItem, status: 'completed', summary: reflection.summary });
             }
@@ -448,6 +474,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
         }
 
         try {
+            lastActionId = planItem.actionId;
             // Run the existing per-step runtime. It does its own
             // context assembly, model call, tool execution, and evidence
             // recording. We then merge the per-step evidence into the
@@ -471,7 +498,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                 eventType: 'supr_decision',
                 actor: 'Supr Session',
                 actorIcon: 'psychology',
-                summary: `Session step ${i + 1}/${input.plan.length}: ${planItem.label}`,
+                summary: `Session step ${i + 1}/${plan.length}: ${planItem.label}`,
                 detail: stepSummary,
             });
 
@@ -517,7 +544,7 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
             // If reflection is enabled and we just received a final
             // response, slot in a reflection step right after.
             if (enableReflection && execution.status === 'completed' && execution.finalSummary) {
-                input.plan.splice(i + 1, 0, {
+                plan.splice(i + 1, 0, {
                     kind: 'reflection',
                     label: `Audit: ${planItem.label}`,
                     basedOn: 'last_final',

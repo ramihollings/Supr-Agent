@@ -6,8 +6,7 @@ const cspDirectives = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   // Material Symbols + Space Grotesk / Inter fonts.
   "font-src 'self' https://fonts.gstatic.com data:",
-  // Next.js needs unsafe-eval in dev for HMR. Keep it on; refine if HMR is off.
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''}`,
   "img-src 'self' data: blob: https:",
   "connect-src 'self' https://api.minimax.io https://generativelanguage.googleapis.com",
   "frame-ancestors 'none'",

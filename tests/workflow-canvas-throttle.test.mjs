@@ -23,7 +23,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +32,13 @@ const read = (rel) => readFileSync(resolve(__dirname, '..', ...rel), 'utf8');
 const layout = read(['lib', 'services', 'graph-layout.ts']);
 const canvas = read(['components', 'ProjectWorkflowCanvas.tsx']);
 const chatActions = read(['app', 'actions', 'chat-workspace.ts']);
+
+function extractFunction(source, name) {
+    const start = source.search(new RegExp(`export function ${name}\\b`));
+    if (start < 0) return '';
+    const next = source.indexOf('\nexport function ', start + 1);
+    return source.slice(start, next < 0 ? source.length : next);
+}
 
 // ---------------------------------------------------------------------------
 // 1. Layout helpers -- source-level assertions
@@ -73,9 +80,7 @@ test('layoutGraphFallback is a phase-column layout with no dagre dependency', ()
 });
 
 test('layoutGraph wraps layoutGraphDagre in try/catch for resilience', () => {
-    const fnBody = layout.match(
-        /export function layoutGraph[\s\S]*?\n\}/,
-    )?.[0] || '';
+    const fnBody = extractFunction(layout, 'layoutGraph');
     assert.match(fnBody, /try \{/);
     assert.match(fnBody, /catch/);
     assert.match(fnBody, /layoutGraphDagre/);
@@ -112,7 +117,7 @@ test('buildPhaseGroups sizes the band from inner node positions', () => {
 
 test('layoutGraph is deterministic (same input = same output)', async () => {
     const { layoutGraph, buildPhaseGroups } = await import(
-        resolve(__dirname, '..', 'lib', 'services', 'graph-layout.ts')
+        pathToFileURL(resolve(__dirname, '..', 'lib', 'services', 'graph-layout.ts')).href
     );
 
     const nodes = [
@@ -141,7 +146,7 @@ test('layoutGraph is deterministic (same input = same output)', async () => {
 
 test('buildPhaseGroups returns one group per canonical phase', async () => {
     const { layoutGraph, buildPhaseGroups } = await import(
-        resolve(__dirname, '..', 'lib', 'services', 'graph-layout.ts')
+        pathToFileURL(resolve(__dirname, '..', 'lib', 'services', 'graph-layout.ts')).href
     );
 
     const nodes = [
@@ -163,7 +168,7 @@ test('buildPhaseGroups returns one group per canonical phase', async () => {
 
 test('buildPhaseGroups produces non-overlapping column indices', async () => {
     const { layoutGraph, buildPhaseGroups } = await import(
-        resolve(__dirname, '..', 'lib', 'services', 'graph-layout.ts')
+        pathToFileURL(resolve(__dirname, '..', 'lib', 'services', 'graph-layout.ts')).href
     );
 
     const nodes = [
@@ -185,7 +190,7 @@ test('buildPhaseGroups produces non-overlapping column indices', async () => {
 
 test('buildPhaseGroups puts the right nodes into the right group', async () => {
     const { layoutGraph, buildPhaseGroups } = await import(
-        resolve(__dirname, '..', 'lib', 'services', 'graph-layout.ts')
+        pathToFileURL(resolve(__dirname, '..', 'lib', 'services', 'graph-layout.ts')).href
     );
 
     const nodes = [

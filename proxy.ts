@@ -78,16 +78,25 @@ export async function proxy(request: NextRequest) {
 
   const isAuthRoute = pathname.startsWith('/api/auth');
   const isWebhookRoute = pathname === '/api/slack' || pathname === '/api/discord' || pathname === '/api/telegram';
+  const isInternalRoute = pathname.startsWith('/api/internal/');
+  const isPlatformHealthRoute = pathname === '/api/health/live' || pathname === '/api/health/ready';
   const isLoginPage = pathname === '/login';
   const isStaticFile =
     pathname.startsWith('/_next') ||
     pathname.includes('.') ||
     pathname.startsWith('/static');
 
-  if (isAuthRoute || isWebhookRoute || isLoginPage || isStaticFile) {
+  if (isAuthRoute || isWebhookRoute || isInternalRoute || isPlatformHealthRoute || isLoginPage || isStaticFile) {
     const response = NextResponse.next();
     response.headers.set('x-request-id', requestId);
     return response;
+  }
+
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+    const origin = request.headers.get('origin');
+    if (origin && origin !== request.nextUrl.origin) {
+      return NextResponse.json({ success: false, error: 'Cross-origin state change rejected.' }, { status: 403 });
+    }
   }
 
   // Fail-closed in production: refuse to serve any non-static request until

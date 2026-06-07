@@ -23,8 +23,10 @@ export class ContinuationManager {
     const rawState = JSON.stringify(stateData);
 
     await dbClient.execute(
-      "INSERT INTO Settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-      [`continuation_${id}`, rawState],
+      `INSERT INTO Run_Continuations (id, session_id, state_data, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(session_id) DO UPDATE SET state_data = excluded.state_data, updated_at = excluded.updated_at`,
+      [id, id, rawState],
     );
   }
 
@@ -37,10 +39,10 @@ export class ContinuationManager {
     agentId: string,
   ): Promise<Record<string, any> | null> {
     const id = `cont-${missionId}-${taskId}-${agentId}`;
-    const row = await dbClient.queryOne<any>("SELECT value FROM Settings WHERE key = ?", [`continuation_${id}`]);
+    const row = await dbClient.queryOne<any>("SELECT state_data FROM Run_Continuations WHERE session_id = ?", [id]);
     if (!row) return null;
     try {
-      return JSON.parse(row.value);
+      return JSON.parse(row.state_data);
     } catch {
       return null;
     }
