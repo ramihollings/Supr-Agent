@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Apply order:
+#   1. namespace.yaml        — creates the `supr` namespace + NetworkPolicy
+#   2. deployment.yaml       — the orchestrator Deployment + K8s service account
+#   3. service.yaml          — the LoadBalancer service
+#   4. hpa.yaml              — HorizontalPodAutoscaler (currently 1/1)
+#   5. pdb.yaml              — PodDisruptionBudget (minAvailable: 1)
+#   6. sandbox-template.yaml — sandbox worker pod template
+#   7. network-policy.yaml   — sandbox-worker egress policy (in gcp/)
+#
+# `PROJECT_ID` and `COMMIT_SHA` MUST be substituted before `kubectl
+# apply` (see deploy.sh or the cloudbuild pipeline). The default
+# in deployment.yaml uses placeholder values so a `kustomize build`
+# on its own fails loud instead of silently deploying the wrong image.
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - sandbox-template.yaml

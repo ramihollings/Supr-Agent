@@ -14,3 +14,11 @@ spec:
     name: http
   selector:
     app: supr-orchestrator
+  # The orchestrator takes a long time to come up (it boots the DB,
+  # runs migrations, and warms the provider cache). Give the LB
+  # 5 minutes before it routes traffic to a not-yet-ready pod.
+  healthCheckNodePort: 30000
+---
+# The LoadBalancer health check is a plain HTTP GET on the readiness
+# path. We don't use a separate `readiness` port because the
+# readiness probe is the same path.

@@ -1,0 +1,11 @@
+# Example tfvars. Copy to terraform.tfvars (which is gitignored) and
+# fill in. NEVER commit terraform.tfvars to source control.
+project_id      = "your-gcp-project-id"
+region          = "us-central1"
+
+# Secrets. Generate with:
+#   openssl rand -base64 32   # for db_password and app_password
+# Or use Secret Manager to seed the values and remove from tfvars.
+db_password     = "REPLACE_ME"
+gemini_api_key  = "REPLACE_ME"
+app_password    = "REPLACE_ME"

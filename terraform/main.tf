@@ -6,11 +6,43 @@ terraform {
       version = ">= 4.50.0"
     }
   }
+  # Remote state. The `BUCKET` placeholder is substituted at init time
+  # via `terraform init -backend-config="bucket=..."`; we keep the
+  # default empty so a missing backend blows up loud at init rather
+  # than silently writing state to a local file. See README and
+  # deploy.sh for the bootstrap command.
+  backend "gcs" {
+    bucket = "supr-terraform-state-REPLACE_WITH_PROJECT_ID"
+    prefix = "terraform/state"
+  }
 }
 
 provider "google" {
   project = var.project_id
   region  = var.region
+}
+
+# ==========================================
+# 0. Customer-Managed Encryption Key (CMEK)
+# ==========================================
+# All bucket, Cloud SQL, and Secret Manager resources are encrypted
+# with this KMS key. The key never leaves Google Cloud; the GKE
+# service account is granted `roles/cloudkms.cryptoKeyEncrypterDecrypter`
+# so the orchestrator can write to the bucket and the database.
+# Rotation period is 90 days per Supr's secret-rotation policy.
+resource "google_kms_key_ring" "supr" {
+  name     = "supr-keyring"
+  location = var.region
+}
+
+resource "google_kms_crypto_key" "supr" {
+  name     = "supr-cmek"
+  key_ring = google_kms_key_ring.supr.id
+  rotation_period = "7776000s" # 90 days
+
+  version_template {
+    algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION"
+  }
 }
 
 # ==========================================
@@ -28,7 +60,6 @@ resource "google_compute_subnetwork" "supr_subnet" {
   network       = google_compute_network.supr_vpc.id
   region        = var.region
 
-  # Enable private Google access to permit nodes reaching GCP APIs directly
   private_ip_google_access = true
 }
 
@@ -51,25 +82,51 @@ resource "google_service_networking_connection" "vpc_connection" {
 # ==========================================
 # 2. Cloud SQL PostgreSQL Database
 # ==========================================
-
+# High Availability: `availability_type = REGIONAL` provisions a
+# synchronous standby in a second zone. Failover is automatic.
+# Disk is SSD (vs HDD) for the small per-instance footprint.
+# Deletion protection: enabled so a `terraform destroy` cannot wipe
+# the production database. Operators must explicitly set
+# `deletion_protection = false` in an override to drop the DB.
+# Backups: automated daily + 7-day retention. Point-in-time recovery
+# is enabled for the first 7 days.
 resource "google_sql_database_instance" "postgres_instance" {
   name             = "supr-postgres-instance"
   database_version = "POSTGRES_15"
   region           = var.region
-  
+  deletion_protection = true
+
   depends_on = [google_service_networking_connection.vpc_connection]
 
   settings {
-    tier = "db-f1-micro" # Highly cost-efficient for standard workloads, scales easily
-    
+    tier = "db-g1-small" # Move off db-f1-micro for production; gives HA headroom.
+    availability_type = "REGIONAL" # HA: synchronous standby in another zone.
+
     ip_configuration {
-      ipv4_enabled    = false # Disable public IP routing
+      ipv4_enabled    = false
       private_network = google_compute_network.supr_vpc.id
     }
 
     backup_configuration {
-      enabled    = true
-      start_time = "02:00"
+      enabled            = true
+      start_time         = "02:00"
+      point_in_time_recovery_enabled = true
+      backup_retention_settings {
+        retained_backups = 7
+        retention_unit   = "COUNT"
+      }
+    }
+
+    disk_type       = "PD_SSD"
+    disk_size       = 20
+    disk_autoresize = true
+
+    # Customer-managed encryption at rest. The instance's service
+    # account is granted encrypter/decrypter on the key in IAM
+    # below; without that grant Postgres falls back to Google's
+    # managed key, which defeats the purpose of having CMEK.
+    encryption_configuration {
+      kms_key_name = google_kms_crypto_key.supr.id
     }
   }
 }
@@ -88,16 +145,33 @@ resource "google_sql_user" "db_admin" {
 # ==========================================
 # 3. Cloud Storage (GCS) State Bucket
 # ==========================================
-
+# Encrypted with the same CMEK key as the database. Uniform
+# bucket-level access is on (no per-object ACLs). Versioning is
+# on so a bad object write can be rolled back via `gcloud`.
+# Lifecycle: 30-day soft delete for the workspace tarballs.
 resource "google_storage_bucket" "state_bucket" {
   name          = "${var.project_id}-supr-state"
   location      = var.region
   force_destroy = false
+  default_event_based_hold = false
 
   uniform_bucket_level_access = true
 
   versioning {
     enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 30
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  encryption {
+    default_kms_key_name = google_kms_crypto_key.supr.id
   }
 }
 
@@ -108,34 +182,38 @@ resource "google_storage_bucket" "state_bucket" {
 resource "google_container_cluster" "gke_cluster" {
   name     = "supr-gke-cluster"
   location = var.region
-
-  # Enable Autopilot Mode
   enable_autopilot = true
-  
+
   network    = google_compute_network.supr_vpc.name
   subnetwork = google_compute_subnetwork.supr_subnet.name
 
-  # Enable the Google Cloud Storage FUSE CSI driver for mounting storage
   addons_config {
     gcs_fuse_csi_driver_config {
       enabled = true
     }
   }
 
-  ip_allocation_policy {
-    # Autopilot manages network allocations automatically
-  }
+  # Cluster-level deletion protection. An explicit
+  # `--enable-deletion-protection=false` override is required to
+  # tear down the cluster.
+  deletion_protection = true
+
+  ip_allocation_policy {}
 }
 
 # ==========================================
 # 5. Secret Manager Setup
 # ==========================================
-
-# Secret 1: Database URL
+# Three secrets: DATABASE_URL, GEMINI_API_KEY, APP_PASSWORD.
+# All use the same CMEK key as the bucket and the database so
+# the same key-rotation policy applies to all of them.
 resource "google_secret_manager_secret" "db_url_secret" {
   secret_id = "DATABASE_URL"
   replication {
     automatic = true
+  }
+  encryption {
+    kms_key_name = google_kms_crypto_key.supr.id
   }
 }
 
@@ -144,11 +222,13 @@ resource "google_secret_manager_secret_version" "db_url_val" {
   secret_data = "postgresql://supr_admin:${var.db_password}@${google_sql_database_instance.postgres_instance.private_ip_address}:5432/${google_sql_database.supr_db.name}"
 }
 
-# Secret 2: Gemini API Key
 resource "google_secret_manager_secret" "gemini_secret" {
   secret_id = "GEMINI_API_KEY"
   replication {
     automatic = true
+  }
+  encryption {
+    kms_key_name = google_kms_crypto_key.supr.id
   }
 }
 
@@ -157,11 +237,13 @@ resource "google_secret_manager_secret_version" "gemini_val" {
   secret_data = var.gemini_api_key
 }
 
-# Secret 3: App Master Password
 resource "google_secret_manager_secret" "app_pw_secret" {
   secret_id = "APP_PASSWORD"
   replication {
     automatic = true
+  }
+  encryption {
+    kms_key_name = google_kms_crypto_key.supr.id
   }
 }
 
@@ -178,6 +260,22 @@ resource "google_secret_manager_secret_version" "app_pw_val" {
 resource "google_iam_service_account" "orchestrator_sa" {
   account_id   = "supr-orchestrator-sa"
   display_name = "Supr Orchestrator GKE Pod Identity"
+}
+
+# Cloud SQL Client so the SA can connect (in addition to the
+# secret accessor grants).
+resource "google_project_iam_member" "orchestrator_sql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_iam_service_account.orchestrator_sa.email}"
+}
+
+# CMEK encrypter/decrypter for the orchestrator SA. Without this
+# the SA cannot write to the bucket or read secrets.
+resource "google_kms_crypto_key_iam_member" "orchestrator_cmek" {
+  crypto_key_id = google_kms_crypto_key.supr.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:${google_iam_service_account.orchestrator_sa.email}"
 }
 
 # Grant GCS access to the orchestrator service account

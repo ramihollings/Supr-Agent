@@ -900,6 +900,7 @@ export function initDatabase() {
       input_tokens INTEGER DEFAULT 0,
       output_tokens INTEGER DEFAULT 0,
       cost_cents REAL DEFAULT 0,
+      reported INTEGER NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);

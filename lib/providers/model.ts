@@ -16,6 +16,47 @@ export interface ModelOptions {
   systemInstruction?: string;
 }
 
+/**
+ * Token usage reported by the underlying model API. `inputTokens` is
+ * the number of tokens in the prompt (system + user + tool results);
+ * `outputTokens` is the number of tokens the model generated. When a
+ * provider does not report usage, the estimate helpers below are used
+ * to derive a value from the raw text.
+ */
+export interface ModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  /** When true, the numbers came from the provider's `usage` field rather than an estimate. */
+  reported: boolean;
+}
+
+/**
+ * A single chunk yielded by `streamContentWithUsage`. Providers that
+ * know the cumulative usage at any point during the stream set the
+ * `usage` field; providers that only know it at the end set it on the
+ * final chunk. Callers MUST use the LAST non-undefined `usage` they
+ * see as the authoritative total for the request.
+ */
+export interface ModelStreamChunk {
+  text: string;
+  usage?: ModelUsage;
+}
+
+export interface ModelGenerateResult {
+  text: string;
+  usage: ModelUsage;
+}
+
+const AVG_CHARS_PER_TOKEN = 4;
+
+export function estimateInputTokens(text: string): number {
+  return Math.max(1, Math.ceil((text || '').length / AVG_CHARS_PER_TOKEN));
+}
+
+export function estimateOutputTokens(text: string): number {
+  return Math.max(0, Math.ceil((text || '').length / AVG_CHARS_PER_TOKEN));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Abstract base — any provider must implement these two methods
 // ─────────────────────────────────────────────────────────────────────────────
@@ -36,6 +77,51 @@ export abstract class ModelProvider {
 
   /** Streams the response for a given prompt. */
   abstract streamContent(prompt: string, options?: ModelOptions): AsyncGenerator<string>;
+
+  /**
+   * Streams a response with cumulative usage. Providers SHOULD override
+   * this to report real usage; the default implementation here
+   * delegates to `streamContent` and estimates usage from the text
+   * length, which is what every provider will fall back to until they
+   * upgrade. Callers use the LAST `usage` field they observe as the
+   * authoritative total for the request.
+   */
+  async *streamContentWithUsage(
+    prompt: string,
+    options?: ModelOptions,
+  ): AsyncGenerator<ModelStreamChunk> {
+    let text = '';
+    for await (const chunk of this.streamContent(prompt, options)) {
+      text += chunk;
+      yield { text: chunk };
+    }
+    const usage: ModelUsage = {
+      inputTokens: estimateInputTokens(prompt),
+      outputTokens: estimateOutputTokens(text),
+      reported: false,
+    };
+    yield { text: '', usage };
+  }
+
+  /**
+   * Non-streaming variant that returns both the text and the usage.
+   * Providers SHOULD override this to return real usage; the default
+   * delegates to `generateContent` and estimates usage from text.
+   */
+  async generateContentWithUsage(
+    prompt: string,
+    options?: ModelOptions,
+  ): Promise<ModelGenerateResult> {
+    const text = await this.generateContent(prompt, options);
+    return {
+      text,
+      usage: {
+        inputTokens: estimateInputTokens(prompt),
+        outputTokens: estimateOutputTokens(text),
+        reported: false,
+      },
+    };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,6 +152,32 @@ export class GeminiProvider extends ModelProvider {
     return response.text || '';
   }
 
+  async generateContentWithUsage(prompt: string, options?: ModelOptions): Promise<ModelGenerateResult> {
+    const response = await this.ai.models.generateContent({
+      model: options?.model || this.defaultModel,
+      contents: prompt,
+      config: {
+        systemInstruction: options?.systemInstruction,
+        maxOutputTokens: options?.maxOutputTokens,
+      }
+    });
+    const usageMetadata = (response as any)?.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } | undefined;
+    return {
+      text: response.text || '',
+      usage: usageMetadata
+        ? {
+            inputTokens: usageMetadata.promptTokenCount ?? estimateInputTokens(prompt),
+            outputTokens: usageMetadata.candidatesTokenCount ?? estimateOutputTokens(response.text || ''),
+            reported: true,
+          }
+        : {
+            inputTokens: estimateInputTokens(prompt),
+            outputTokens: estimateOutputTokens(response.text || ''),
+            reported: false,
+          },
+    };
+  }
+
   async *streamContent(prompt: string, options?: ModelOptions): AsyncGenerator<string> {
     const responseStream = await this.ai.models.generateContentStream({
       model: options?.model || this.defaultModel,
@@ -78,6 +190,41 @@ export class GeminiProvider extends ModelProvider {
     for await (const chunk of responseStream) {
       if (chunk.text) yield chunk.text;
     }
+  }
+
+  async *streamContentWithUsage(prompt: string, options?: ModelOptions): AsyncGenerator<ModelStreamChunk> {
+    const responseStream = await this.ai.models.generateContentStream({
+      model: options?.model || this.defaultModel,
+      contents: prompt,
+      config: {
+        systemInstruction: options?.systemInstruction,
+        maxOutputTokens: options?.maxOutputTokens,
+      }
+    });
+    let text = '';
+    let lastUsage: ModelUsage | undefined;
+    for await (const chunk of responseStream) {
+      if (chunk.text) {
+        text += chunk.text;
+        yield { text: chunk.text };
+      }
+      const usageMetadata = (chunk as any)?.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+      if (usageMetadata && (usageMetadata.promptTokenCount || usageMetadata.candidatesTokenCount)) {
+        lastUsage = {
+          inputTokens: usageMetadata.promptTokenCount ?? estimateInputTokens(prompt),
+          outputTokens: usageMetadata.candidatesTokenCount ?? estimateOutputTokens(text),
+          reported: true,
+        };
+      }
+    }
+    yield {
+      text: '',
+      usage: lastUsage ?? {
+        inputTokens: estimateInputTokens(prompt),
+        outputTokens: estimateOutputTokens(text),
+        reported: false,
+      },
+    };
   }
 
   /**
@@ -160,13 +307,25 @@ export class OpenAICompatibleProvider extends ModelProvider {
   }
 
   async generateContent(prompt: string, options?: ModelOptions): Promise<string> {
+    const result = await this.generateContentWithUsage(prompt, options);
+    return result.text;
+  }
+
+  async generateContentWithUsage(prompt: string, options?: ModelOptions): Promise<ModelGenerateResult> {
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify(this.buildRequestBody(prompt, options)),
+      body: JSON.stringify({
+        ...this.buildRequestBody(prompt, options),
+        // OpenAI-compatible APIs that support usage expose it when stream_options.usage is set
+        // (only honored when stream is true), so we have to also call the streaming endpoint
+        // for a real `usage` payload. For non-streaming we estimate.
+        stream: false,
+        stream_options: undefined,
+      }),
     });
 
     if (!response.ok) {
@@ -175,7 +334,22 @@ export class OpenAICompatibleProvider extends ModelProvider {
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
+    const text = data.choices?.[0]?.message?.content || '';
+    const usage = data.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+    return {
+      text,
+      usage: usage && (usage.prompt_tokens !== undefined || usage.completion_tokens !== undefined)
+        ? {
+            inputTokens: usage.prompt_tokens ?? estimateInputTokens(prompt),
+            outputTokens: usage.completion_tokens ?? estimateOutputTokens(text),
+            reported: true,
+          }
+        : {
+            inputTokens: estimateInputTokens(prompt),
+            outputTokens: estimateOutputTokens(text),
+            reported: false,
+          },
+    };
   }
 
   async *streamContent(prompt: string, options?: ModelOptions): AsyncGenerator<string> {
@@ -216,6 +390,72 @@ export class OpenAICompatibleProvider extends ModelProvider {
       }
     }
   }
+
+  async *streamContentWithUsage(prompt: string, options?: ModelOptions): AsyncGenerator<ModelStreamChunk> {
+    // We must request the streaming endpoint with `stream_options.usage`
+    // so the upstream sends a final SSE chunk with a `usage` field.
+    const body = {
+      ...this.buildRequestBody(prompt, options, true),
+      stream_options: { include_usage: true },
+    };
+    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`${this.name} stream error ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let text = '';
+    let lastUsage: ModelUsage | undefined;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const clean = line.replace(/^data:\s*/, '').trim();
+        if (!clean || clean === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(clean);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            text += delta;
+            yield { text: delta };
+          }
+          const usage = parsed.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+          if (usage && (usage.prompt_tokens !== undefined || usage.completion_tokens !== undefined)) {
+            lastUsage = {
+              inputTokens: usage.prompt_tokens ?? estimateInputTokens(prompt),
+              outputTokens: usage.completion_tokens ?? estimateOutputTokens(text),
+              reported: true,
+            };
+          }
+        } catch {
+          // skip malformed SSE lines
+        }
+      }
+    }
+    yield {
+      text: '',
+      usage: lastUsage ?? {
+        inputTokens: estimateInputTokens(prompt),
+        outputTokens: estimateOutputTokens(text),
+        reported: false,
+      },
+    };
+  }
 }
 
 export class AnthropicProvider extends ModelProvider {
@@ -254,6 +494,48 @@ export class AnthropicProvider extends ModelProvider {
     return Array.isArray(data.content)
       ? data.content.map((part: any) => typeof part?.text === 'string' ? part.text : '').join('')
       : '';
+  }
+
+  async generateContentWithUsage(prompt: string, options?: ModelOptions): Promise<ModelGenerateResult> {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: options?.model || this.modelName,
+        system: options?.systemInstruction,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: options?.maxOutputTokens ?? 2048,
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error(`${this.name} API error ${response.status}: ${errBody}`);
+    }
+
+    const data = await response.json();
+    const text = Array.isArray(data.content)
+      ? data.content.map((part: any) => typeof part?.text === 'string' ? part.text : '').join('')
+      : '';
+    const usage = data.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+    return {
+      text,
+      usage: usage && (usage.input_tokens !== undefined || usage.output_tokens !== undefined)
+        ? {
+            inputTokens: usage.input_tokens ?? estimateInputTokens(prompt),
+            outputTokens: usage.output_tokens ?? estimateOutputTokens(text),
+            reported: true,
+          }
+        : {
+            inputTokens: estimateInputTokens(prompt),
+            outputTokens: estimateOutputTokens(text),
+            reported: false,
+          },
+    };
   }
 
   async *streamContent(prompt: string, options?: ModelOptions): AsyncGenerator<string> {

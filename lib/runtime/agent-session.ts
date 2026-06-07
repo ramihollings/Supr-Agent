@@ -54,6 +54,9 @@ import { parseModelJson } from './model-json';
 import { telemetry } from '@/lib/telemetry';
 import type { AgentActionRecord, AgentContextBundle, AgentRuntimeRunResult, ModelToolResponse } from './types';
 
+const REFLECTION_PROMPT_VERSION = 'reflection-v1';
+const REFLECTION_MAX_GUIDANCE_CHARS = 800;
+
 // ---------------------------------------------------------------------------
 // Session event bus — process-local, in addition to the global mission bus.
 // The chat UI subscribes to this to render streaming model output, tool
@@ -169,13 +172,97 @@ function sessionEvent(
 }
 
 // ---------------------------------------------------------------------------
-// Reflection — Phase 2A. Right now the reflection step is a no-op that
-// returns a pass-through verdict; the prompt contract and verdict schema
-// are in place so Phase 2A can swap in a real LLM call without touching
-// callers.
+// Reflection — Phase 2A. Calls the active LLM as a judge over the
+// session's final summary and evidence. The verdict schema is fixed so
+// downstream callers don't have to change if the prompt is tuned.
+//
+// Schema:
+//   {
+//     "verdict": "pass" | "retry",
+//     "guidance"?: string,   // required when verdict is "retry"
+//     "summary": string      // one-line summary for the transcript
+//   }
+//
+// If the LLM call fails for any reason, reflection degrades gracefully
+// to a `pass` verdict (with a telemetry warning) so a single broken
+// reflection never blocks an otherwise-valid session.
 // ---------------------------------------------------------------------------
 
-async function runReflection(input: {
+function buildReflectionPrompt(input: {
+    intent: string;
+    finalSummary?: string;
+    evidence: Record<string, string[]>;
+}): string {
+    const evidenceShape = Object.entries(input.evidence)
+        .map(([k, v]) => `${k}=${(v || []).length}`)
+        .join(', ');
+    const finalText = input.finalSummary && input.finalSummary.trim()
+        ? input.finalSummary.slice(0, 4000)
+        : '(no final summary was produced)';
+    return [
+        'You are Supr Reflection. You audit a completed agent session and decide whether the work is satisfactory.',
+        '',
+        `Mission intent: ${input.intent}`,
+        `Evidence (count by category): ${evidenceShape || 'none'}`,
+        '',
+        'Final summary from the session:',
+        finalText,
+        '',
+        'Respond with STRICT JSON ONLY (no markdown, no commentary):',
+        '{"verdict":"pass","summary":"<one line>"}',
+        'or',
+        '{"verdict":"retry","guidance":"<concrete fix>","summary":"<one line>"}',
+        '',
+        'Rules:',
+        '- verdict is "retry" only when the final summary is empty, contradicts the evidence counts, or the work is clearly incomplete.',
+        '- guidance must be a concrete, single-sentence instruction a follow-up step can act on (no more than 800 chars).',
+        '- Never invent evidence ids; only refer to categories shown above.',
+    ].join('\n');
+}
+
+function isReflectionVerdict(value: unknown): value is 'pass' | 'retry' {
+    return value === 'pass' || value === 'retry';
+}
+
+function heuristicReflection(input: {
+    intent: string;
+    finalSummary?: string;
+    evidence: Record<string, string[]>;
+}): { verdict: 'pass' | 'retry'; guidance?: string; summary: string } {
+    const finalText = (input.finalSummary || '').trim();
+    const toolCallCount = (input.evidence.toolCalls || []).length;
+    const artifactCount = (input.evidence.artifacts || []).length;
+    const eventCount = (input.evidence.events || []).length;
+
+    if (!finalText) {
+        return {
+            verdict: 'retry',
+            guidance: 'Re-run the finalization step with a non-empty summary that names what was actually done.',
+            summary: `No final summary produced after ${toolCallCount} tool call(s).`,
+        };
+    }
+    if (toolCallCount === 0 && artifactCount === 0 && eventCount === 0) {
+        return {
+            verdict: 'retry',
+            guidance: 'At least one tool invocation or artifact is required to call this session complete.',
+            summary: 'Session produced no tool calls and no artifacts.',
+        };
+    }
+    return {
+        verdict: 'pass',
+        summary: `Audited ${toolCallCount} tool call(s) and ${artifactCount} artifact(s); final summary present.`,
+    };
+}
+
+async function callReflectionLlm(prompt: string): Promise<string> {
+    const provider = await getActiveProvider('reflection');
+    return provider.generateContent(prompt, {
+        systemInstruction: 'You are Supr Reflection. Return only one JSON object matching the schema. No markdown.',
+        maxOutputTokens: 600,
+    });
+}
+
+export async function runReflection(input: {
     sessionId: string;
     missionId: string;
     intent: string;
@@ -184,16 +271,64 @@ async function runReflection(input: {
 }): Promise<{ verdict: 'pass' | 'retry'; guidance?: string; summary: string }> {
     sessionEventBus.emitEvent(sessionEvent(input.sessionId, input.missionId, 'reflection_started', {
         intent: input.intent,
+        promptVersion: REFLECTION_PROMPT_VERSION,
     }));
-    // Phase 2A will replace this with a real LLM call. The stub returns
-    // a pass verdict so the session can keep going without a real
-    // reflection agent yet.
-    const summary = `Reflection: ${input.evidence.artifacts?.length || 0} artifact(s), ${input.evidence.toolCalls?.length || 0} tool call(s).`;
+
+    const prompt = buildReflectionPrompt(input);
+
+    let parsed: Record<string, unknown> | null = null;
+    let llmCalled = false;
+    try {
+        const raw = await callReflectionLlm(prompt);
+        llmCalled = true;
+        parsed = parseModelJson<Record<string, unknown>>(raw);
+    } catch (error: any) {
+        telemetry.warn('session.reflection.llm_failed', {
+            sessionId: input.sessionId,
+            missionId: input.missionId,
+            reason: error?.message || String(error),
+        });
+    }
+
+    let verdict: 'pass' | 'retry';
+    let guidance: string | undefined;
+    let summary: string;
+    if (parsed && isReflectionVerdict(parsed.verdict) && typeof parsed.summary === 'string' && parsed.summary.trim()) {
+        verdict = parsed.verdict;
+        summary = parsed.summary.trim().slice(0, 1000);
+        if (verdict === 'retry') {
+            const rawGuidance = typeof parsed.guidance === 'string' ? parsed.guidance.trim() : '';
+            if (!rawGuidance) {
+                // A retry verdict without guidance is a model bug. Demote to pass
+                // rather than risk an ungrounded retry loop.
+                telemetry.warn('session.reflection.retry_without_guidance', { sessionId: input.sessionId });
+                verdict = 'pass';
+            } else {
+                guidance = rawGuidance.slice(0, REFLECTION_MAX_GUIDANCE_CHARS);
+            }
+        }
+    } else {
+        // LLM returned no usable verdict. Fall back to a deterministic
+        // heuristic so the session can still complete cleanly.
+        const heuristic = heuristicReflection(input);
+        verdict = heuristic.verdict;
+        guidance = heuristic.guidance;
+        summary = heuristic.summary;
+        telemetry.warn('session.reflection.llm_unparseable', {
+            sessionId: input.sessionId,
+            missionId: input.missionId,
+            llmCalled,
+            parsedKeys: parsed ? Object.keys(parsed) : null,
+        });
+    }
+
     sessionEventBus.emitEvent(sessionEvent(input.sessionId, input.missionId, 'reflection_completed', {
         summary,
-        verdict: 'pass',
+        verdict,
+        guidance,
+        source: llmCalled && parsed ? 'llm' : 'heuristic',
     }));
-    return { verdict: 'pass', summary };
+    return verdict === 'retry' && guidance ? { verdict, guidance, summary } : { verdict, summary };
 }
 
 // ---------------------------------------------------------------------------
@@ -276,11 +411,14 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                 evidence,
             });
             reflectionSummaries.push(reflection.summary);
-            if (reflection.verdict === 'retry') {
-                // Phase 2A: the reflection verdict is `retry` only when there is
-                // actionable guidance. For now we just record it. A future
-                // implementation will inject the guidance into the next step.
-                perStep.push({ planItem, status: 'completed', summary: reflection.summary });
+            if (reflection.verdict === 'retry' && reflection.guidance) {
+                // Surface the guidance so the chat UI and supervisor can
+                // show what the reflection agent wants to retry. The
+                // guidance is not yet re-injected into the next step —
+                // that wiring lands when a follow-up run can read the
+                // session's reflection_summaries.
+                perStep.push({ planItem, status: 'completed', summary: reflection.summary, error: `retry: ${reflection.guidance}` });
+                overallStatus = 'partial';
             } else {
                 perStep.push({ planItem, status: 'completed', summary: reflection.summary });
             }
@@ -289,6 +427,8 @@ export async function runAgentSession(input: AgentSessionInput): Promise<AgentSe
                 kind: planItem.kind,
                 status: 'completed',
                 summary: reflection.summary,
+                verdict: reflection.verdict,
+                guidance: reflection.guidance,
             }));
             continue;
         }

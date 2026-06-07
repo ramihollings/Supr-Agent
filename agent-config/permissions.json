@@ -2,31 +2,37 @@
   "tiers": [
     {
       "level": 1,
+      "id": "Observe",
       "name": "Observe",
       "allowedTools": ["read_file", "list_dir", "search_web", "view_file"]
     },
     {
       "level": 2,
+      "id": "Draft",
       "name": "Draft",
       "allowedTools": ["write_to_file", "create_artifact"]
     },
     {
       "level": 3,
+      "id": "Edit",
       "name": "Edit",
       "allowedTools": ["replace_file_content", "multi_replace_file_content"]
     },
     {
       "level": 4,
+      "id": "Execute",
       "name": "Execute",
       "allowedTools": ["run_command_sandbox", "test_runner"]
     },
     {
       "level": 5,
+      "id": "External_Act",
       "name": "External Act",
       "allowedTools": ["deploy", "call_api", "commit", "push"]
     },
     {
       "level": 6,
+      "id": "Root",
       "name": "Root",
       "allowedTools": ["run_command", "manage_task", "sudo"]
     }

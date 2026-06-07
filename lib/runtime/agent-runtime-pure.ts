@@ -18,6 +18,7 @@
  */
 
 import type { ModelToolResponse } from './types';
+import { parseModelJson } from './model-json';
 
 /**
  * The Supr runtime protocol. The model must return one of these
@@ -38,10 +39,11 @@ export type RuntimeProtocolResponse = ModelToolResponse;
 export function parseModelToolResponse(raw: string): ModelToolResponse {
   if (!raw.trim()) return { type: 'invalid', reason: 'Model returned empty output.', raw };
   try {
-    // Lazy import to avoid a circular dep: model-json.ts imports
-    // nothing from this file but agent-runtime-runner.ts re-exports
-    // these helpers.
-    const { parseModelJson } = require('./model-json') as typeof import('./model-json');
+    // The lazy `require` that used to live here was a defense
+    // against a circular dep with model-json.ts, but model-json
+    // imports nothing from this file so a static import is safe
+    // and lets the function run under both CJS (tsx --test) and
+    // ESM (vitest) without a `require is not defined` crash.
     const parsed = parseModelJson<Record<string, unknown>>(raw);
     if (parsed.type === 'tool_call' && parsed.toolName && parsed.arguments && typeof parsed.arguments === 'object') {
       return {

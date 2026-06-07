@@ -25,3 +25,20 @@ cloudflared.exe
 # caught before being added to the repo.
 Complex */
 Complex* /
+
+# Terraform state and variable files. `*.tfstate` and `*.tfstate.backup`
+# are Terraform's default local-state filenames; `terraform.tfvars` is
+# the auto-loaded var file and can contain secrets. `*.tfplan` files
+# can contain rendered secrets too.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/terraform.tfvars
+terraform/.terraform.lock.hcl.bak
+
+# Vitest cache + coverage artifacts.
+.vitest-cache/
+coverage/
+.vitest/
+

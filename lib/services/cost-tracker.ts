@@ -46,6 +46,13 @@ export class CostTracker {
 
   /**
    * Log an LLM usage event and calculate cost.
+   *
+   * The optional `reported` flag records whether the token counts
+   * came from the upstream provider's `usage` payload (true) or
+   * were estimated locally from text length (false). This is
+   * useful for capacity planning: when the reported-vs-estimated
+   * ratio drops we know the budget engine is under-counting real
+   * spend.
    */
   async recordCostEvent(data: {
     missionId?: string;
@@ -56,15 +63,17 @@ export class CostTracker {
     model: string;
     inputTokens: number;
     outputTokens: number;
+    reported?: boolean;
   }): Promise<number> {
     const pricing = this.getPricing(data.model);
     const costCents = (data.inputTokens * pricing.inputRate) + (data.outputTokens * pricing.outputRate);
     const id = `cost-${crypto.randomUUID()}`;
+    const reported = data.reported === true ? 1 : 0;
 
     await dbClient.execute(
-      `INSERT INTO Cost_Events 
-      (id, mission_id, agent_id, task_id, agent_run_id, provider, model, input_tokens, output_tokens, cost_cents, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      `INSERT INTO Cost_Events
+      (id, mission_id, agent_id, task_id, agent_run_id, provider, model, input_tokens, output_tokens, cost_cents, reported, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       [
         id,
         data.missionId || null,
@@ -75,7 +84,8 @@ export class CostTracker {
         data.model,
         data.inputTokens,
         data.outputTokens,
-        costCents
+        costCents,
+        reported,
       ]
     );
 
@@ -117,20 +127,27 @@ export class CostTracker {
 
   /**
    * Get overall spend summary aggregated by agent, mission, and model.
+   * Also reports a `reportedCoverage` ratio: the share of recorded
+   * spend whose token counts came from the provider's `usage` payload
+   * (vs an estimate). Operators can watch this number drop toward 0
+   * as a signal that the budget engine is under-counting real spend.
    */
   async getSpendSummary(): Promise<{
     totalCents: number;
     eventsCount: number;
+    reportedCents: number;
+    estimatedCents: number;
+    reportedCoverage: number;
     byAgent: { agentId: string; agentName: string; costCents: number; inputTokens: number; outputTokens: number }[];
     byMission: { missionId: string; missionTitle: string; costCents: number }[];
     byModel: { provider: string; model: string; costCents: number; callCount: number }[];
   }> {
-    const totalRow = await dbClient.queryOne<{ total: number | null; count: number }>(
-      "SELECT SUM(cost_cents) as total, COUNT(*) as count FROM Cost_Events"
+    const totalRow = await dbClient.queryOne<{ total: number | null; count: number; reported: number | null }>(
+      "SELECT SUM(cost_cents) as total, COUNT(*) as count, SUM(CASE WHEN reported = 1 THEN cost_cents ELSE 0 END) as reported FROM Cost_Events"
     );
 
     const byAgent = await dbClient.query<any>(
-      `SELECT c.agent_id as agentId, COALESCE(a.name, 'Unknown Agent') as agentName, 
+      `SELECT c.agent_id as agentId, COALESCE(a.name, 'Unknown Agent') as agentName,
               SUM(c.cost_cents) as costCents, SUM(c.input_tokens) as inputTokens, SUM(c.output_tokens) as outputTokens
        FROM Cost_Events c
        LEFT JOIN Agents a ON c.agent_id = a.id
@@ -139,7 +156,7 @@ export class CostTracker {
     );
 
     const byMission = await dbClient.query<any>(
-      `SELECT c.mission_id as missionId, COALESCE(m.title, 'No Mission Context') as missionTitle, 
+      `SELECT c.mission_id as missionId, COALESCE(m.title, 'No Mission Context') as missionTitle,
               SUM(c.cost_cents) as costCents
        FROM Cost_Events c
        LEFT JOIN Missions m ON c.mission_id = m.id
@@ -154,9 +171,15 @@ export class CostTracker {
        ORDER BY costCents DESC`
     );
 
+    const totalCents = totalRow?.total || 0;
+    const reportedCents = totalRow?.reported || 0;
+
     return {
-      totalCents: totalRow?.total || 0,
+      totalCents,
       eventsCount: totalRow?.count || 0,
+      reportedCents,
+      estimatedCents: Math.max(0, totalCents - reportedCents),
+      reportedCoverage: totalCents > 0 ? reportedCents / totalCents : 0,
       byAgent: byAgent.map((r: any) => ({
         agentId: r.agentId,
         agentName: r.agentName,
@@ -173,7 +196,7 @@ export class CostTracker {
         provider: r.provider,
         model: r.model,
         costCents: r.costCents || 0,
-        callCount: r.callCount || 0
+        callCount: r.callCount
       }))
     };
   }

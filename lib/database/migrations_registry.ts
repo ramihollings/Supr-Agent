@@ -28,6 +28,7 @@ import {
   addTeamMessages,
 } from './migrations/010__team_runs';
 import { addMcpInvocations } from './migrations/011__mcp_invocations';
+import { addCostEventsReported } from './migrations/012__cost_events_reported';
 
 export const migrations: Migration[] = [
   addCronJobsAssignedAgentId,
@@ -41,4 +42,5 @@ export const migrations: Migration[] = [
   addTeamContext,
   addTeamMessages,
   addMcpInvocations,
+  addCostEventsReported,
 ];

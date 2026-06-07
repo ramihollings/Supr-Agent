@@ -6,6 +6,9 @@ metadata:
   labels:
     app: supr-orchestrator
 spec:
+  # Recreate is required because the deployment uses a GCS-FUSE
+  # CSI mount of `.agents/` and `supr_workspaces/` -- two pods
+  # cannot share the same FUSE mount.
   strategy:
     type: Recreate
   replicas: 1
@@ -17,30 +20,38 @@ spec:
       labels:
         app: supr-orchestrator
       annotations:
-        # Enable Google Cloud Storage FUSE CSI driver volume mounting
         gke-gcsfuse/volumes: "true"
     spec:
-      # Enforce secure user-space kernel via gVisor runtime class
+      # The pod identity is wired via Workload Identity in Terraform:
+      # the K8s service account `supr-sa` is bound to the
+      # `supr-orchestrator-sa` GCP service account.
+      serviceAccountName: supr-sa
+      # gVisor user-space kernel -- the deploy-time line of defense
+      # against container escape.
       runtimeClassName: gvisor
-
-      # Allow service account token automounting for GCS FUSE CSI driver and Kubernetes API access
+      # The CSI driver needs API access to mount the bucket; we keep
+      # this `true` so the FUSE volume can be created, and we rely on
+      # the GKE node-pool service account + Workload Identity binding
+      # (in Terraform) to scope what the pod can do with the token.
       automountServiceAccountToken: true
 
       containers:
       - name: supr-app
-        image: us-central1-docker.pkg.dev/project-cc5e59a9-05a9-4613-9db/supr-repo/supr-agent:latest
-        imagePullPolicy: Always
+        image: us-central1-docker.pkg.dev/PROJECT_ID/supr-repo/supr-agent:COMMIT_SHA
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3001
           name: http
-        
+
         env:
         - name: PORT
           value: "3001"
         - name: NODE_ENV
           value: "production"
-        
-        # Inject secrets from Cloud Secret Manager via pre-created k8s secrets
+
+        # Secrets are projected from the `supr-secrets` Kubernetes
+        # Secret, which itself is backed by Google Secret Manager via
+        # the Secret Manager CSI driver (out of band, see Terraform).
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
@@ -57,6 +68,9 @@ spec:
               name: supr-secrets
               key: APP_PASSWORD
 
+        # Hardened resource limits. The runtime can spike to 2 CPU
+        # during heavy tool execution; the requests are conservative
+        # so the cluster can pack the deployment onto cheap nodes.
         resources:
           limits:
             cpu: "2"
@@ -65,8 +79,50 @@ spec:
             cpu: "500m"
             memory: 512Mi
 
+        # ───── Health probes ──────────────────────────────────────
+        # /api/health/production is auth-gated but the readiness
+        # probe uses the same path with the `?probe=model` flag
+        # disabled so the boot path doesn't need credentials. The
+        # endpoint returns "pass" / "warn" / "fail"; we treat
+        # "pass" and "warn" as healthy because "warn" is acceptable
+        # when optional channels (Telegram, Slack) are intentionally
+        # disabled. Only "fail" blocks traffic.
+        startupProbe:
+          httpGet:
+            path: /api/health/production
+            port: 3001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30   # 5 minutes to come up
+        livenessProbe:
+          httpGet:
+            path: /api/health/production
+            port: 3001
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health/production
+            port: 3001
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Drop all Linux capabilities; we don't need any of them
+        # inside the orchestrator pod.
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          capabilities:
+            drop:
+            - ALL
+
         volumeMounts:
-        # Mount the persistent Agent states and workspaces using FUSE
         - name: supr-gcs-fuse
           mountPath: /app/.agents
           subPath: .agents
@@ -75,10 +131,19 @@ spec:
           subPath: supr_workspaces
 
       volumes:
-      # CSI Driver volume details referencing the state bucket
       - name: supr-gcs-fuse
         csi:
           driver: gcsfuse.csi.storage.gke.io
           volumeAttributes:
-            bucketName: project-cc5e59a9-05a9-4613-9db-supr-state
+            bucketName: PROJECT_ID-supr-state
             mountOptions: "implicit-dirs,temp-dir=/tmp"
+
+---
+# K8s service account dedicated to the orchestrator. Workload
+# Identity binds this to the `supr-orchestrator-sa` GCP service
+# account defined in Terraform.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: supr-sa
+  namespace: supr

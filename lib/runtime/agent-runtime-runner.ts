@@ -29,7 +29,6 @@ import type {
 import { sessionEventBus } from './agent-session';
 import { memorySectionService } from '@/lib/services/memory-sections';
 import { costTracker } from '@/lib/services/cost-tracker';
-import { budgetEngine } from '@/lib/services/budget-engine';
 import { telemetry } from '@/lib/telemetry';
 
 function id(prefix: string) {
@@ -128,7 +127,8 @@ async function getModelResponse(input: {
   deadline: number | null;
   transcriptIds: string[];
   budget: AgentRuntimeBudget;
-}) {
+  usageSink: { inputTokens: number; outputTokens: number; reported: boolean };
+}): Promise<string> {
   const role = inferProviderRole(input.action.capability, input.action.intent);
   const provider = await getActiveProvider(role);
   await providerRouteDecisionService.record({
@@ -148,34 +148,80 @@ async function getModelResponse(input: {
   };
   let streamed = '';
   try {
-    for await (const chunk of provider.streamContent(prompt, modelOptions)) {
-      streamed += chunk;
-      if (chunk.trim()) {
-        input.transcriptIds.push(await recordStep({
-          missionId: input.action.missionId,
-          agentId: input.action.agentId,
-          runId: input.runId,
-          eventType: 'runtime_model_stream',
-          summary: chunk.slice(0, 500),
-          metadata: { provider: provider.name, role },
-        }));
-        // Phase 1B: forward each chunk to the session bus so the chat
-        // UI can render a live "thinking…" typewriter. The sessionId
-        // field is left blank on per-action runs -- the SSE route
-        // will derive the active session from the action's missionId.
-        sessionEventBus.emitEvent({
-          sessionId: '',
-          missionId: input.action.missionId,
-          kind: 'model_chunk',
-          at: new Date().toISOString(),
-          data: {
-            agentId: input.action.agentId,
-            chunk,
-            provider: provider.name,
-            role,
-          },
-        });
+    const stream = provider.streamContentWithUsage
+      ? provider.streamContentWithUsage(prompt, modelOptions)
+      : null;
+    if (stream) {
+      for await (const chunk of stream) {
+        if (chunk.text) {
+          streamed += chunk.text;
+          if (chunk.text.trim()) {
+            input.transcriptIds.push(await recordStep({
+              missionId: input.action.missionId,
+              agentId: input.action.agentId,
+              runId: input.runId,
+              eventType: 'runtime_model_stream',
+              summary: chunk.text.slice(0, 500),
+              metadata: { provider: provider.name, role },
+            }));
+            // Phase 1B: forward each chunk to the session bus so the chat
+            // UI can render a live "thinking…" typewriter. The sessionId
+            // field is left blank on per-action runs -- the SSE route
+            // will derive the active session from the action's missionId.
+            sessionEventBus.emitEvent({
+              sessionId: '',
+              missionId: input.action.missionId,
+              kind: 'model_chunk',
+              at: new Date().toISOString(),
+              data: {
+                agentId: input.action.agentId,
+                chunk: chunk.text,
+                provider: provider.name,
+                role,
+              },
+            });
+          }
+        }
+        if (chunk.usage) {
+          // Use the LAST usage the stream reports. Providers that report
+          // cumulative usage update this on every chunk; providers that
+          // only know it at the end send it on the final chunk.
+          input.usageSink.inputTokens = chunk.usage.inputTokens;
+          input.usageSink.outputTokens = chunk.usage.outputTokens;
+          input.usageSink.reported = chunk.usage.reported;
+        }
       }
+    } else {
+      // No usage-aware stream available; fall back to the plain stream.
+      for await (const chunk of provider.streamContent(prompt, modelOptions)) {
+        streamed += chunk;
+        if (chunk.trim()) {
+          input.transcriptIds.push(await recordStep({
+            missionId: input.action.missionId,
+            agentId: input.action.agentId,
+            runId: input.runId,
+            eventType: 'runtime_model_stream',
+            summary: chunk.slice(0, 500),
+            metadata: { provider: provider.name, role },
+          }));
+          sessionEventBus.emitEvent({
+            sessionId: '',
+            missionId: input.action.missionId,
+            kind: 'model_chunk',
+            at: new Date().toISOString(),
+            data: {
+              agentId: input.action.agentId,
+              chunk,
+              provider: provider.name,
+              role,
+            },
+          });
+        }
+      }
+      // Estimate from text length when the provider can't report usage.
+      input.usageSink.inputTokens = Math.max(1, Math.ceil(prompt.length / 4));
+      input.usageSink.outputTokens = Math.max(0, Math.ceil(streamed.length / 4));
+      input.usageSink.reported = false;
     }
     return streamed;
   } catch (error: any) {
@@ -189,7 +235,20 @@ async function getModelResponse(input: {
       runtimeMode: input.mode,
       failureReason: error.message || String(error),
     });
-    return withRuntimeTimeout(provider.generateContent(prompt, modelOptions), input.deadline, 'model response');
+    const fallback = await withRuntimeTimeout(
+      provider.generateContentWithUsage
+        ? provider.generateContentWithUsage(prompt, modelOptions)
+        : provider.generateContent(prompt, modelOptions).then((text) => ({ text, usage: { inputTokens: Math.max(1, Math.ceil(prompt.length / 4)), outputTokens: Math.max(0, Math.ceil(text.length / 4)), reported: false } })),
+      input.deadline,
+      'model response',
+    );
+    streamed = typeof fallback === 'string' ? fallback : fallback.text;
+    if (typeof fallback !== 'string' && fallback.usage) {
+      input.usageSink.inputTokens = fallback.usage.inputTokens;
+      input.usageSink.outputTokens = fallback.usage.outputTokens;
+      input.usageSink.reported = fallback.usage.reported;
+    }
+    return streamed;
   }
 }
 
@@ -279,6 +338,16 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
     const toolResults: Array<{ invocationId: string; toolName: string; output: unknown }> = [];
     const evidence: Record<string, string[]> = { artifacts: [], memory: [], events: [], toolCalls: [] };
     const logs: string[] = [];
+    // Accumulated usage for the most recent model call. Reset on every
+    // getModelResponse invocation; the runner reads it after the call
+    // returns so the cost tracker can be fed real token counts.
+    const lastModelUsage: { inputTokens: number; outputTokens: number; reported: boolean } = {
+      inputTokens: 0,
+      outputTokens: 0,
+      reported: false,
+    };
+    let lastProviderName = 'unknown';
+    let lastModelName = 'unknown';
 
     try {
       assertNotCancelled(normalized);
@@ -306,7 +375,37 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           deadline,
           transcriptIds,
           budget,
+          usageSink: lastModelUsage,
         }), deadline, 'model response');
+        // Capture the provider+model used for the most recent model call
+        // so the cost event below can attribute the spend correctly.
+        // inferProviderRole + the runtime are intentionally lossy here:
+        // we just need the model name for cost attribution, not for
+        // re-routing.
+        lastProviderName = inferProviderRole(action.capability, action.intent);
+        lastModelName = action.capability;
+        // Phase 4D: record the cost event for THIS model call. Real
+        // token counts come from the provider's usage payload; when
+        // the provider doesn't report usage the sink holds an estimate.
+        try {
+          await costTracker.recordCostEvent({
+            missionId: action.missionId || undefined,
+            agentId: action.agentId || undefined,
+            taskId: action.taskId || undefined,
+            agentRunId: runId || undefined,
+            provider: lastProviderName,
+            model: lastModelName,
+            inputTokens: lastModelUsage.inputTokens,
+            outputTokens: lastModelUsage.outputTokens,
+            reported: lastModelUsage.reported,
+          });
+        } catch (costError: any) {
+          // Cost recording must never fail a run; the budget engine
+          // would have thrown a typed `budget_exceeded` error which
+          // we propagate, everything else we warn and continue.
+          if (costError?.code === 'budget_exceeded') throw costError;
+          telemetry.warn('runtime.cost_record_failed', { reason: costError?.message || String(costError) });
+        }
         const response = parseModelToolResponse(raw);
 
         // Phase 2C: record a heartbeat step so the chat UI can show
@@ -521,31 +620,6 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
             at: new Date().toISOString(),
             data: { agentId: action.agentId, toolName: response.toolName, invocationId, hasOutput: output !== undefined },
           });
-          // Phase 4D: record the cost event and let the budget
-          // engine evaluate. We do this best-effort: a hard-stop
-          // violation throws a typed error so the calling code can
-          // surface it as a failure.
-          try {
-            await costTracker.recordCostEvent({
-              missionId: action.missionId || undefined,
-              agentId: action.agentId || undefined,
-              taskId: action.taskId || undefined,
-              agentRunId: runId || undefined,
-              provider: 'tool',
-              model: response.toolName,
-              inputTokens: 10000, // Equates to ~1 cent using default cost
-              outputTokens: 0,
-            });
-            await budgetEngine.evaluateCostEvent(1, action.missionId, action.agentId);
-          } catch (budgetError: any) {
-            // The budget engine throws a typed error when a hard
-            // stop is crossed. We bubble it up so the runtime marks
-            // the run as failed with a clear reason.
-            if (budgetError?.code === 'budget_exceeded') {
-              throw budgetError;
-            }
-            telemetry.warn('runtime.budget_eval_failed', { reason: budgetError?.message || String(budgetError) });
-          }
           const metric = await operationalMetrics.record({
             missionId: action.missionId,
             agentId: action.agentId,

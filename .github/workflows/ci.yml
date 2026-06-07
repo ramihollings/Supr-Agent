@@ -15,6 +15,10 @@ jobs:
       AUTH_SECRET: ci-smoke-secret
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Fetch full history so gitleaks and CodeQL can scan every
+          # commit, not just the head.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -28,21 +32,82 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      # ───── Security gates ────────────────────────────────────
+
+      # 1. Secret scan. Catches API keys, tokens, .env values,
+      # GCP service-account JSON, and the like. Runs BEFORE the
+      # build so a leaked secret fails the PR without burning CI
+      # minutes.
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: true
+          GITLEAKS_ENABLE_SUMMARY: true
+
+      # 2. SAST with CodeQL. Scans TypeScript / JavaScript for
+      # taint-style vulnerabilities (SQLi, SSRF, XSS). The
+      # default `security-extended` query pack covers the OWASP
+      # Top 10.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: typescript,javascript
+          queries: security-extended,security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:typescript"
+
+      # 3. Static analysis / policy checks. The lint step
+      # additionally catches the `lib/diagnostics/*` orphaned
+      # scripts the linter is wired to flag.
       - name: Lint
         run: npm run lint
 
+      # 4. Unit tests (vitest) — pure helpers + the new
+      # reflection / cost-wiring contract tests.
+      - name: Unit tests (vitest)
+        run: npm run test:unit
+
+      # 5. Security regression suite (215+ tests).
       - name: Security regression tests
         run: npm run test:security
 
+      # 6. Build. A type error or missing import surfaces here.
       - name: Build
         run: npm run build
 
+      # 7. Smoke + E2E. Boots the production build and walks the
+      # happy path.
       - name: Smoke test (boots prod server, probes endpoints)
         run: npm run smoke
 
       - name: End-to-end tests
         run: npm run test:e2e
 
+      # 8. SBOM. The `anchore/sbom-action` ships a
+      # CycloneDX-formatted SBOM of the production image so we
+      # can later run vulnerability scans against a known-good
+      # baseline. Stored as a build artifact for 30 days.
+      - name: Generate SBOM (CycloneDX)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          artifact-name: supr-sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: supr-sbom
+          path: supr-sbom.cdx.json
+          retention-days: 30
+
+      # 9. Playwright report (only on failure so a green run
+      # doesn't dump 50MB of test output).
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4

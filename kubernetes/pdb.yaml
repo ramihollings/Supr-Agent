@@ -1,0 +1,19 @@
+# PodDisruptionBudget for the orchestrator.
+#
+# Even though there's only one replica today, an explicit PDB
+# pins the contract: a voluntary disruption (drain, autoscaler
+# scale-down) must NEVER bring the orchestrator below one
+# running pod. Without a PDB a kubectl drain on the node can
+# evict the only replica and take the agent offline.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: supr-orchestrator
+  namespace: supr
+  labels:
+    app: supr-orchestrator
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: supr-orchestrator
