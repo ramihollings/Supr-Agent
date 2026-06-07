@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { getSqliteDb, initDatabase } from './init';
 
 const isPostgres = !!(process.env.DATABASE_URL || process.env.PGHOST);
+const allowProductionSqliteForTests = process.env.SUPR_ALLOW_PRODUCTION_SQLITE_FOR_TESTS === 'true';
 
 let pgPool: Pool | null = null;
 if (isPostgres) {
@@ -19,12 +20,19 @@ if (isPostgres) {
   }
   console.log('[db_client] Initialized PostgreSQL connection pool.');
 } else {
-  console.log('[db_client] Falling back to SQLite.');
+  console.log(
+    process.env.NODE_ENV === 'production' && !allowProductionSqliteForTests
+      ? '[db_client] PostgreSQL configuration required in production.'
+      : '[db_client] Falling back to SQLite.',
+  );
 }
 
 let isSqliteInitialized = false;
 function ensureSqliteInitialized() {
   if (!isPostgres && !isSqliteInitialized) {
+    if (process.env.NODE_ENV === 'production' && !allowProductionSqliteForTests) {
+      throw new Error('PostgreSQL configuration is required in production.');
+    }
     initDatabase(); // Idempotent — safe to call multiple times
     isSqliteInitialized = true;
   }

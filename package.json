@@ -12,14 +12,19 @@
     "smoke": "node scripts/smoke.mjs",
     "db:status": "node scripts/recover.mjs",
     "db:migrate:postgres": "node --import tsx scripts/migrate-postgres.ts",
+    "db:schema:postgres": "node --import tsx scripts/postgres-schema-gate.ts",
     "composio": "node bin/supr-composio.mjs",
     "test:diagnostics": "node scripts/diagnostics.mjs",
     "test:postgres": "node scripts/test-postgres.mjs",
     "test:postgres:runtime": "node --import tsx tests/postgres-integration.ts",
+    "staging:accept": "node scripts/staging-acceptance.mjs",
+    "evaluate:durable-runtime": "node --import tsx scripts/evaluate-durable-runtime.ts",
+    "evaluate:durable-runtime:verify": "node scripts/verify-durable-evaluation.mjs",
+    "release:verify": "node scripts/verify-release-evidence.mjs",
     "test": "npm run test:unit",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
-    "test:security": "node --import tsx --test tests/security-hardening.test.mjs tests/behavior-regression.test.mjs tests/telemetry.test.mjs tests/project-flow-structure.test.mjs tests/agent-runtime-pure.test.mjs tests/auth-fail-closed.test.mjs tests/proxy-xss-hardening.test.mjs tests/persisted-ids.test.mjs tests/plugin-trust-boundary.test.mjs tests/second-pass-audit.test.mjs tests/safe-fetch-behavior.test.mjs tests/blueprint5.test.mjs tests/mcp-composio-bulkup.test.mjs tests/mcp-bulkup.test.mjs tests/blueprint5-wave2.test.mjs tests/blueprint5-final.test.mjs tests/cleanup-final.test.mjs tests/plugin-env-allowlist.test.mjs tests/live-surfaces.test.mjs tests/teams-and-mcp.test.mjs tests/team-parser-runtime.test.mjs tests/concierge-handshake.test.mjs tests/workflow-canvas-throttle.test.mjs tests/tier-name-drift.test.mjs",
+    "test:security": "node --import tsx --test tests/security-hardening.test.mjs tests/behavior-regression.test.mjs tests/telemetry.test.mjs tests/project-flow-structure.test.mjs tests/agent-runtime-pure.test.mjs tests/auth-fail-closed.test.mjs tests/proxy-xss-hardening.test.mjs tests/persisted-ids.test.mjs tests/plugin-trust-boundary.test.mjs tests/second-pass-audit.test.mjs tests/safe-fetch-behavior.test.mjs tests/blueprint5.test.mjs tests/mcp-composio-bulkup.test.mjs tests/mcp-bulkup.test.mjs tests/blueprint5-wave2.test.mjs tests/blueprint5-final.test.mjs tests/cleanup-final.test.mjs tests/plugin-env-allowlist.test.mjs tests/live-surfaces.test.mjs tests/teams-and-mcp.test.mjs tests/team-parser-runtime.test.mjs tests/concierge-handshake.test.mjs tests/workflow-canvas-throttle.test.mjs tests/tier-name-drift.test.mjs tests/ci-production-gates.test.mjs",
     "test:e2e": "playwright test",
     "test:prod": "npm audit --audit-level=high && npm run lint && npm run test:unit && npm run test:security && npm run test:diagnostics && npm run build && npm run smoke && npm run test:e2e"
   },
@@ -48,6 +53,7 @@
     "react-hook-form": "^7.76.0",
     "tailwind-merge": "^3.3.1",
     "tmp": "^0.2.7",
+    "undici": "^7.27.2",
     "uuid": "^11.1.1",
     "zod": "^4.4.3"
   },
@@ -75,6 +81,6 @@
     "postcss": "$postcss"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.18.1"
   }
 }

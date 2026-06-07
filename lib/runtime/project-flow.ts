@@ -9,6 +9,7 @@ import { messagingGateway } from '@/lib/services/messaging-gateway';
 import { serializeChannelPayload } from '@/lib/channel-logging';
 import { telemetry } from '@/lib/telemetry';
 import { notifyMissionChanged } from '@/lib/events/bus';
+import { redactSensitiveText, serializeRedacted } from '@/lib/security/redaction';
 import type { PermissionTier } from '@/lib/services/governance';
 import type { RiskLevel, RuntimeMode } from './types';
 
@@ -267,7 +268,7 @@ async function upsertFlowNode(input: {
         input.nextAction || null,
         input.x,
         input.y,
-        JSON.stringify(input.metadata || {}),
+        serializeRedacted(input.metadata || {}),
         existing.id,
       ],
     );
@@ -292,7 +293,7 @@ async function upsertFlowNode(input: {
       input.nextAction || null,
       input.x,
       input.y,
-      JSON.stringify(input.metadata || {}),
+      serializeRedacted(input.metadata || {}),
     ],
   );
   return nodeId;
@@ -791,9 +792,9 @@ async function recordAgentRun(flowRunId: string, action: any, status: string, lo
       action.id,
       action.agentId || action.agent_id,
       status,
-      JSON.stringify([log]),
-      result ? JSON.stringify(result) : null,
-      error || null,
+      serializeRedacted([log]),
+      result ? serializeRedacted(result) : null,
+      error ? redactSensitiveText(error) : null,
     ],
   );
 }
@@ -919,7 +920,8 @@ export async function runProjectFlow(projectId: string) {
       }
     } catch (error: any) {
       failed += 1;
-      await recordAgentRun(flowRun.id, actionRow, 'failed', error.message || String(error), null, error.message || String(error));
+      const safeError = redactSensitiveText(error.message || String(error));
+      await recordAgentRun(flowRun.id, actionRow, 'failed', safeError, null, safeError);
     }
   }
 

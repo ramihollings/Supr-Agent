@@ -41,6 +41,12 @@ RUN apk add --no-cache \
     curl \
     openssl
 
+# The standalone server only needs the Node runtime. Remove package-manager
+# tooling from the final image to reduce attack surface and avoid shipping
+# dependencies that are never executed in production.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack && \
+    rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 # CloakBrowser can be supplied as a verified build argument. By default, use the
 # packaged Chromium wrapper so production builds never fetch unsigned binaries.
 ARG CLOAKBROWSER_DOWNLOAD_URL=""
@@ -71,6 +77,8 @@ COPY --from=builder /app/public ./public
 # https://nextjs.org/docs/advanced-features/output-file-tracing
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Next standalone tracing misses this dynamically loaded Playwright manifest.
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/playwright-core/browsers.json ./node_modules/playwright-core/browsers.json
 
 # Execution workspaces are ephemeral. Durable artifacts are uploaded to GCS.
 RUN mkdir -p /app/.agents && chown nextjs:nodejs /app/.agents

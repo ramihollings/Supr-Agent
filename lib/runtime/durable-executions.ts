@@ -4,6 +4,7 @@ import dbClient from '@/lib/database/db_client';
 import { buildSessionPlanFromMission, runAgentSession } from '@/lib/runtime/agent-session';
 import type { AgentSessionContinuation } from '@/lib/runtime/agent-session';
 import { telemetry } from '@/lib/telemetry';
+import { redactSensitive, redactSensitiveText, serializeRedacted } from '@/lib/security/redaction';
 import { nextScheduledRun } from '@/lib/runtime/schedule';
 import { restoreWorkspaceSnapshot, uploadWorkspaceSnapshot } from '@/lib/services/workspace-snapshots';
 import { syncMissionArtifactsToGcs } from '@/lib/services/artifact-storage';
@@ -132,8 +133,11 @@ export async function enqueueCloudTask(execution: ExecutionRecord): Promise<{ en
   const parent = `projects/${project}/locations/${location}/queues/${queue}`;
   const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
   const client = await auth.getClient();
-  const dispatchId = crypto.randomUUID().replace(/-/g, '');
-  const taskName = `${parent}/tasks/${execution.id.replace(/[^A-Za-z0-9_-]/g, '-')}-${dispatchId}`;
+  // One Cloud Task per durable execution attempt. Duplicate scheduler ticks
+  // receive 409 from Cloud Tasks and are treated as the same dispatch, while
+  // an approved or dead-lettered execution can dispatch again after its
+  // persisted attempt has advanced.
+  const taskName = `${parent}/tasks/${execution.id.replace(/[^A-Za-z0-9_-]/g, '-')}-attempt-${execution.attempt}`;
   try {
     const response = await client.request<any>({
       url: `https://cloudtasks.googleapis.com/v2/${parent}/tasks`,
@@ -181,6 +185,27 @@ export async function requeueDeadLetterExecution(executionId: string) {
   return { requeued: true, execution, dispatched: dispatch.enqueued };
 }
 
+export async function cancelExecution(executionId: string) {
+  const execution = await dbClient.queryOne<any>(
+    `UPDATE Job_Executions SET status = 'cancelled', claimed_by = NULL, lease_expires_at = NULL,
+       updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status IN ('queued','running','needs_approval')
+     RETURNING *`,
+    [executionId],
+  );
+  if (!execution) {
+    return { cancelled: false, execution: await getExecution(executionId) };
+  }
+  await dbClient.execute(
+    `UPDATE Agent_Sessions SET status = 'cancelled', claimed_by = NULL, lease_expires_at = NULL,
+       updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status IN ('queued','running','needs_approval')`,
+    [execution.session_id],
+  );
+  telemetry.info('execution.cancelled', { executionId, sessionId: execution.session_id });
+  return { cancelled: true, execution: mapExecution(execution) };
+}
+
 export async function claimExecution(
   executionId: string,
   workerId: string,
@@ -188,6 +213,22 @@ export async function claimExecution(
   leaseMs = Number(process.env.EXECUTION_LEASE_MS || 35 * 60_000),
 ) {
   const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+  if (dbClient.isPostgres) {
+    return dbClient.queryOne<any>(
+      `WITH claimable AS (
+         SELECT id FROM Job_Executions
+         WHERE id = ? AND (status = 'queued' OR (status = 'running' AND lease_expires_at < ?))
+         FOR UPDATE SKIP LOCKED
+       )
+       UPDATE Job_Executions AS execution
+       SET status = 'running', claimed_by = ?, lease_expires_at = ?,
+           attempt = execution.attempt + 1, updated_at = CURRENT_TIMESTAMP
+       FROM claimable
+       WHERE execution.id = claimable.id
+       RETURNING execution.*`,
+      [executionId, now.toISOString(), workerId, leaseExpiresAt],
+    );
+  }
   return dbClient.queryOne<any>(
     `UPDATE Job_Executions SET status = 'running', claimed_by = ?, lease_expires_at = ?,
        attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP
@@ -261,7 +302,7 @@ export async function runExecution(executionId: string, workerId = `worker-${cry
       {
         sql: `UPDATE Agent_Sessions SET status = ?, result = ?, evidence = ?, claimed_by = NULL,
               lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        params: [finalStatus, JSON.stringify(result), JSON.stringify(result.evidence), session.id],
+        params: [finalStatus, serializeRedacted(result), serializeRedacted(result.evidence), session.id],
       },
       {
         sql: `UPDATE Job_Executions SET status = ?, error = NULL, claimed_by = NULL,
@@ -281,28 +322,28 @@ export async function runExecution(executionId: string, workerId = `worker-${cry
       await dbClient.execute(
         `UPDATE Cron_Jobs SET last_success_at = CURRENT_TIMESTAMP, last_error = NULL,
          previous_result = ?, last_execution_id = ? WHERE id = ?`,
-        [JSON.stringify(result), executionId, row.cron_job_id],
+        [serializeRedacted(result), executionId, row.cron_job_id],
       );
     }
     telemetry.info('execution.completed', { executionId, sessionId: session.id, status: finalStatus, steps: result.steps });
     return { accepted: true, result: { ...result, status: finalStatus } };
   } catch (error: any) {
-    const message = error?.message || String(error);
+    const message = redactSensitiveText(error?.message || String(error));
     const current = await dbClient.queryOne<{ status: string }>('SELECT status FROM Job_Executions WHERE id = ?', [executionId]);
     if (current?.status === 'cancelled') {
       await dbClient.execute(
         `UPDATE Agent_Sessions SET status = 'cancelled', result = ?, claimed_by = NULL,
          lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [JSON.stringify({ error: message }), session.id],
+        [serializeRedacted({ error: message }), session.id],
       );
-      return { accepted: true, result: { status: 'cancelled', error: message } };
+      return { accepted: true, result: redactSensitive({ status: 'cancelled', error: message }) };
     }
     const maxAttempts = Number(process.env.MAX_EXECUTION_ATTEMPTS || 5);
     const retry = Number(row.attempt || 0) < maxAttempts;
     const nextStatus = retry ? 'queued' : 'failed';
     const deadLetteredAt = retry ? null : new Date().toISOString();
     await dbClient.runTransaction([
-      { sql: `UPDATE Agent_Sessions SET status = ?, result = ?, claimed_by = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, params: [nextStatus, JSON.stringify({ error: message }), session.id] },
+      { sql: `UPDATE Agent_Sessions SET status = ?, result = ?, claimed_by = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, params: [nextStatus, serializeRedacted({ error: message }), session.id] },
       { sql: `UPDATE Job_Executions SET status = ?, error = ?, dead_lettered_at = ?,
               dead_letter_reason = ?, claimed_by = NULL, lease_expires_at = NULL,
               updated_at = CURRENT_TIMESTAMP WHERE id = ?`,

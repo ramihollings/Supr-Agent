@@ -9,6 +9,7 @@
  * All calls are safe to make from server-side code, route handlers, server
  * actions, and the proxy middleware. They never throw.
  */
+import { redactSensitive } from '@/lib/security/redaction';
 
 export type TelemetryLevel = "debug" | "info" | "warn" | "error";
 
@@ -49,7 +50,7 @@ export function setTelemetrySink(sink: TelemetrySink | null | undefined): void {
 }
 
 function emit(event: TelemetryEvent): void {
-  const enriched: TelemetryEvent = {
+  const enriched = redactSensitive({
     timestamp: new Date().toISOString(),
     ...event,
     attributes: {
@@ -57,7 +58,7 @@ function emit(event: TelemetryEvent): void {
       env: process.env.NODE_ENV ?? "development",
       ...event.attributes,
     },
-  };
+  }) as TelemetryEvent;
   try {
     currentSink(enriched);
   } catch (e) {

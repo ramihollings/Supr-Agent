@@ -6,7 +6,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 
 const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error('DATABASE_URL is required.');
+if (!databaseUrl && !process.env.PGHOST) throw new Error('DATABASE_URL or PGHOST is required.');
 
 const sourcePath = process.env.SQLITE_DB_PATH
   ? path.resolve(process.env.SQLITE_DB_PATH)
@@ -16,7 +16,7 @@ const seedPath = fs.existsSync(sourcePath)
   ? sourcePath
   : path.join(os.tmpdir(), `supr-schema-${Date.now()}.db`);
 
-const pg = new Client({ connectionString: databaseUrl });
+const pg = databaseUrl ? new Client({ connectionString: databaseUrl }) : new Client();
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
 const pgTable = (value: string) => quote(value.toLowerCase());
 

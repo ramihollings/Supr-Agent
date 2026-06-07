@@ -1,4 +1,5 @@
 import dbClient from '@/lib/database/db_client';
+import { checkRequiredSchema } from '@/lib/database/schema-health';
 
 export const dynamic = 'force-dynamic';
 
@@ -6,6 +7,8 @@ export async function GET() {
   const failures: string[] = [];
   try {
     await dbClient.queryOne('SELECT 1 as ok');
+    const schemaFailures = await checkRequiredSchema();
+    failures.push(...schemaFailures.map((failure) => `Required schema unavailable: ${failure}`));
   } catch (error: any) {
     failures.push(`Database unreachable: ${error?.message || String(error)}`);
   }

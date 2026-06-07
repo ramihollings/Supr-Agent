@@ -6,6 +6,7 @@ import dbClient from '../../lib/database/db_client';
 import { toolRegistry, type ToolDefinition } from '../../lib/tools/registry';
 import { getRuntimeMode } from '../../lib/runtime/runtime-mode';
 import { safeFetchText } from '../../lib/net/safe-fetch';
+import { redactSensitiveText } from '../../lib/security/redaction';
 
 function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -56,6 +57,7 @@ async function persistArtifact(input: {
   content: string;
   diffSummary?: string;
 }) {
+  const safeContent = redactSensitiveText(input.content);
   const existing = await dbClient.queryOne<any>(`SELECT * FROM Artifacts WHERE mission_id = ? AND title = ?`, [input.missionId, input.title]);
   const artifactId = existing?.id || id('art');
   const latest = await dbClient.queryOne<any>(`SELECT MAX(version) as version FROM Artifact_Versions WHERE mission_id = ? AND title = ?`, [input.missionId, input.title]);
@@ -63,18 +65,18 @@ async function persistArtifact(input: {
   if (existing) {
     await dbClient.execute(
       `UPDATE Artifacts SET type = ?, content = ?, created_by_agent_id = ?, quality_status = 'draft', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [input.type || 'markdown', input.content, input.agentId || null, artifactId],
+      [input.type || 'markdown', safeContent, input.agentId || null, artifactId],
     ).catch(async () => {
       await dbClient.execute(
         `UPDATE Artifacts SET type = ?, content = ?, created_by_agent_id = ?, quality_status = 'draft' WHERE id = ?`,
-        [input.type || 'markdown', input.content, input.agentId || null, artifactId],
+        [input.type || 'markdown', safeContent, input.agentId || null, artifactId],
       );
     });
   } else {
     await dbClient.execute(
       `INSERT INTO Artifacts (id, mission_id, type, title, content, created_by_agent_id, quality_status, evidence_refs)
        VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)`,
-      [artifactId, input.missionId, input.type || 'markdown', input.title, input.content, input.agentId || null, JSON.stringify([])],
+      [artifactId, input.missionId, input.type || 'markdown', input.title, safeContent, input.agentId || null, JSON.stringify([])],
     );
   }
 
@@ -87,10 +89,10 @@ async function persistArtifact(input: {
       input.missionId,
       input.title,
       input.type || 'markdown',
-      input.content,
+      safeContent,
       Number(latest?.version || 0) + 1,
       input.agentId || 'AgentRuntimeRunner',
-      input.diffSummary || `${input.content.length} bytes written`,
+      input.diffSummary || `${safeContent.length} bytes written`,
     ],
   );
 

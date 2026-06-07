@@ -30,6 +30,7 @@ import { sessionEventBus } from './agent-session';
 import { memorySectionService } from '@/lib/services/memory-sections';
 import { costTracker } from '@/lib/services/cost-tracker';
 import { telemetry } from '@/lib/telemetry';
+import { redactSensitive, redactSensitiveText, serializeRedacted } from '@/lib/security/redaction';
 
 function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -55,7 +56,8 @@ async function backoffSleepMs(attempt: number): Promise<void> {
 }
 
 function summarize(value: unknown, max = 8000) {
-  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  const redacted = redactSensitive(value);
+  const text = typeof redacted === 'string' ? redacted : JSON.stringify(redacted);
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
@@ -69,7 +71,7 @@ function buildRuntimePrompt(action: AgentActionRecord, context: AgentContextBund
     '',
     `Action: ${action.capability}`,
     `Intent: ${action.intent}`,
-    `Inputs: ${JSON.stringify(action.inputs || {})}`,
+    `Inputs: ${serializeRedacted(action.inputs || {})}`,
     `Mission: ${JSON.stringify({ id: context.mission.id, title: context.mission.title, goal: context.mission.goal })}`,
     `Agent: ${JSON.stringify({ id: context.agent?.id, name: context.agent?.name, tier: context.agent?.permission_tier })}`,
     `Injected sections: ${context.injectedSections.join(', ')}`,
@@ -87,7 +89,7 @@ function buildRuntimePrompt(action: AgentActionRecord, context: AgentContextBund
     JSON.stringify(context.tools),
     '',
     'Previous tool results:',
-    JSON.stringify(toolResults),
+    serializeRedacted(toolResults),
   ].join('\n');
 }
 
@@ -103,7 +105,7 @@ async function recordStep(input: {
   await dbClient.execute(
     `INSERT INTO Event_Log (id, mission_id, actor_type, actor_id, event_type, summary, metadata)
      VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-    [eventId, input.missionId, input.agentId || null, input.eventType, input.summary, JSON.stringify({ ...(input.metadata || {}), agentRunId: input.runId })],
+    [eventId, input.missionId, input.agentId || null, input.eventType, redactSensitiveText(input.summary), serializeRedacted({ ...(input.metadata || {}), agentRunId: input.runId })],
   );
   return eventId;
 }
@@ -156,12 +158,13 @@ async function getModelResponse(input: {
         if (chunk.text) {
           streamed += chunk.text;
           if (chunk.text.trim()) {
+            const safeChunk = redactSensitiveText(chunk.text);
             input.transcriptIds.push(await recordStep({
               missionId: input.action.missionId,
               agentId: input.action.agentId,
               runId: input.runId,
               eventType: 'runtime_model_stream',
-              summary: chunk.text.slice(0, 500),
+              summary: safeChunk.slice(0, 500),
               metadata: { provider: provider.name, role },
             }));
             // Phase 1B: forward each chunk to the session bus so the chat
@@ -175,7 +178,7 @@ async function getModelResponse(input: {
               at: new Date().toISOString(),
               data: {
                 agentId: input.action.agentId,
-                chunk: chunk.text,
+                chunk: safeChunk,
                 provider: provider.name,
                 role,
               },
@@ -196,12 +199,13 @@ async function getModelResponse(input: {
       for await (const chunk of provider.streamContent(prompt, modelOptions)) {
         streamed += chunk;
         if (chunk.trim()) {
+          const safeChunk = redactSensitiveText(chunk);
           input.transcriptIds.push(await recordStep({
             missionId: input.action.missionId,
             agentId: input.action.agentId,
             runId: input.runId,
             eventType: 'runtime_model_stream',
-            summary: chunk.slice(0, 500),
+            summary: safeChunk.slice(0, 500),
             metadata: { provider: provider.name, role },
           }));
           sessionEventBus.emitEvent({
@@ -211,7 +215,7 @@ async function getModelResponse(input: {
             at: new Date().toISOString(),
             data: {
               agentId: input.action.agentId,
-              chunk,
+              chunk: safeChunk,
               provider: provider.name,
               role,
             },
@@ -233,7 +237,7 @@ async function getModelResponse(input: {
       model: provider.modelName,
       fallbackProvider: null,
       runtimeMode: input.mode,
-      failureReason: error.message || String(error),
+      failureReason: redactSensitiveText(error.message || String(error)),
     });
     const fallback = await withRuntimeTimeout(
       provider.generateContentWithUsage
@@ -257,7 +261,7 @@ async function updateAgentRun(runId: string, status: string, result?: unknown, e
     `UPDATE Agent_Runs
      SET status = ?, result = ?, error = ?, logs = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-    [status, result ? summarize(result) : null, error || null, JSON.stringify(logs), runId],
+    [status, result ? summarize(result) : null, error ? redactSensitiveText(error) : null, serializeRedacted(logs), runId],
   );
 }
 
@@ -297,7 +301,7 @@ async function recordToolInvocation(input: {
 async function completeToolInvocation(invocationId: string, output: unknown, error?: string) {
   await dbClient.execute(
     `UPDATE Tool_Invocations SET status = ?, output = ?, error = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [error ? 'failed' : 'completed', output === undefined ? null : summarize(output), error || null, invocationId],
+    [error ? 'failed' : 'completed', output === undefined ? null : summarize(output), error ? redactSensitiveText(error) : null, invocationId],
   );
 }
 
@@ -404,7 +408,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           // would have thrown a typed `budget_exceeded` error which
           // we propagate, everything else we warn and continue.
           if (costError?.code === 'budget_exceeded') throw costError;
-          telemetry.warn('runtime.cost_record_failed', { reason: costError?.message || String(costError) });
+          telemetry.warn('runtime.cost_record_failed', { reason: redactSensitiveText(costError?.message || String(costError)) });
         }
         const response = parseModelToolResponse(raw);
 
@@ -456,7 +460,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
             summary: response.content,
             metadata: { step },
           }));
-          logs.push(response.content);
+          logs.push(redactSensitiveText(response.content));
           continue;
         }
         if (response.type === 'final') {
@@ -495,8 +499,8 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
             await memorySectionService.upsert({
               missionId: action.missionId,
               title: `Run ${action.id.slice(0, 8)}: ${action.capability}`,
-              content: [
-                `Summary: ${response.summary}`,
+            content: [
+                `Summary: ${redactSensitiveText(response.summary)}`,
                 `Evidence: artifacts=${(evidence.artifacts || []).length} toolCalls=${(evidence.toolCalls || []).length} events=${(evidence.events || []).length}`,
                 `Mode: ${mode}`,
               ].join('\n'),
@@ -506,7 +510,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           } catch (memoryError: any) {
             telemetry.warn('runtime.memory_persist_failed', {
               actionId: action.id,
-              reason: memoryError?.message || String(memoryError),
+              reason: redactSensitiveText(memoryError?.message || String(memoryError)),
             });
           }
           const learnedSkillDraft = await skillLearningService.evaluateCompletedRun(runId);
@@ -550,7 +554,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           missionId: action.missionId,
           kind: 'tool_called',
           at: new Date().toISOString(),
-          data: { agentId: action.agentId, toolName: response.toolName, args: response.arguments, step },
+          data: redactSensitive({ agentId: action.agentId, toolName: response.toolName, args: response.arguments, step }) as Record<string, unknown>,
         });
 
         const invocationId = await recordToolInvocation({
@@ -607,7 +611,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
                 runId,
                 eventType: 'runtime_warning',
                 summary: `${response.toolName} failed attempt ${attempt + 1}; retrying after backoff.`,
-                metadata: { step, attempt: attempt + 1, retryLimit, reason: error.message || String(error) },
+                metadata: { step, attempt: attempt + 1, retryLimit, reason: redactSensitiveText(error.message || String(error)) },
               }));
               // Phase 4E: exponential backoff between retries. This is
               // best-effort; the runtime honors the deadline at the
@@ -655,7 +659,7 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
         eventType: 'failure',
         outcome: 'failed',
         durationMs: Date.now() - startedAt,
-        metadata: { capability: action.capability, mode, reason: error.message || String(error) },
+        metadata: { capability: action.capability, mode, reason: redactSensitiveText(error.message || String(error)) },
       });
       metricIds.push(metric.id);
       throw error;

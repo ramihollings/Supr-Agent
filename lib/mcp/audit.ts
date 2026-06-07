@@ -11,6 +11,7 @@
  */
 import crypto from 'node:crypto';
 import dbClient from '@/lib/database/db_client';
+import { redactSensitiveText, serializeRedacted } from '@/lib/security/redaction';
 
 export interface McpInvocationRecord {
   serverId: string;
@@ -29,9 +30,7 @@ export type McpInvocationOutcome = {
 function previewArgs(args: Record<string, unknown> | undefined): string {
   if (!args) return '';
   try {
-    const text = JSON.stringify(args);
-    if (text.length <= 400) return text;
-    return text.slice(0, 397) + '...';
+    return serializeRedacted(args, 400);
   } catch {
     return '(unserializable)';
   }
@@ -103,7 +102,7 @@ export function recordMcpInvocation(record: McpInvocationRecord, outcome: McpInv
         outcome.ok ? 1 : 0,
         outcome.durationMs,
         argsPreview,
-        outcome.error ? String(outcome.error).slice(0, 500) : null,
+        outcome.error ? redactSensitiveText(String(outcome.error)).slice(0, 500) : null,
         calledAt,
       ],
     )
@@ -111,7 +110,7 @@ export function recordMcpInvocation(record: McpInvocationRecord, outcome: McpInv
       // The audit log is best-effort; never let a write failure
       // bubble back up to the caller (the caller's tool result
       // was already returned or thrown).
-      console.warn(`[MCP_AUDIT] Failed to record invocation for ${record.serverId}/${record.toolName}:`, err?.message ?? err);
+      console.warn(`[MCP_AUDIT] Failed to record invocation for ${record.serverId}/${record.toolName}:`, redactSensitiveText(err?.message ?? String(err)));
     });
 }
 
@@ -168,4 +167,3 @@ export async function queryMcpAudit(q: McpAuditQuery = {}): Promise<McpAuditEntr
     calledAt: r.called_at,
   }));
 }
-

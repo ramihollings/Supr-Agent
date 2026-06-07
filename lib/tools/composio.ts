@@ -24,6 +24,7 @@ import { toolRegistry, type ToolDefinition } from './registry';
 // @ts-ignore - The types might be missing or incomplete depending on version
 import { Composio } from 'composio-core';
 import { getSecretSetting } from '@/lib/secrets';
+import { redactSensitive, redactSensitiveText, serializeRedacted } from '@/lib/security/redaction';
 
 export interface ComposioBridge {
   listApps(): Promise<Array<{ name: string; key: string; description?: string }>>;
@@ -138,7 +139,7 @@ class SuprComposioBridge implements ComposioBridge {
     if (typeof anyClient.executeAction !== 'function') {
       throw new Error('Composio SDK does not expose executeAction().');
     }
-    return await anyClient.executeAction(actionName, params);
+    return redactSensitive(await anyClient.executeAction(actionName, params));
   }
 }
 
@@ -161,9 +162,9 @@ export async function registerComposioTool(actionName: string, riskLevel: 'Low' 
     execute: async (params) => {
       try {
         const response = await composioBridge.executeAction(actionName, params || {});
-        return JSON.stringify(response);
+        return serializeRedacted(response);
       } catch (error: any) {
-        throw new Error(`Composio Execution Failed: ${error.message}`);
+        throw new Error(`Composio Execution Failed: ${redactSensitiveText(error.message || String(error))}`);
       }
     },
   };

@@ -136,6 +136,13 @@ test('shell tool enforces approvalRequired from the execution policy', () => {
   assert.match(SHELL_SOURCE, /\(error as any\)\.approvalRequired = true/);
 });
 
+test('hard-denied shell commands cannot be bypassed by a trusted approval id', () => {
+  const blockedCheck = SHELL_SOURCE.indexOf('executionPolicy.selectedEnvironment === "blocked"');
+  const approvalBypass = SHELL_SOURCE.indexOf('if (trustedApprovedActionId)');
+  assert.ok(blockedCheck >= 0);
+  assert.ok(approvalBypass > blockedCheck);
+});
+
 // 7. Remaining persisted IDs
 test('activity-log uses crypto.randomUUID() for all persisted ids', () => {
   // Both logAudit() and logEvent() must use UUIDs. The audit covered

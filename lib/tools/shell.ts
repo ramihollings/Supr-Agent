@@ -143,6 +143,9 @@ async function assertExecutionAllowedOrThrow(
   executionPolicy: { approvalRequired: boolean; selectedEnvironment: string; reason: string },
   trustedApprovedActionId?: string,
 ): Promise<void> {
+  if (executionPolicy.selectedEnvironment === "blocked") {
+    throw new Error(`Command execution blocked by policy: ${executionPolicy.reason}`);
+  }
   if (trustedApprovedActionId) {
     // The agent registry routed this call through an approved action;
     // the human has already signed off on this exact command. Bypass

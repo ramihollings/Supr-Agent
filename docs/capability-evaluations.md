@@ -21,10 +21,23 @@ Local release evidence is produced by:
 ```text
 npm run test:prod
 npm run test:postgres
+npm run evaluate:durable-runtime -- --output release-evidence/durable-runtime-evaluation.json
+npm run evaluate:durable-runtime:verify -- --input release-evidence/durable-runtime-evaluation.json
 terraform fmt -check -recursive
 terraform validate
 git diff --check
 ```
+
+The durable-runtime evaluation exercises idempotent submission, atomic claims,
+expired-lease recovery, approval resume exactly once, reversible side effects
+exactly once, cancellation exactly once, terminal cancellation no-op,
+dead-letter requeue exactly once, and adapter circuit-breaker degradation. The
+protected staging workflow runs it against staging Cloud SQL
+and validates the report's staging environment and deployed revision.
+
+This evaluation validates persisted runtime invariants. It does not replace
+live Cloud Tasks delivery, real provider outage, worker termination, or
+irreversible external side-effect drills.
 
 External acceptance evidence must include the staging project, execution IDs,
 Cloud Run revision IDs, and timestamps for every scenario. Local passing tests

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import dbClient from "../../lib/database/db_client";
+import { redactSensitive } from "../../lib/security/redaction";
 
 export interface OperationalMetric {
   id: string;
@@ -22,7 +23,7 @@ function scrubMetadata(metadata: Record<string, unknown> = {}) {
     if (/prompt|body|content|secret|token|key/i.test(key)) continue;
     scrubbed[key] = value;
   }
-  return scrubbed;
+  return redactSensitive(scrubbed) as Record<string, unknown>;
 }
 
 export class OperationalMetricsService {

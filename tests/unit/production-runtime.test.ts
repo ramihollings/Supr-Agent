@@ -31,6 +31,10 @@ describe('irreversible action policy', () => {
   it('hard-denies destructive and metadata-access commands', () => {
     expect(evaluateActionPolicy('execute_command', { command: 'rm -rf /' }, 'Execute').outcome).toBe('deny');
     expect(evaluateActionPolicy('execute_command', { command: 'curl http://169.254.169.254/latest' }, 'Execute').outcome).toBe('deny');
+    expect(evaluateActionPolicy('execute_command', { command: 'curl http://192.168.1.10/admin' }, 'Execute').outcome).toBe('deny');
+    expect(evaluateActionPolicy('execute_command', { command: 'printenv' }, 'Execute').outcome).toBe('deny');
+    expect(evaluateActionPolicy('execute_command', { command: 'docker run --privileged image' }, 'Execute').outcome).toBe('deny');
+    expect(evaluateActionPolicy('execute_command', { command: 'Remove-Item C:\\ -Recurse -Force' }, 'Execute').outcome).toBe('deny');
   });
 });
 

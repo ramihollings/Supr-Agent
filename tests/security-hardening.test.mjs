@@ -58,6 +58,17 @@ test('production health is authenticated and reports live readiness without secr
   assert.match(supervisor, /Probe Live Model/);
 });
 
+test('production database access requires PostgreSQL outside explicit local test harnesses', () => {
+  const dbClient = readFileSync('lib/database/db_client.ts', 'utf8');
+  const smoke = readFileSync('scripts/smoke.mjs', 'utf8');
+  const playwright = readFileSync('playwright.config.ts', 'utf8');
+  assert.match(dbClient, /PostgreSQL configuration is required in production/);
+  assert.match(dbClient, /SUPR_ALLOW_PRODUCTION_SQLITE_FOR_TESTS/);
+  assert.match(smoke, /SUPR_ALLOW_PRODUCTION_SQLITE_FOR_TESTS: "true"/);
+  assert.match(playwright, /SUPR_ALLOW_PRODUCTION_SQLITE_FOR_TESTS: "true"/);
+  assert.doesNotMatch(readFileSync('terraform/main.tf', 'utf8'), /SUPR_ALLOW_PRODUCTION_SQLITE_FOR_TESTS/);
+});
+
 test('optional disabled channels are ignored without blocking live runtime and logs are scrubbed', () => {
   const scrubber = readFileSync('lib/channel-logging.ts', 'utf8');
   const telegram = readFileSync('app/api/telegram/route.ts', 'utf8');
@@ -65,7 +76,8 @@ test('optional disabled channels are ignored without blocking live runtime and l
   const discord = readFileSync('app/api/discord/route.ts', 'utf8');
 
   assert.match(scrubber, /scrubChannelPayload/);
-  assert.match(scrubber, /SCRUBBED/);
+  assert.match(scrubber, /redactSensitive/);
+  assert.match(readFileSync('lib/security/redaction.ts', 'utf8'), /\[REDACTED\]/);
   for (const route of [telegram, slack, discord]) {
     assert.match(route, /serializeChannelPayload/);
     assert.match(route, /core Supr runtime remains live/);

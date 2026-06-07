@@ -1,5 +1,6 @@
 import { GoogleAuth } from 'google-auth-library';
 import dbClient from '@/lib/database/db_client';
+import { serializeRedacted } from '@/lib/security/redaction';
 
 const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;
 
@@ -8,7 +9,7 @@ function safeObjectToken(value: string) {
 }
 
 async function uploadJson(bucket: string, objectName: string, value: unknown) {
-  const payload = JSON.stringify(value);
+  const payload = serializeRedacted(value);
   if (Buffer.byteLength(payload, 'utf8') > MAX_ARTIFACT_BYTES) {
     throw new Error(`Artifact payload exceeds ${MAX_ARTIFACT_BYTES} bytes.`);
   }

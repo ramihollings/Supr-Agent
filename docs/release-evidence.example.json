@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "environment": "staging",
+  "revision": "replace-with-cloud-run-revision",
+  "gates": {
+    "ci_security": { "status": "pending", "completedAt": null, "evidence": [] },
+    "postgres_migration_restore": { "status": "pending", "completedAt": null, "evidence": [] },
+    "worker_interruption_recovery": { "status": "pending", "completedAt": null, "evidence": ["replace-with-staging-execution-and-cloud-tasks-log-reference"] },
+    "provider_degradation": { "status": "pending", "completedAt": null, "evidence": ["replace-with-live-provider-outage-evidence-reference"] },
+    "approval_exactly_once": { "status": "pending", "completedAt": null, "evidence": ["replace-with-approval-action-and-external-side-effect-evidence-reference"] },
+    "telegram_end_to_end": { "status": "pending", "completedAt": null, "evidence": [] },
+    "staging_soak": { "status": "pending", "completedAt": null, "evidence": [] },
+    "production_rollback": { "status": "pending", "completedAt": null, "evidence": [] },
+    "documentation_accuracy": { "status": "pending", "completedAt": null, "evidence": [] }
+  },
+  "soak": {
+    "startedAt": null,
+    "endedAt": null,
+    "stuckExecutions": null
+  }
+}

@@ -32,6 +32,7 @@ import { GoogleGenAI } from '@google/genai';
 import { getActiveProvider, invalidateProviderCache } from '@/lib/providers/model';
 import { getSecretSetting, isSecretSettingKey, redactSettings } from '@/lib/secrets';
 import { DEFAULT_GEMINI_MODEL, OPENAI_COMPATIBLE_BASE_URLS } from '@/lib/providers/catalog';
+import { redactSensitiveText } from '@/lib/security/redaction';
 import { hasConfiguredModelProvider } from '@/lib/runtime/runtime-mode';
 import { createAgentAction as createRuntimeAgentAction, decideApprovalOnce, fetchAgentActionsForMission } from '@/lib/runtime/agent-actions';
 import { recordProviderFailure, recordProviderSuccess } from '@/lib/runtime/provider-health';
@@ -1041,7 +1042,7 @@ export async function updateChatMessageAction(messageId: string, content: string
   try {
     const id = z.string().min(1).max(160).parse(messageId);
     const nextContent = z.string().min(1).max(12000).parse(content);
-    await dbClient.execute(`UPDATE Supr_Chat_Messages SET content = ? WHERE id = ?`, [nextContent, id]);
+    await dbClient.execute(`UPDATE Supr_Chat_Messages SET content = ? WHERE id = ?`, [redactSensitiveText(nextContent), id]);
     return { success: true };
   } catch (error) {
     console.error('Failed to update chat message:', error);
@@ -1259,7 +1260,13 @@ export async function sendChatMessageAction(
         INSERT INTO Supr_Chat_Messages (id, sender, content, file_name, file_type, file_content)
         VALUES (?, 'user', ?, ?, ?, ?)
       `;
-      await dbClient.execute(insertMsgSql, [userMsgId, content, file?.name || null, file?.type || null, file?.content || null]);
+      await dbClient.execute(insertMsgSql, [
+        userMsgId,
+        redactSensitiveText(content),
+        file?.name || null,
+        file?.type || null,
+        file?.content ? redactSensitiveText(file.content) : null,
+      ]);
     }
 
     // Concierge mode (Pass 3 polish): if the operator has the
@@ -1310,7 +1317,7 @@ export async function sendChatMessageAction(
         INSERT INTO Supr_Chat_Messages (id, sender, content)
         VALUES (?, 'supr', ?)
       `;
-      await dbClient.execute(insertSuprSql, [responseMessageId, finalContent]);
+      await dbClient.execute(insertSuprSql, [responseMessageId, redactSensitiveText(finalContent)]);
     }
 
     return {

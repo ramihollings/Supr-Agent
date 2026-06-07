@@ -15,6 +15,7 @@ components/external/
 test-results/
 playwright-report/
 playwright/.cache/
+release-evidence/
 
 # Local-only debug + tunneling artifacts
 test_keys_*.js
@@ -41,4 +42,3 @@ terraform/.terraform.lock.hcl.bak
 .vitest-cache/
 coverage/
 .vitest/
-

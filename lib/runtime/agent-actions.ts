@@ -4,6 +4,7 @@ import { PermissionEngine } from '@/lib/services/governance';
 import type { AgentActionInput, AgentActionRecord, AgentActionStatus, ExecutionResult } from './types';
 import { notifyMissionChanged } from '@/lib/events/bus';
 import { evaluateActionPolicy } from '@/lib/governance/action-policy';
+import { redactSensitive, redactSensitiveText, serializeRedacted } from '@/lib/security/redaction';
 
 function id(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -89,7 +90,7 @@ export async function recordRuntimeAudit(input: {
       input.targetType || null,
       input.targetId || null,
       input.riskLevel || null,
-      JSON.stringify(input.metadata || {}),
+      serializeRedacted(input.metadata || {}),
     ]
   );
 }
@@ -109,8 +110,8 @@ export async function emitActionTimelineEvent(
       'agent',
       action.agentId,
       eventType,
-      summary,
-      JSON.stringify({ detail, actionId: action.id, traceId: action.traceId, capability: action.capability }),
+      redactSensitiveText(summary),
+      serializeRedacted({ detail, actionId: action.id, traceId: action.traceId, capability: action.capability }),
     ]
   );
 }
@@ -129,13 +130,13 @@ export async function createAgentAction(input: AgentActionInput): Promise<AgentA
         input.taskId || null,
         input.agentId,
         input.capability,
-        input.intent,
-        JSON.stringify(input.inputs || {}),
+        redactSensitiveText(input.intent),
+        serializeRedacted(input.inputs || {}),
         input.riskLevel || 'Low',
         input.requiredPermission || 'Observe',
         'draft',
         traceId,
-        JSON.stringify(input.metadata || {}),
+        serializeRedacted(input.metadata || {}),
       ]
     );
   } catch (error: any) {
@@ -191,7 +192,7 @@ export async function evaluateAgentAction(actionId: string): Promise<ExecutionRe
   const actionPolicy = evaluateActionPolicy(action.capability, action.inputs || {}, action.requiredPermission);
 
   if (decision.status === 'Denied' || actionPolicy.outcome === 'deny') {
-    const reason = actionPolicy.outcome === 'deny' ? actionPolicy.reason : decision.reason;
+    const reason = redactSensitiveText(actionPolicy.outcome === 'deny' ? actionPolicy.reason : decision.reason);
     await dbClient.execute(
       `UPDATE Agent_Actions SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND status IN ('draft','failed')`,
@@ -204,7 +205,7 @@ export async function evaluateAgentAction(actionId: string): Promise<ExecutionRe
 
   if (decision.status === 'RequiresApproval' || actionPolicy.outcome === 'require_approval') {
     const approvalId = id('gate');
-    const reason = actionPolicy.outcome === 'require_approval' ? actionPolicy.reason : decision.reason;
+    const reason = redactSensitiveText(actionPolicy.outcome === 'require_approval' ? actionPolicy.reason : decision.reason);
     await dbClient.runTransaction([
       {
         sql: `UPDATE Agent_Actions SET status = 'pending_approval', updated_at = CURRENT_TIMESTAMP
@@ -287,16 +288,18 @@ export async function executeAgentAction<T>(
     if ((running.metadata as any)?.requiresEvidence && !hasExecutionEvidence(result)) {
       throw new Error('Agent action produced no durable work evidence. Completion rejected.');
     }
-    const serialized = typeof result === 'string' ? result : JSON.stringify(result);
+    const persistedResult = redactSensitive(result);
+    const serialized = typeof persistedResult === 'string' ? persistedResult : JSON.stringify(persistedResult);
     await updateActionStatus(actionId, 'completed', { result: serialized });
     const completed = await getAgentAction(actionId);
     if (completed) await emitActionTimelineEvent(completed, 'agent_action_completed', `Completed ${running.capability}`, running.intent);
     notifyMissionChanged(running.missionId, 'agent_action_completed');
-    return { status: 'completed', action: completed || running, result };
+    return { status: 'completed', action: completed || running, result: persistedResult };
   } catch (error: any) {
-    await updateActionStatus(actionId, 'failed', { error: error.message || String(error) });
+    const safeError = redactSensitiveText(error.message || String(error));
+    await updateActionStatus(actionId, 'failed', { error: safeError });
     const failed = await getAgentAction(actionId);
-    if (failed) await emitActionTimelineEvent(failed, 'agent_action_failed', `Failed ${running.capability}`, error.message || String(error));
+    if (failed) await emitActionTimelineEvent(failed, 'agent_action_failed', `Failed ${running.capability}`, safeError);
     notifyMissionChanged(running.missionId, 'agent_action_failed');
     throw error;
   }

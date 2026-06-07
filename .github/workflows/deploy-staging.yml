@@ -1,0 +1,258 @@
+name: Deploy Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: Google Cloud staging project ID
+        required: true
+        type: string
+      region:
+        description: Google Cloud region
+        required: true
+        default: us-central1
+        type: string
+      state_bucket:
+        description: Existing Terraform remote-state bucket
+        required: true
+        type: string
+      enable_gemini:
+        description: Enable the certified Gemini provider
+        required: true
+        default: false
+        type: boolean
+      enable_telegram:
+        description: Enable the certified Telegram channel
+        required: true
+        default: false
+        type: boolean
+      enable_github:
+        description: Enable the certified native GitHub adapter
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: supr-staging-deployment
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Terraform deploy and acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: staging
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: supr
+          POSTGRES_PASSWORD: supr-test-password
+          POSTGRES_DB: supr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U supr -d supr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PROJECT_ID: ${{ inputs.project_id }}
+      REGION: ${{ inputs.region }}
+      STATE_BUCKET: ${{ inputs.state_bucket }}
+      ENVIRONMENT: staging
+      REVISION: ${{ github.sha }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      TF_VAR_enable_gemini: ${{ inputs.enable_gemini }}
+      TF_VAR_enable_telegram: ${{ inputs.enable_telegram }}
+      TF_VAR_enable_github: ${{ inputs.enable_github }}
+      TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enforce main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Staging deployments are permitted only from main."
+          exit 1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ inputs.project_id }}
+          version: '>= 416.0.0'
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run complete application gate
+        env:
+          APP_PASSWORD: staging-preflight-password
+          AUTH_SECRET: staging-preflight-auth-secret
+        run: npm run test:prod
+
+      - name: Run PostgreSQL migration and runtime gate
+        env:
+          DATABASE_URL: postgres://supr:supr-test-password@127.0.0.1:5432/supr
+        run: npm run test:postgres
+
+      - name: Build exact staging candidate
+        run: |
+          echo "STAGING_IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/supr/supr:$GITHUB_SHA" >> "$GITHUB_ENV"
+          docker build --tag supr-staging:${GITHUB_SHA} .
+
+      - name: Scan exact staging candidate
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: supr-staging:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+      - name: Provision Terraform-owned deployment prerequisites
+        run: |
+          terraform -chdir=terraform init -backend-config="bucket=$STATE_BUCKET"
+          terraform -chdir=terraform apply \
+            -target=google_artifact_registry_repository.supr \
+            -target=google_secret_manager_secret.secrets \
+            -target=google_sql_database_instance.postgres \
+            -target=google_sql_database.supr \
+            -var="project_id=$PROJECT_ID" \
+            -var="region=$REGION" \
+            -var="environment=$ENVIRONMENT" \
+            -var="image=$STAGING_IMAGE"
+
+      - name: Provision secret versions outside Terraform state
+        shell: bash
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.SUPR_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          add_secret_version() {
+            local secret_id="$1"
+            local value="$2"
+            if [[ -z "$value" ]]; then
+              echo "Required value for $secret_id is empty."
+              exit 1
+            fi
+            printf '%s' "$value" | gcloud secrets versions add "$secret_id" --data-file=- --project="$PROJECT_ID" >/dev/null
+          }
+          add_secret_version DB_PASSWORD "$DB_PASSWORD"
+          add_secret_version APP_PASSWORD "$APP_PASSWORD"
+          add_secret_version AUTH_SECRET "$AUTH_SECRET"
+          if [[ "${{ inputs.enable_gemini }}" == "true" ]]; then add_secret_version GEMINI_API_KEY "$GEMINI_API_KEY"; fi
+          if [[ "${{ inputs.enable_telegram }}" == "true" ]]; then
+            add_secret_version TELEGRAM_BOT_TOKEN "$TELEGRAM_BOT_TOKEN"
+            add_secret_version TELEGRAM_WEBHOOK_SECRET "$TELEGRAM_WEBHOOK_SECRET"
+          fi
+          if [[ "${{ inputs.enable_github }}" == "true" ]]; then add_secret_version GITHUB_TOKEN "$GITHUB_TOKEN"; fi
+
+      - name: Configure staging PostgreSQL user outside Terraform state
+        shell: bash
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if ! gcloud sql users create supr --instance=supr-postgres --password="$DB_PASSWORD" --project="$PROJECT_ID" 2>/dev/null; then
+            gcloud sql users set-password supr --instance=supr-postgres --password="$DB_PASSWORD" --project="$PROJECT_ID"
+          fi
+
+      - name: Push exact scanned staging candidate
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker tag "supr-staging:${GITHUB_SHA}" "$STAGING_IMAGE"
+          docker push "$STAGING_IMAGE"
+
+      - name: Deploy staging through Terraform
+        env:
+          IMAGE: ${{ env.STAGING_IMAGE }}
+          SKIP_IMAGE_BUILD: 'true'
+          SKIP_ACCEPTANCE: 'true'
+        run: ./deploy.sh
+
+      - name: Capture staging endpoints
+        run: |
+          echo "SUPR_WEB_URL=$(terraform -chdir=terraform output -raw web_url)" >> "$GITHUB_ENV"
+          echo "CLOUD_SQL_CONNECTION_NAME=$(terraform -chdir=terraform output -raw cloud_sql_connection_name)" >> "$GITHUB_ENV"
+
+      - name: Start pinned Cloud SQL Auth Proxy
+        run: |
+          curl --fail --silent --show-error --location \
+            --output cloud-sql-proxy \
+            https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.20.0/cloud-sql-proxy.linux.amd64
+          chmod +x cloud-sql-proxy
+          ./cloud-sql-proxy --address 127.0.0.1 --port 5433 "$CLOUD_SQL_CONNECTION_NAME" > cloud-sql-proxy.log 2>&1 &
+          for attempt in {1..30}; do
+            if (echo > /dev/tcp/127.0.0.1/5433) 2>/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat cloud-sql-proxy.log
+          exit 1
+
+      - name: Bootstrap or verify staging PostgreSQL schema
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5433'
+          PGUSER: supr
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGDATABASE: supr
+        run: npm run db:schema:postgres -- --bootstrap-empty --output release-evidence/postgres-schema.json
+
+      - name: Evaluate durable runtime against staging PostgreSQL
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5433'
+          PGUSER: supr
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+          PGDATABASE: supr
+        run: |
+          npm run evaluate:durable-runtime -- --output release-evidence/durable-runtime-evaluation.json
+          npm run evaluate:durable-runtime:verify -- --input release-evidence/durable-runtime-evaluation.json --environment staging --revision "$GITHUB_SHA"
+
+      - name: Run deployed staging acceptance
+        run: npm run staging:accept -- --url "$SUPR_WEB_URL" --environment staging --revision "${GITHUB_SHA}" --output release-evidence/staging-acceptance.json
+
+      - name: Upload staging acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-acceptance-${{ github.run_id }}
+          path: |
+            release-evidence/staging-acceptance.json
+            release-evidence/postgres-schema.json
+            release-evidence/durable-runtime-evaluation.json
+            cloud-sql-proxy.log
+          if-no-files-found: error
+          retention-days: 90

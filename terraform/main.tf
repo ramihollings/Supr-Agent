@@ -4,6 +4,7 @@ provider "google" {
 }
 
 locals {
+  database_user = "supr"
   services = toset([
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
@@ -15,6 +16,17 @@ locals {
     "logging.googleapis.com",
     "secretmanager.googleapis.com",
   ])
+  web_secret_access = toset(concat(
+    ["DB_PASSWORD", "APP_PASSWORD", "AUTH_SECRET"],
+    var.enable_gemini ? ["GEMINI_API_KEY"] : [],
+    var.enable_telegram ? ["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET"] : [],
+    var.enable_github ? ["GITHUB_TOKEN"] : [],
+  ))
+  worker_secret_access = toset(concat(
+    ["DB_PASSWORD", "AUTH_SECRET"],
+    var.enable_gemini ? ["GEMINI_API_KEY"] : [],
+    var.enable_github ? ["GITHUB_TOKEN"] : [],
+  ))
 }
 
 resource "google_project_service" "required" {
@@ -81,12 +93,6 @@ resource "google_sql_database" "supr" {
   instance = google_sql_database_instance.postgres.name
 }
 
-resource "google_sql_user" "supr" {
-  name     = "supr"
-  instance = google_sql_database_instance.postgres.name
-  password = var.db_password
-}
-
 resource "google_storage_bucket" "artifacts" {
   name                        = "${var.project_id}-supr-artifacts"
   location                    = var.region
@@ -120,45 +126,6 @@ resource "google_secret_manager_secret" "secrets" {
   depends_on = [google_project_service.required]
 }
 
-resource "google_secret_manager_secret_version" "db_password" {
-  secret      = google_secret_manager_secret.secrets["DB_PASSWORD"].id
-  secret_data = var.db_password
-}
-
-resource "google_secret_manager_secret_version" "app_password" {
-  secret      = google_secret_manager_secret.secrets["APP_PASSWORD"].id
-  secret_data = var.app_password
-}
-
-resource "google_secret_manager_secret_version" "auth_secret" {
-  secret      = google_secret_manager_secret.secrets["AUTH_SECRET"].id
-  secret_data = var.auth_secret
-}
-
-resource "google_secret_manager_secret_version" "gemini" {
-  count       = var.enable_gemini ? 1 : 0
-  secret      = google_secret_manager_secret.secrets["GEMINI_API_KEY"].id
-  secret_data = var.gemini_api_key
-}
-
-resource "google_secret_manager_secret_version" "telegram_token" {
-  count       = var.enable_telegram ? 1 : 0
-  secret      = google_secret_manager_secret.secrets["TELEGRAM_BOT_TOKEN"].id
-  secret_data = var.telegram_bot_token
-}
-
-resource "google_secret_manager_secret_version" "telegram_secret" {
-  count       = var.enable_telegram ? 1 : 0
-  secret      = google_secret_manager_secret.secrets["TELEGRAM_WEBHOOK_SECRET"].id
-  secret_data = var.telegram_webhook_secret
-}
-
-resource "google_secret_manager_secret_version" "github_token" {
-  count       = var.enable_github ? 1 : 0
-  secret      = google_secret_manager_secret.secrets["GITHUB_TOKEN"].id
-  secret_data = var.github_token
-}
-
 resource "google_project_iam_member" "sql_client" {
   for_each = toset([google_service_account.web.email, google_service_account.worker.email])
   project  = var.project_id
@@ -166,11 +133,20 @@ resource "google_project_iam_member" "sql_client" {
   member   = "serviceAccount:${each.value}"
 }
 
-resource "google_project_iam_member" "secret_accessor" {
-  for_each = toset([google_service_account.web.email, google_service_account.worker.email])
-  project  = var.project_id
-  role     = "roles/secretmanager.secretAccessor"
-  member   = "serviceAccount:${each.value}"
+resource "google_secret_manager_secret_iam_member" "web_secret_accessor" {
+  for_each  = local.web_secret_access
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.secrets[each.value].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "worker_secret_accessor" {
+  for_each  = local.worker_secret_access
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.secrets[each.value].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.worker.email}"
 }
 
 resource "google_storage_bucket_iam_member" "artifact_access" {
@@ -218,7 +194,10 @@ resource "google_cloud_run_v2_service" "worker" {
   location            = var.region
   deletion_protection = var.environment == "production"
   ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
-  depends_on          = [google_project_service.required]
+  depends_on = [
+    google_project_service.required,
+    google_secret_manager_secret_iam_member.worker_secret_accessor,
+  ]
 
   template {
     service_account                  = google_service_account.worker.email
@@ -232,6 +211,26 @@ resource "google_cloud_run_v2_service" "worker" {
       image = var.image
       resources {
         limits = { cpu = "2", memory = "4Gi" }
+      }
+      startup_probe {
+        initial_delay_seconds = 0
+        timeout_seconds       = 5
+        period_seconds        = 5
+        failure_threshold     = 24
+        http_get {
+          path = "/api/health/live"
+          port = 3001
+        }
+      }
+      liveness_probe {
+        initial_delay_seconds = 10
+        timeout_seconds       = 5
+        period_seconds        = 30
+        failure_threshold     = 3
+        http_get {
+          path = "/api/health/live"
+          port = 3001
+        }
       }
       env {
         name  = "SUPR_SERVICE_ROLE"
@@ -251,7 +250,7 @@ resource "google_cloud_run_v2_service" "worker" {
       }
       env {
         name  = "PGUSER"
-        value = google_sql_user.supr.name
+        value = local.database_user
       }
       env {
         name  = "PGDATABASE"
@@ -328,7 +327,10 @@ resource "google_cloud_run_v2_service" "web" {
   location            = var.region
   deletion_protection = var.environment == "production"
   ingress             = "INGRESS_TRAFFIC_ALL"
-  depends_on          = [google_project_service.required]
+  depends_on = [
+    google_project_service.required,
+    google_secret_manager_secret_iam_member.web_secret_accessor,
+  ]
 
   template {
     service_account                  = google_service_account.web.email
@@ -342,6 +344,26 @@ resource "google_cloud_run_v2_service" "web" {
       image = var.image
       resources {
         limits = { cpu = "2", memory = "2Gi" }
+      }
+      startup_probe {
+        initial_delay_seconds = 0
+        timeout_seconds       = 5
+        period_seconds        = 5
+        failure_threshold     = 24
+        http_get {
+          path = "/api/health/live"
+          port = 3001
+        }
+      }
+      liveness_probe {
+        initial_delay_seconds = 10
+        timeout_seconds       = 5
+        period_seconds        = 30
+        failure_threshold     = 3
+        http_get {
+          path = "/api/health/live"
+          port = 3001
+        }
       }
       env {
         name  = "SUPR_SERVICE_ROLE"
@@ -357,7 +379,7 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "PGUSER"
-        value = google_sql_user.supr.name
+        value = local.database_user
       }
       env {
         name  = "PGDATABASE"

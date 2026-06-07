@@ -40,6 +40,7 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       NODE_ENV: "production",
+      SUPR_ALLOW_PRODUCTION_SQLITE_FOR_TESTS: "true",
       APP_PASSWORD,
       AUTH_SECRET,
       PORT: String(PORT),

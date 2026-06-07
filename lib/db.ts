@@ -1,6 +1,7 @@
 import dbClient from './database/db_client';
 import crypto from 'crypto';
 import { DatabaseSchema, Mission, Agent, TaskStatus, ActivityEvent, FailureEvent, Artifact, MemoryItem, Phase, Task } from '@/types';
+import { redactSensitiveText, serializeRedacted } from '@/lib/security/redaction';
 
 // Backward compatibility stub for initialization
 export async function ensureDbExists() {
@@ -478,26 +479,28 @@ export async function updateTaskStatus(missionId: string, taskId: string, status
 
 export async function addArtifact(missionId: string, artifact: Omit<Artifact, 'id'>): Promise<void> {
   const id = newId('art');
+  const safeContent = redactSensitiveText(artifact.content);
   const sql = `
     INSERT INTO Artifacts (id, mission_id, type, title, content)
     VALUES (?, ?, ?, ?, ?)
   `;
-  await dbClient.execute(sql, [id, missionId, artifact.type, artifact.filename, artifact.content]);
+  await dbClient.execute(sql, [id, missionId, artifact.type, artifact.filename, safeContent]);
   const versionId = newId('av');
   await dbClient.execute(
     `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [versionId, id, missionId, artifact.filename, artifact.type, artifact.content, 1, 'draft', 'Supr', `${artifact.content.split('\n').length} lines created`]
+    [versionId, id, missionId, artifact.filename, artifact.type, safeContent, 1, 'draft', 'Supr', `${safeContent.split('\n').length} lines created`]
   );
   const { syncArtifactVersionToGcs } = await import('@/lib/services/artifact-storage');
   await syncArtifactVersionToGcs(versionId);
 }
 
 export async function updateArtifact(missionId: string, title: string, content: string): Promise<void> {
+  const safeContent = redactSensitiveText(content);
   const artifact = await dbClient.queryOne<any>(`SELECT * FROM Artifacts WHERE mission_id = ? AND title = ?`, [missionId, title]);
   const latest = await dbClient.queryOne<any>(`SELECT MAX(version) as version FROM Artifact_Versions WHERE mission_id = ? AND title = ?`, [missionId, title]);
   const sql = `UPDATE Artifacts SET content = ? WHERE mission_id = ? AND title = ?`;
-  await dbClient.execute(sql, [content, missionId, title]);
+  await dbClient.execute(sql, [safeContent, missionId, title]);
   const versionId = newId('av');
   await dbClient.execute(
     `INSERT INTO Artifact_Versions (id, artifact_id, mission_id, title, type, content, version, status, generated_by, diff_summary)
@@ -508,11 +511,11 @@ export async function updateArtifact(missionId: string, title: string, content: 
       missionId,
       title,
       artifact?.type || 'markdown',
-      content,
+      safeContent,
       Number(latest?.version || 0) + 1,
       'draft',
       'Code Agent',
-      `${content.split('\n').length} lines updated`
+      `${safeContent.split('\n').length} lines updated`
     ]
   );
   const { syncArtifactVersionToGcs } = await import('@/lib/services/artifact-storage');
@@ -528,7 +531,7 @@ export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'i
     newId('mem'),
     missionId, 
     'semantic', 
-    JSON.stringify({ key: item.key, value: item.value }),
+    serializeRedacted({ key: item.key, value: item.value }),
     item.importance === 'High' ? 0.8 : 0.5
   ]);
 }

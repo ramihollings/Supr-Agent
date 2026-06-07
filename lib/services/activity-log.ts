@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import dbClient from "../../lib/database/db_client";
+import { redactSensitiveText, serializeRedacted } from "../../lib/security/redaction";
 
 export interface AuditLogEntry {
   missionId?: string;
@@ -27,7 +28,7 @@ export class ActivityLogService {
    */
   async logAudit(entry: AuditLogEntry): Promise<void> {
     const id = `audit-${crypto.randomUUID()}`;
-    const metadataJson = JSON.stringify(entry.metadata || {});
+    const metadataJson = serializeRedacted(entry.metadata || {});
 
     await dbClient.execute(
       `INSERT INTO Audit_Log (id, mission_id, actor_type, actor_id, action, target_type, target_id, risk_level, metadata, created_at)
@@ -51,7 +52,7 @@ export class ActivityLogService {
    */
   async logEvent(entry: EventLogEntry): Promise<void> {
     const id = `evt-${crypto.randomUUID()}`;
-    const metadataJson = JSON.stringify(entry.metadata || {});
+    const metadataJson = serializeRedacted(entry.metadata || {});
 
     await dbClient.execute(
       `INSERT INTO Event_Log (id, mission_id, actor_type, actor_id, event_type, summary, metadata, timestamp)
@@ -62,7 +63,7 @@ export class ActivityLogService {
         entry.actorType,
         entry.actorId,
         entry.eventType,
-        entry.summary,
+        redactSensitiveText(entry.summary),
         metadataJson
       ]
     );

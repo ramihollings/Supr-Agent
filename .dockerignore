@@ -18,6 +18,7 @@ data/workspaces
 data/agents/*.db
 data/agents/*.db-shm
 data/agents/*.db-wal
+tests
 .env.local
 .env.development.local
 .env.test.local

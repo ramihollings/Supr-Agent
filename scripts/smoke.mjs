@@ -133,6 +133,7 @@ async function main() {
       env: {
         ...process.env,
         NODE_ENV: "production",
+        SUPR_ALLOW_PRODUCTION_SQLITE_FOR_TESTS: "true",
         APP_PASSWORD: SMOKE_PASSWORD,
         AUTH_SECRET,
         PORT: String(PORT),
