@@ -44,10 +44,12 @@
       "id": "github-mcp",
       "name": "GitHub",
       "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
       "required_tier": "Edit",
       "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
-      "description": "Beta GitHub MCP entry. Disabled until a pinned executable passes adapter certification.",
-      "enabled": false
+      "description": "GitHub MCP server for Automated Code Review and DevOps operations.",
+      "enabled": true
     },
     {
       "id": "postgres-mcp",

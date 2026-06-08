@@ -8,6 +8,7 @@ import { skillLearningService } from '@/lib/services/skill-learning';
 import { executeAgentAction, getAgentAction } from './agent-actions';
 import { assembleAgentContext } from './context-assembler';
 import { getRuntimeMode } from './runtime-mode';
+import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
 import { parseModelJson } from './model-json';
 import {
   DEFAULT_RUNTIME_BUDGET,
@@ -365,292 +366,313 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
       }));
 
       const maxSteps = budget.maxSteps;
-      for (let step = 0; step < maxSteps; step += 1) {
-        assertNotCancelled(normalized);
-        if (Date.now() >= deadline) {
-          throw new Error(`Runtime timeout exceeded after ${Date.now() - startedAt}ms.`);
-        }
-        const raw = await withRuntimeTimeout(getModelResponse({
-          action,
-          context,
-          toolResults,
-          runId,
-          mode,
-          deadline,
-          transcriptIds,
-          budget,
-          usageSink: lastModelUsage,
-        }), deadline, 'model response');
-        // Capture the provider+model used for the most recent model call
-        // so the cost event below can attribute the spend correctly.
-        // inferProviderRole + the runtime are intentionally lossy here:
-        // we just need the model name for cost attribution, not for
-        // re-routing.
-        lastProviderName = inferProviderRole(action.capability, action.intent);
-        lastModelName = action.capability;
-        // Phase 4D: record the cost event for THIS model call. Real
-        // token counts come from the provider's usage payload; when
-        // the provider doesn't report usage the sink holds an estimate.
-        try {
-          await costTracker.recordCostEvent({
-            missionId: action.missionId || undefined,
-            agentId: action.agentId || undefined,
-            taskId: action.taskId || undefined,
-            agentRunId: runId || undefined,
-            provider: lastProviderName,
-            model: lastModelName,
-            inputTokens: lastModelUsage.inputTokens,
-            outputTokens: lastModelUsage.outputTokens,
-            reported: lastModelUsage.reported,
-          });
-        } catch (costError: any) {
-          // Cost recording must never fail a run; the budget engine
-          // would have thrown a typed `budget_exceeded` error which
-          // we propagate, everything else we warn and continue.
-          if (costError?.code === 'budget_exceeded') throw costError;
-          telemetry.warn('runtime.cost_record_failed', { reason: redactSensitiveText(costError?.message || String(costError)) });
-        }
-        const response = parseModelToolResponse(raw);
 
-        // Phase 2C: record a heartbeat step so the chat UI can show
-        // `step N of M, currently calling tool X`. We capture the
-        // raw model step count from `step` plus the response kind.
-        try {
-          await appendAgentRunStep({
-            runId,
-            step,
-            event: response.type === 'final' ? 'final' : response.type === 'message' ? 'model_thinking' : 'model_thinking',
-            detail: {
-              kind: response.type,
-              modelChars: raw.length,
-            },
-          });
-        } catch {
-          // Heartbeat writes are best-effort; never fail a run.
-        }
+      const AgentState = Annotation.Root({
+        step: Annotation<number>({ reducer: (x, y) => y }),
+        toolResults: Annotation<Array<{ invocationId: string; toolName: string; output: unknown }>>({ reducer: (x, y) => y }),
+        evidence: Annotation<Record<string, string[]>>({ reducer: (x, y) => y }),
+        logs: Annotation<string[]>({ reducer: (x, y) => y }),
+        transcriptIds: Annotation<string[]>({ reducer: (x, y) => y }),
+        metricIds: Annotation<string[]>({ reducer: (x, y) => y }),
+        lastModelUsage: Annotation<{ inputTokens: number; outputTokens: number; reported: boolean }>({ reducer: (x, y) => y }),
+        response: Annotation<any>({ reducer: (x, y) => y }),
+        result: Annotation<any>({ reducer: (x, y) => y }),
+        error: Annotation<any>({ reducer: (x, y) => y })
+      });
 
-        if (response.type === 'invalid') {
-          transcriptIds.push(await recordStep({
-            missionId: action.missionId,
-            agentId: action.agentId,
-            runId,
-            eventType: 'runtime_failure',
-            summary: response.reason,
-            metadata: { step, raw: response.raw?.slice(0, 1000), mode },
-          }));
-          throw new Error(response.reason);
-        }
-        if (response.type === 'needs_approval') {
-          transcriptIds.push(await recordStep({
-            missionId: action.missionId,
-            agentId: action.agentId,
-            runId,
-            eventType: 'runtime_approval',
-            summary: response.reason,
-            metadata: { step, mode },
-          }));
-          throw new Error(`Runtime requested approval: ${response.reason}`);
-        }
-        if (response.type === 'message') {
-          transcriptIds.push(await recordStep({
-            missionId: action.missionId,
-            agentId: action.agentId,
-            runId,
-            eventType: 'runtime_model',
-            summary: response.content,
-            metadata: { step },
-          }));
-          logs.push(redactSensitiveText(response.content));
-          continue;
-        }
-        if (response.type === 'final') {
-          mergeEvidence(evidence, response.evidence as Record<string, string[]>);
-          if (!hasCompletionEvidence(evidence)) {
-            throw new Error('Runtime final response had no durable evidence.');
+      const graph = new StateGraph(AgentState)
+        .addNode('agent', async (state) => {
+          assertNotCancelled(normalized);
+          if (Date.now() >= deadline) {
+            return { error: new Error(`Runtime timeout exceeded after ${Date.now() - startedAt}ms.`) };
           }
-          const finalEventId = await recordStep({
-            missionId: action.missionId,
-            agentId: action.agentId,
+          if (state.step >= maxSteps) {
+            return { error: new Error(`Runtime exceeded max step budget (${maxSteps}) without final evidence.`) };
+          }
+
+          const raw = await withRuntimeTimeout(getModelResponse({
+            action,
+            context,
+            toolResults: state.toolResults,
             runId,
-            eventType: 'runtime_final',
-            summary: response.summary,
-            metadata: { evidence, mode },
-          });
-          transcriptIds.push(finalEventId);
-          evidence.events.push(finalEventId);
-          const result = {
-            summary: response.summary,
             mode,
-            agentRunId: runId,
-            transcriptIds,
-            evidence,
-            injectedSections: context.injectedSections,
-          };
-          await updateAgentRun(runId, 'completed', result, undefined, logs);
+            deadline,
+            transcriptIds: state.transcriptIds,
+            budget,
+            usageSink: state.lastModelUsage,
+          }), deadline, 'model response');
 
-          // Phase 1D: persist a short Memory_Section so the next
-          // session/iteration of this mission sees what was decided.
-          // We do this best-effort: a failure to write memory must
-          // not fail the run, so we wrap in try/catch. The section
-          // title is the action capability, the body is the
-          // final summary plus the durable evidence ids so a later
-          // session can audit what was done.
+          lastProviderName = inferProviderRole(action.capability, action.intent);
+          lastModelName = action.capability;
+
           try {
-            await memorySectionService.upsert({
+            await costTracker.recordCostEvent({
+              missionId: action.missionId || undefined,
+              agentId: action.agentId || undefined,
+              taskId: action.taskId || undefined,
+              agentRunId: runId || undefined,
+              provider: lastProviderName,
+              model: lastModelName,
+              inputTokens: state.lastModelUsage.inputTokens,
+              outputTokens: state.lastModelUsage.outputTokens,
+              reported: state.lastModelUsage.reported,
+            });
+          } catch (costError: any) {
+            if (costError?.code === 'budget_exceeded') return { error: costError };
+            telemetry.warn('runtime.cost_record_failed', { reason: redactSensitiveText(costError?.message || String(costError)) });
+          }
+          
+          const response = parseModelToolResponse(raw);
+
+          try {
+            await appendAgentRunStep({
+              runId,
+              step: state.step,
+              event: response.type === 'final' ? 'final' : response.type === 'message' ? 'model_thinking' : 'model_thinking',
+              detail: {
+                kind: response.type,
+                modelChars: raw.length,
+              },
+            });
+          } catch {}
+
+          if (response.type === 'invalid') {
+            state.transcriptIds.push(await recordStep({
               missionId: action.missionId,
-              title: `Run ${action.id.slice(0, 8)}: ${action.capability}`,
-            content: [
-                `Summary: ${redactSensitiveText(response.summary)}`,
-                `Evidence: artifacts=${(evidence.artifacts || []).length} toolCalls=${(evidence.toolCalls || []).length} events=${(evidence.events || []).length}`,
-                `Mode: ${mode}`,
-              ].join('\n'),
-              provenance: 'agent',
-              injectionStatus: 'active',
-            });
-          } catch (memoryError: any) {
-            telemetry.warn('runtime.memory_persist_failed', {
-              actionId: action.id,
-              reason: redactSensitiveText(memoryError?.message || String(memoryError)),
-            });
+              agentId: action.agentId,
+              runId,
+              eventType: 'runtime_failure',
+              summary: response.reason,
+              metadata: { step: state.step, raw: response.raw?.slice(0, 1000), mode },
+            }));
+            return { error: new Error(response.reason) };
           }
-          const learnedSkillDraft = await skillLearningService.evaluateCompletedRun(runId);
-          if (learnedSkillDraft?.status === 'draft') {
-            await skillLearningService.requestSecurityReview(learnedSkillDraft.id);
+          if (response.type === 'needs_approval') {
+            state.transcriptIds.push(await recordStep({
+              missionId: action.missionId,
+              agentId: action.agentId,
+              runId,
+              eventType: 'runtime_approval',
+              summary: response.reason,
+              metadata: { step: state.step, mode },
+            }));
+            return { error: new Error(`Runtime requested approval: ${response.reason}`) };
           }
-          const metric = await operationalMetrics.record({
+          if (response.type === 'message') {
+            state.transcriptIds.push(await recordStep({
+              missionId: action.missionId,
+              agentId: action.agentId,
+              runId,
+              eventType: 'runtime_model',
+              summary: response.content,
+              metadata: { step: state.step },
+            }));
+            state.logs.push(redactSensitiveText(response.content));
+            return { response, step: state.step + 1 };
+          }
+          if (response.type === 'final') {
+            mergeEvidence(state.evidence, response.evidence as Record<string, string[]>);
+            if (!hasCompletionEvidence(state.evidence)) {
+              return { error: new Error('Runtime final response had no durable evidence.') };
+            }
+            const finalEventId = await recordStep({
+              missionId: action.missionId,
+              agentId: action.agentId,
+              runId,
+              eventType: 'runtime_final',
+              summary: response.summary,
+              metadata: { evidence: state.evidence, mode },
+            });
+            state.transcriptIds.push(finalEventId);
+            state.evidence.events.push(finalEventId);
+            const result = {
+              summary: response.summary,
+              mode,
+              agentRunId: runId,
+              transcriptIds: state.transcriptIds,
+              evidence: state.evidence,
+              injectedSections: context.injectedSections,
+            };
+            await updateAgentRun(runId, 'completed', result, undefined, state.logs);
+
+            try {
+              await memorySectionService.upsert({
+                missionId: action.missionId,
+                title: `Run ${action.id.slice(0, 8)}: ${action.capability}`,
+                content: [
+                  `Summary: ${redactSensitiveText(response.summary)}`,
+                  `Evidence: artifacts=${(state.evidence.artifacts || []).length} toolCalls=${(state.evidence.toolCalls || []).length} events=${(state.evidence.events || []).length}`,
+                  `Mode: ${mode}`,
+                ].join('\n'),
+                provenance: 'agent',
+                injectionStatus: 'active',
+              });
+            } catch (memoryError: any) {
+              telemetry.warn('runtime.memory_persist_failed', {
+                actionId: action.id,
+                reason: redactSensitiveText(memoryError?.message || String(memoryError)),
+              });
+            }
+            const learnedSkillDraft = await skillLearningService.evaluateCompletedRun(runId);
+            if (learnedSkillDraft?.status === 'draft') {
+              await skillLearningService.requestSecurityReview(learnedSkillDraft.id);
+            }
+            const metric = await operationalMetrics.record({
+              missionId: action.missionId,
+              agentId: action.agentId,
+              eventType: 'outcome',
+              outcome: 'completed',
+              durationMs: Date.now() - startedAt,
+              metadata: { capability: action.capability, mode },
+            });
+            state.metricIds.push(metric.id);
+            return { result, response, step: state.step + 1 };
+          }
+          
+          return { response, step: state.step + 1 };
+        })
+        .addNode('tool', async (state) => {
+          const response = state.response;
+          state.transcriptIds.push(await recordStep({
             missionId: action.missionId,
             agentId: action.agentId,
-            eventType: 'outcome',
-            outcome: 'completed',
-            durationMs: Date.now() - startedAt,
-            metadata: { capability: action.capability, mode },
-          });
-          metricIds.push(metric.id);
-          return result;
-        }
-
-        transcriptIds.push(await recordStep({
-          missionId: action.missionId,
-          agentId: action.agentId,
-          runId,
-          eventType: 'runtime_tool',
-          summary: `Calling ${response.toolName}`,
-          metadata: { step, rationale: response.rationale },
-        }));
-        // Phase 2C: bump the heartbeat for tool_called so the
-        // chat UI's in-flight tool strip can show which tool is
-        // currently running.
-        try {
-          await appendAgentRunStep({
             runId,
-            step,
-            event: 'tool_calling',
-            detail: { toolName: response.toolName },
+            eventType: 'runtime_tool',
+            summary: `Calling ${response.toolName}`,
+            metadata: { step: state.step - 1, rationale: response.rationale },
+          }));
+          try {
+            await appendAgentRunStep({
+              runId,
+              step: state.step - 1,
+              event: 'tool_calling',
+              detail: { toolName: response.toolName },
+            });
+          } catch {}
+          sessionEventBus.emitEvent({
+            sessionId: '',
+            missionId: action.missionId,
+            kind: 'tool_called',
+            at: new Date().toISOString(),
+            data: redactSensitive({ agentId: action.agentId, toolName: response.toolName, args: response.arguments, step: state.step - 1 }) as Record<string, unknown>,
           });
-        } catch {}
-        // Phase 1B: notify session bus that a tool call is starting.
-        sessionEventBus.emitEvent({
-          sessionId: '',
-          missionId: action.missionId,
-          kind: 'tool_called',
-          at: new Date().toISOString(),
-          data: redactSensitive({ agentId: action.agentId, toolName: response.toolName, args: response.arguments, step }) as Record<string, unknown>,
-        });
 
-        const invocationId = await recordToolInvocation({
-          missionId: action.missionId,
-          flowRunId: normalized.flowRunId || null,
-          agentRunId: runId,
-          agentActionId: action.id,
-          agentId: action.agentId,
-          toolName: response.toolName,
-          args: response.arguments,
-        });
-        try {
-          let output: unknown;
-          let lastError: any;
-          for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
-            try {
-              assertNotCancelled(normalized);
-              const adapterResult = await withRuntimeTimeout(
-                integrationRegistry.execute(response.toolName, {
-                  sessionId: normalized.sessionId,
-                  agentId: action.agentId,
-                  missionId: action.missionId,
-                  agentActionId: action.id,
-                }, response.arguments),
-                deadline,
-                `${response.toolName} tool call`,
-              );
-              if (!adapterResult.ok) {
-                const adapterError = new Error(adapterResult.error || `${response.toolName} adapter failed.`);
-                (adapterError as any).detail = adapterResult.errorDetail;
-                throw adapterError;
-              }
-              output = adapterResult.output;
-              if (!hasMeaningfulToolOutput(output)) {
-                throw new Error(`${response.toolName} returned empty output; refusing to treat it as durable execution evidence.`);
-              }
-              if (attempt > 0) {
-                transcriptIds.push(await recordStep({
+          const invocationId = await recordToolInvocation({
+            missionId: action.missionId,
+            flowRunId: normalized.flowRunId || null,
+            agentRunId: runId,
+            agentActionId: action.id,
+            agentId: action.agentId,
+            toolName: response.toolName,
+            args: response.arguments,
+          });
+
+          try {
+            let output: unknown;
+            let lastError: any;
+            for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+              try {
+                assertNotCancelled(normalized);
+                const adapterResult = await withRuntimeTimeout(
+                  integrationRegistry.execute(response.toolName, {
+                    sessionId: normalized.sessionId,
+                    agentId: action.agentId,
+                    missionId: action.missionId,
+                    agentActionId: action.id,
+                  }, response.arguments),
+                  deadline,
+                  `${response.toolName} tool call`,
+                );
+                if (!adapterResult.ok) {
+                  const adapterError = new Error(adapterResult.error || `${response.toolName} adapter failed.`);
+                  (adapterError as any).detail = adapterResult.errorDetail;
+                  throw adapterError;
+                }
+                output = adapterResult.output;
+                if (!hasMeaningfulToolOutput(output)) {
+                  throw new Error(`${response.toolName} returned empty output; refusing to treat it as durable execution evidence.`);
+                }
+                if (attempt > 0) {
+                  state.transcriptIds.push(await recordStep({
+                    missionId: action.missionId,
+                    agentId: action.agentId,
+                    runId,
+                    eventType: 'runtime_warning',
+                    summary: `${response.toolName} succeeded on retry ${attempt}.`,
+                    metadata: { step: state.step - 1, attempt, retryLimit },
+                  }));
+                }
+                break;
+              } catch (error: any) {
+                lastError = error;
+                if (attempt >= retryLimit) throw error;
+                state.transcriptIds.push(await recordStep({
                   missionId: action.missionId,
                   agentId: action.agentId,
                   runId,
                   eventType: 'runtime_warning',
-                  summary: `${response.toolName} succeeded on retry ${attempt}.`,
-                  metadata: { step, attempt, retryLimit },
+                  summary: `${response.toolName} failed attempt ${attempt + 1}; retrying after backoff.`,
+                  metadata: { step: state.step - 1, attempt: attempt + 1, retryLimit, reason: redactSensitiveText(error.message || String(error)) },
                 }));
+                await backoffSleepMs(attempt);
               }
-              break;
-            } catch (error: any) {
-              lastError = error;
-              if (attempt >= retryLimit) throw error;
-              transcriptIds.push(await recordStep({
-                missionId: action.missionId,
-                agentId: action.agentId,
-                runId,
-                eventType: 'runtime_warning',
-                summary: `${response.toolName} failed attempt ${attempt + 1}; retrying after backoff.`,
-                metadata: { step, attempt: attempt + 1, retryLimit, reason: redactSensitiveText(error.message || String(error)) },
-              }));
-              // Phase 4E: exponential backoff between retries. This is
-              // best-effort; the runtime honors the deadline at the
-              // top of the loop so a long backoff won't extend past
-              // the budgeted runtime.
-              await backoffSleepMs(attempt);
             }
+            if (output === undefined) throw lastError || new Error(`${response.toolName} produced no output.`);
+            await completeToolInvocation(invocationId, output);
+            state.toolResults.push({ invocationId, toolName: response.toolName, output });
+            state.evidence.toolCalls.push(invocationId);
+            const parsedOutput = typeof output === 'string' ? safeJson<Record<string, any>>(output, {}) : output as Record<string, any>;
+            if (parsedOutput?.evidence) mergeEvidence(state.evidence, parsedOutput.evidence);
+            state.logs.push(`${response.toolName} completed`);
+            sessionEventBus.emitEvent({
+              sessionId: '',
+              missionId: action.missionId,
+              kind: 'tool_completed',
+              at: new Date().toISOString(),
+              data: { agentId: action.agentId, toolName: response.toolName, invocationId, hasOutput: output !== undefined },
+            });
+            const metric = await operationalMetrics.record({
+              missionId: action.missionId,
+              agentId: action.agentId,
+              eventType: 'tool',
+              outcome: 'completed',
+              durationMs: Date.now() - startedAt,
+              metadata: { toolName: response.toolName, mode },
+            });
+            state.metricIds.push(metric.id);
+            return {};
+          } catch (error: any) {
+            await completeToolInvocation(invocationId, error.commandResult || null, error.message || String(error));
+            return { error };
           }
-          if (output === undefined) throw lastError || new Error(`${response.toolName} produced no output.`);
-          await completeToolInvocation(invocationId, output);
-          toolResults.push({ invocationId, toolName: response.toolName, output });
-          evidence.toolCalls.push(invocationId);
-          const parsedOutput = typeof output === 'string' ? safeJson<Record<string, any>>(output, {}) : output as Record<string, any>;
-          if (parsedOutput?.evidence) mergeEvidence(evidence, parsedOutput.evidence);
-          logs.push(`${response.toolName} completed`);
-          // Phase 1B: notify session bus that a tool call has finished.
-          sessionEventBus.emitEvent({
-            sessionId: '',
-            missionId: action.missionId,
-            kind: 'tool_completed',
-            at: new Date().toISOString(),
-            data: { agentId: action.agentId, toolName: response.toolName, invocationId, hasOutput: output !== undefined },
-          });
-          const metric = await operationalMetrics.record({
-            missionId: action.missionId,
-            agentId: action.agentId,
-            eventType: 'tool',
-            outcome: 'completed',
-            durationMs: Date.now() - startedAt,
-            metadata: { toolName: response.toolName, mode },
-          });
-          metricIds.push(metric.id);
-        } catch (error: any) {
-          await completeToolInvocation(invocationId, error.commandResult || null, error.message || String(error));
-          throw error;
-        }
-      }
+        })
+        .addConditionalEdges('agent', (state) => {
+          if (state.error || state.result) return END;
+          if (state.response?.type === 'tool_call') return 'tool';
+          return 'agent';
+        })
+        .addEdge('tool', 'agent')
+        .addEdge(START, 'agent')
+        .compile();
 
-      throw new Error(`Runtime exceeded max step budget (${maxSteps}) without final evidence.`);
+      const finalState = await graph.invoke({
+        step: 0,
+        toolResults,
+        evidence,
+        logs,
+        transcriptIds,
+        metricIds,
+        lastModelUsage,
+        response: null,
+        result: null,
+        error: null
+      });
+
+      if (finalState.error) {
+        throw finalState.error;
+      }
+      
+      return finalState.result;
     } catch (error: any) {
       await updateAgentRun(runId, 'failed', undefined, error.message || String(error), logs);
       const metric = await operationalMetrics.record({
