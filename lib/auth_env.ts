@@ -1,3 +1,10 @@
+if (process.env.APP_PASSWORD) {
+  process.env.APP_PASSWORD = process.env.APP_PASSWORD.trim();
+}
+if (process.env.AUTH_SECRET) {
+  process.env.AUTH_SECRET = process.env.AUTH_SECRET.trim();
+}
+
 let productionEnvResult: { ok: true } | { ok: false; reason: string } | null = null;
 
 /**

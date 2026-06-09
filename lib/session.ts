@@ -1,3 +1,10 @@
+if (process.env.APP_PASSWORD) {
+  process.env.APP_PASSWORD = process.env.APP_PASSWORD.trim();
+}
+if (process.env.AUTH_SECRET) {
+  process.env.AUTH_SECRET = process.env.AUTH_SECRET.trim();
+}
+
 import { NextResponse } from 'next/server';
 
 export const SESSION_COOKIE = 'supr_auth_token';

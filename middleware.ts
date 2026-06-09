@@ -1,3 +1,10 @@
+if (process.env.APP_PASSWORD) {
+  process.env.APP_PASSWORD = process.env.APP_PASSWORD.trim();
+}
+if (process.env.AUTH_SECRET) {
+  process.env.AUTH_SECRET = process.env.AUTH_SECRET.trim();
+}
+
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifySessionToken } from '@/lib/session';
