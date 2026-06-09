@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { runAgentRuntimeAction } from '../lib/runtime/agent-runtime-runner';
 import { v4 as uuidv4 } from 'uuid';
 import dbClient from '../lib/database/db_client';
@@ -39,13 +38,10 @@ async function runDemo() {
   };
 
   try {
-    const result = await runAgentRuntimeAction(action as any, {
-      evidenceStore: {},
-      metricsTracker: {} as any,
-    } as any, { maxSteps: 10, timeoutMs: 60000 });
+    const result = await runAgentRuntimeAction(action as any);
 
     console.log('\n--- Demo Complete ---');
-    console.log('Result Summary:', result.summary);
+    console.log('Result Summary:', (result as any).summary || result);
   } catch (err: any) {
     console.error('Demo Failed:', err.message);
   }

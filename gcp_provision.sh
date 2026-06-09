@@ -100,13 +100,16 @@ fi
 APP_PW=$(openssl rand -hex 12)
 create_secret "APP_PASSWORD" "$APP_PW"
 
+AUTH_SECRET=$(openssl rand -hex 32)
+create_secret "AUTH_SECRET" "$AUTH_SECRET"
+
 # 5. Create GKE Autopilot Cluster with gVisor agent sandboxing enabled
 echo "Creating GKE Autopilot Cluster (supr-cluster)..."
 if gcloud container clusters describe supr-cluster --region=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
   echo "GKE Cluster supr-cluster already exists."
 else
   # --enable-agent-sandbox activates gVisor runsc kernel isolation on Autopilot
-  gcloud container clusters create-auto supr-cluster \
+  gcloud beta container clusters create-auto supr-cluster \
     --region=$REGION \
     --enable-agent-sandbox \
     --project=$PROJECT_ID
@@ -123,6 +126,7 @@ kubectl create secret generic supr-secrets \
   --from-literal=DATABASE_URL="$DATABASE_URL" \
   --from-literal=GEMINI_API_KEY="${GEMINI_API_KEY:-change-me-later}" \
   --from-literal=APP_PASSWORD="$APP_PW" \
+  --from-literal=AUTH_SECRET="$AUTH_SECRET" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 6. Set up Cloud Run + Firebase Hosting (Frontend)
@@ -138,12 +142,14 @@ IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/supr-repo/supr-agent"
 echo "Building Supr container image..."
 gcloud builds submit --tag $IMAGE --project=$PROJECT_ID
 
-echo "Deploying frontend to Cloud Run (supr-frontend)..."
-gcloud run deploy supr-frontend \
-  --image=$IMAGE \
-  --region=$REGION \
+echo "Deploying to Cloud Run..."
+gcloud run deploy supr-agent \
+  --image $REGION-docker.pkg.dev/$PROJECT_ID/supr-repo/supr-agent \
+  --region $REGION \
+  --project $PROJECT_ID \
   --allow-unauthenticated \
-  --set-secrets="DATABASE_URL=DATABASE_URL:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,APP_PASSWORD=APP_PASSWORD:latest" \
+  --set-env-vars="NODE_ENV=production" \
+  --set-secrets="DATABASE_URL=DATABASE_URL:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,APP_PASSWORD=APP_PASSWORD:latest,AUTH_SECRET=AUTH_SECRET:latest" \
   --project=$PROJECT_ID
 
 echo "=========================================================="

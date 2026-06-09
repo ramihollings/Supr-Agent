@@ -58,8 +58,8 @@ function LoginPageContent() {
 
   if (isSecured === null) {
     return (
-      <div className="flex-1 min-h-screen bg-surface-container flex flex-col items-center justify-center p-4 md:p-8">
-        <div className="max-w-md w-full bg-background border-4 border-primary shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-8 text-center">
+      <div className="fixed inset-0 w-screen h-screen bg-surface-container flex flex-col items-center justify-center p-4 md:p-8 overflow-y-auto">
+        <div className="max-w-md w-full bg-background border-4 border-primary shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-8 text-center my-auto">
           <p className="font-headline font-bold text-sm uppercase text-primary animate-pulse">Checking Node clearance...</p>
         </div>
       </div>
@@ -67,8 +67,8 @@ function LoginPageContent() {
   }
 
   return (
-    <div className="flex-1 min-h-screen bg-surface-container flex flex-col items-center justify-center p-4 md:p-8 selection:bg-primary-container selection:text-on-primary-container">
-      <div className="max-w-md w-full bg-background border-4 border-primary shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-8 relative overflow-hidden">
+    <div className="fixed inset-0 w-screen h-screen bg-surface-container flex flex-col items-center justify-center p-4 md:p-8 selection:bg-primary-container selection:text-on-primary-container overflow-y-auto">
+      <div className="max-w-md w-full bg-background border-4 border-primary shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-8 relative overflow-hidden my-auto">
         {/* Decorative corner block */}
         <div className="absolute top-0 right-0 bg-tertiary text-on-tertiary font-headline font-bold text-[10px] uppercase px-4 py-1 border-b-2 border-l-2 border-primary tracking-wider">
           {isSecured === false ? 'Setup Node' : 'Security Gate v3.5'}
@@ -157,8 +157,8 @@ function LoginPageContent() {
 export default function LoginPage() {
   return (
     <Suspense fallback={
-      <div className="flex-1 min-h-screen bg-surface-container flex flex-col items-center justify-center p-4 md:p-8">
-        <div className="max-w-md w-full bg-background border-4 border-primary shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-8 text-center">
+      <div className="fixed inset-0 w-screen h-screen bg-surface-container flex flex-col items-center justify-center p-4 md:p-8 overflow-y-auto">
+        <div className="max-w-md w-full bg-background border-4 border-primary shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] p-8 text-center my-auto">
           <p className="font-headline font-bold text-sm uppercase text-primary animate-pulse">Initializing Decryption...</p>
         </div>
       </div>

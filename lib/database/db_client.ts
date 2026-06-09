@@ -8,7 +8,11 @@ let pgPool: Pool | null = null;
 if (isPostgres) {
   const connectionString = process.env.DATABASE_URL;
   if (connectionString) {
-    pgPool = new Pool({ connectionString });
+    pgPool = new Pool({ 
+      connectionString,
+      connectionTimeoutMillis: 5000,
+      statement_timeout: 10000,
+    });
   } else {
     pgPool = new Pool({
       host: process.env.PGHOST,
@@ -16,6 +20,8 @@ if (isPostgres) {
       password: process.env.PGPASSWORD,
       database: process.env.PGDATABASE,
       port: process.env.PGPORT ? parseInt(process.env.PGPORT) : 5432,
+      connectionTimeoutMillis: 5000,
+      statement_timeout: 10000,
     });
   }
   console.log('[db_client] Initialized PostgreSQL connection pool.');
