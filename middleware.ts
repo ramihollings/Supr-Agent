@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifySessionToken } from '@/lib/session';
 import { telemetry } from '@/lib/telemetry';
-import { assertProductionAuthEnvironment } from '@/lib/auth';
+import { assertProductionAuthEnvironment } from '@/lib/auth_env';
 
 let isAppSecured: boolean | null = null;
 
@@ -71,7 +71,7 @@ function logRequest(request: NextRequest, requestId: string, status: number, dur
   }
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const startedAt = Date.now();
   const requestId = request.headers.get('x-request-id') || generateRequestId();
   const { pathname } = request.nextUrl;
