@@ -87,7 +87,14 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/static');
 
   if (isAuthRoute || isWebhookRoute || isInternalRoute || isPlatformHealthRoute || isLoginPage || isStaticFile) {
-    const response = NextResponse.next();
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-request-id', requestId);
+    requestHeaders.set('x-pathname', pathname);
+    const response = NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
     response.headers.set('x-request-id', requestId);
     return response;
   }
