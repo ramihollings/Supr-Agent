@@ -762,10 +762,10 @@ async function resolveGlobalProvider(
   if (cached && cached.expiresAt > Date.now()) return cached.provider;
 
   let primary: ModelProvider | null = null;
-  if (minimaxKey) {
+  if (geminiKey || (!geminiKey && process.env.GOOGLE_CLOUD_PROJECT)) {
+    primary = buildGemini(geminiKey || undefined);
+  } else if (minimaxKey) {
     primary = buildMinimax(minimaxKey);
-  } else if (geminiKey) {
-    primary = buildGemini(geminiKey);
   } else if (openaiKey) {
     primary = buildOpenAICompatiblePreset('openai', openaiKey, DEFAULT_OPENAI_MODEL);
   } else if (anthropicKey) {
