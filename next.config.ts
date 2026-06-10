@@ -22,8 +22,10 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
-  serverActions: {
-    allowedOrigins: ['supr-agent-370633661485.us-central1.run.app'],
+  experimental: {
+    serverActions: {
+      allowedOrigins: ['supr-agent-370633661485.us-central1.run.app'],
+    },
   },
   images: {
     remotePatterns: [
