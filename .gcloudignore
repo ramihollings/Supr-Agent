@@ -4,3 +4,6 @@ node_modules/
 dist/
 build/
 .next/
+supr_local.db*
+.tempmediaStorage/
+supr_workspaces/
