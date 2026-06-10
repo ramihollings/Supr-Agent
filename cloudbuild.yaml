@@ -12,12 +12,12 @@ steps:
     entrypoint: npm
     args: ['run', 'build']
   - name: gcr.io/cloud-builders/docker
-    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/supr/supr:$COMMIT_SHA', '.']
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/supr-repo/supr:$COMMIT_SHA', '.']
   - name: gcr.io/cloud-builders/docker
-    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/supr/supr:$COMMIT_SHA']
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/supr-repo/supr:$COMMIT_SHA']
 
 substitutions:
   _REGION: us-central1
 
 images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/supr/supr:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/supr-repo/supr:$COMMIT_SHA'
