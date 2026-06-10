@@ -108,8 +108,18 @@ export async function middleware(request: NextRequest) {
 
   if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
     const origin = request.headers.get('origin');
-    if (origin && origin !== request.nextUrl.origin) {
-      return NextResponse.json({ success: false, error: 'Cross-origin state change rejected.' }, { status: 403 });
+    if (origin) {
+      try {
+        const originUrl = new URL(origin);
+        const hostHeader = request.headers.get('x-forwarded-host') || request.headers.get('host') || '';
+        const hostName = hostHeader.split(':')[0];
+        const targetHost = hostName || request.nextUrl.hostname;
+        if (originUrl.hostname !== targetHost && originUrl.hostname !== 'localhost' && originUrl.hostname !== '127.0.0.1') {
+          return NextResponse.json({ success: false, error: 'Cross-origin state change rejected.' }, { status: 403 });
+        }
+      } catch (e) {
+        return NextResponse.json({ success: false, error: 'Invalid origin header.' }, { status: 403 });
+      }
     }
   }
 
