@@ -801,17 +801,31 @@ async function recordAgentRun(flowRunId: string, action: any, status: string, lo
 
 async function syncFlowNodes(flowRunId: string, missionId: string) {
   const actions = await dbClient.query<any>(`SELECT * FROM Agent_Actions WHERE mission_id = ?`, [missionId]);
+  let taskUpdated = false;
   for (const action of actions) {
     await dbClient.execute(
       `UPDATE Flow_Nodes SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE flow_run_id = ? AND kind = 'agent_action' AND ref_id = ?`,
       [action.status, flowRunId, action.id],
     );
     if (action.task_id && action.status === 'completed') {
-      await dbClient.execute(`UPDATE Tasks SET status = 'Done' WHERE id = ?`, [action.task_id]);
+      const existingTask = await dbClient.queryOne<any>(`SELECT status FROM Tasks WHERE id = ?`, [action.task_id]);
+      if (existingTask?.status !== 'Done') {
+        await dbClient.execute(`UPDATE Tasks SET status = 'Done' WHERE id = ?`, [action.task_id]);
+        taskUpdated = true;
+      }
       await dbClient.execute(
         `UPDATE Flow_Nodes SET status = 'Done', next_action = 'Completed', updated_at = CURRENT_TIMESTAMP WHERE flow_run_id = ? AND kind = 'task' AND ref_id = ?`,
         [flowRunId, action.task_id],
       );
+    }
+  }
+
+  if (taskUpdated) {
+    try {
+      const { GlidepathEngine } = await import('../governance/GlidepathEngine');
+      await GlidepathEngine.evaluateMission(missionId);
+    } catch (err) {
+      console.error("Failed to auto-evaluate mission after flow sync:", err);
     }
   }
 

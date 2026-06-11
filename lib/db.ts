@@ -475,6 +475,12 @@ export async function resolveFailure(missionId: string, failureId: string, suprG
 export async function updateTaskStatus(missionId: string, taskId: string, status: TaskStatus): Promise<void> {
   const sql = `UPDATE Tasks SET status = ? WHERE id = ?`;
   await dbClient.execute(sql, [status, taskId]);
+  try {
+    const { GlidepathEngine } = await import('./governance/GlidepathEngine');
+    await GlidepathEngine.evaluateMission(missionId);
+  } catch (err) {
+    console.error("Failed to auto-evaluate mission after task status update:", err);
+  }
 }
 
 export async function addArtifact(missionId: string, artifact: Omit<Artifact, 'id'>): Promise<void> {

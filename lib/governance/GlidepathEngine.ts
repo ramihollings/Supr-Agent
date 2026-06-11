@@ -18,7 +18,7 @@ export class GlidepathEngine {
       return { progress: 0, readinessScore: 0 };
     }
 
-    const completed = tasks.filter((t) => t.status === "Done");
+    const completed = tasks.filter((t) => (t.status as string) === "Done" || (t.status as string) === "Completed");
     const progress = completed.length / tasks.length;
     const readinessScore = Math.round(progress * 100);
 

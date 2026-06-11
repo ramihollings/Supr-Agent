@@ -46,6 +46,13 @@ export const todoTool: ToolDefinition<TodoParamsType, string> = {
         [taskId, params.missionId, params.title, status, params.ownerAgentId || null, params.requiredPermission || "Observe"]
       );
 
+      try {
+        const { GlidepathEngine } = await import("../governance/GlidepathEngine");
+        await GlidepathEngine.evaluateMission(params.missionId);
+      } catch (err) {
+        console.error("Failed to auto-evaluate mission after todo add:", err);
+      }
+
       return `Successfully added task: "${params.title}" (ID: ${taskId})`;
     }
 
@@ -86,6 +93,13 @@ export const todoTool: ToolDefinition<TodoParamsType, string> = {
         values
       );
 
+      try {
+        const { GlidepathEngine } = await import("../governance/GlidepathEngine");
+        await GlidepathEngine.evaluateMission(params.missionId);
+      } catch (err) {
+        console.error("Failed to auto-evaluate mission after todo update:", err);
+      }
+
       return `Successfully updated task ${params.taskId}`;
     }
 
@@ -98,6 +112,13 @@ export const todoTool: ToolDefinition<TodoParamsType, string> = {
         "DELETE FROM Tasks WHERE id = ? AND mission_id = ?",
         [params.taskId, params.missionId]
       );
+
+      try {
+        const { GlidepathEngine } = await import("../governance/GlidepathEngine");
+        await GlidepathEngine.evaluateMission(params.missionId);
+      } catch (err) {
+        console.error("Failed to auto-evaluate mission after todo delete:", err);
+      }
 
       return `Successfully deleted task ${params.taskId}`;
     }
