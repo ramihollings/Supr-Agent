@@ -141,11 +141,18 @@ function TopNavContent({ title = "Dashboard", children }: { title?: string, chil
                    return weights[item.minMode] <= weights[mode];
                 }).map((item, idx, arr) => {
                    const isFirstBottom = item.isBottom && !arr[idx - 1]?.isBottom;
+                   const isReasoning = item.href === '/reasoning';
                    return (
                      <li key={item.href} className={isFirstBottom ? "border-t-2 border-outline-variant pt-2 mt-2" : ""}>
-                       <Link href={getHrefWithParam(item.href)} onClick={() => setIsMobileMenuOpen(false)} className={`block py-2 font-headline font-bold uppercase hover:text-tertiary ${item.isBottom ? 'text-sm' : ''}`}>
-                         {item.label}
-                       </Link>
+                       {isReasoning ? (
+                         <span className="block py-2 font-headline font-bold uppercase text-primary/40 cursor-not-allowed opacity-50 select-none">
+                           {item.label} (Disabled)
+                         </span>
+                       ) : (
+                         <Link href={getHrefWithParam(item.href)} onClick={() => setIsMobileMenuOpen(false)} className={`block py-2 font-headline font-bold uppercase hover:text-tertiary ${item.isBottom ? 'text-sm' : ''}`}>
+                           {item.label}
+                         </Link>
+                       )}
                      </li>
                    );
                 })}

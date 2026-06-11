@@ -62,6 +62,15 @@ function SidebarContent() {
     setShowWizard(true);
   };
 
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/login');
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
+
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href);
 
@@ -96,22 +105,35 @@ function SidebarContent() {
         </div>
 
         <ul className="flex-1 overflow-y-auto flex flex-col py-4 gap-1 px-2" aria-label="Primary navigation">
-          {filteredNavItems.map((item) => (
-            <li key={item.href}>
-              <Link
-                href={getHrefWithParam(item.href)}
-                aria-current={isActive(item.href) ? 'page' : undefined}
-                className={`flex items-center gap-3 px-4 py-3 font-body font-bold uppercase text-sm transition-all active:translate-x-0.5 active:translate-y-0.5 border-2 ${
-                  isActive(item.href)
-                    ? 'bg-primary text-on-primary border-primary shadow-[3px_3px_0px_0px_rgba(26,26,26,1)]'
-                    : 'text-primary border-transparent hover:bg-surface-container hover:border-outline-variant'
-                }`}
-              >
-                <span className="material-symbols-outlined" aria-hidden="true">{item.icon}</span>
-                <span>{item.label}</span>
-              </Link>
-            </li>
-          ))}
+          {filteredNavItems.map((item) => {
+            const isReasoning = item.href === '/reasoning';
+            return (
+              <li key={item.href}>
+                {isReasoning ? (
+                  <div
+                    title="Reasoning Core is currently disabled"
+                    className="flex items-center gap-3 px-4 py-3 font-body font-bold uppercase text-sm border-2 text-primary/40 border-transparent cursor-not-allowed opacity-50 select-none"
+                  >
+                    <span className="material-symbols-outlined" aria-hidden="true">{item.icon}</span>
+                    <span>{item.label} (Disabled)</span>
+                  </div>
+                ) : (
+                  <Link
+                    href={getHrefWithParam(item.href)}
+                    aria-current={isActive(item.href) ? 'page' : undefined}
+                    className={`flex items-center gap-3 px-4 py-3 font-body font-bold uppercase text-sm transition-all active:translate-x-0.5 active:translate-y-0.5 border-2 ${
+                      isActive(item.href)
+                        ? 'bg-primary text-on-primary border-primary shadow-[3px_3px_0px_0px_rgba(26,26,26,1)]'
+                        : 'text-primary border-transparent hover:bg-surface-container hover:border-outline-variant'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined" aria-hidden="true">{item.icon}</span>
+                    <span>{item.label}</span>
+                  </Link>
+                )}
+              </li>
+            );
+          })}
         </ul>
 
         <div className="border-t-4 border-primary p-2 flex flex-col">
@@ -160,13 +182,20 @@ function SidebarContent() {
             </div>
           </div>
 
-          <div className="relative">
+          <div className="relative flex flex-col gap-2">
             <button
               onClick={handleNewMission}
               className="w-full bg-primary text-on-primary font-headline font-bold uppercase py-3 border-2 border-primary hover:bg-primary-fixed hover:text-primary transition-colors duration-100 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] active:translate-x-1 active:translate-y-1 active:shadow-none flex items-center justify-center gap-2"
             >
               <span className="material-symbols-outlined text-[18px]">add</span>
               New Project
+            </button>
+            <button
+              onClick={handleLogout}
+              className="w-full bg-error text-on-error font-headline font-bold uppercase py-2 border-2 border-error hover:bg-red-700 transition-colors duration-100 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] active:translate-x-1 active:translate-y-1 active:shadow-none flex items-center justify-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[18px]">logout</span>
+              Logout
             </button>
           </div>
         </div>

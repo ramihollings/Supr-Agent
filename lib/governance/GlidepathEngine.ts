@@ -20,7 +20,7 @@ export class GlidepathEngine {
 
     const completed = tasks.filter((t) => t.status === "Done");
     const progress = completed.length / tasks.length;
-    const readinessScore = progress;
+    const readinessScore = Math.round(progress * 100);
 
     // Update Glidepaths table in database
     await dbClient.execute("UPDATE Glidepaths SET progress = ?, readiness_score = ? WHERE mission_id = ?", [
@@ -39,7 +39,7 @@ export class GlidepathEngine {
         actor: "Supr",
         actorIcon: "smart_toy",
         summary: `Mission "${mission.name}" completed successfully.`,
-        detail: `All ${tasks.length} tasks resolved. Readiness score: ${(readinessScore * 100).toFixed(0)}%.`,
+        detail: `All ${tasks.length} tasks resolved. Readiness score: ${readinessScore.toFixed(0)}%.`,
       });
     }
 
