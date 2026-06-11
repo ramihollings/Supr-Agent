@@ -545,7 +545,7 @@ export async function addMemoryItem(missionId: string, item: Omit<MemoryItem, 'i
 export async function createMission(missionData: Omit<Mission, 'id'>): Promise<Mission> {
   const newMissionId = newId('m');
 
-  await dbClient.runTransaction([
+  const queries: any[] = [
     {
       sql: `INSERT INTO Missions (id, title, goal, status) VALUES (?, ?, ?, ?)`,
       params: [newMissionId, missionData.name, missionData.objective, missionData.status]
@@ -583,10 +583,34 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
         }, null, 2)
       ]
     }
-  ]);
+  ];
+
+  for (const task of (missionData.tasks || [])) {
+    queries.push({
+      sql: `INSERT INTO Tasks (id, mission_id, title, status, owner_agent_id, required_permission) VALUES (?, ?, ?, ?, ?, ?)`,
+      params: [
+        task.id || `task-${crypto.randomUUID()}`,
+        newMissionId,
+        task.title,
+        task.status || 'Pending',
+        task.agentName || null,
+        'Observe'
+      ]
+    });
+  }
+
+  await dbClient.runTransaction(queries);
 
   const newMission = await getMissionById(newMissionId);
   if (!newMission) throw new Error("Failed to create mission in database.");
+
+  try {
+    const { GlidepathEngine } = await import('./governance/GlidepathEngine');
+    await GlidepathEngine.evaluateMission(newMissionId);
+  } catch (err) {
+    console.error("Failed to initially evaluate new mission:", err);
+  }
+
   return newMission;
 }
 
