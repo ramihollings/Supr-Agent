@@ -135,14 +135,15 @@ export class GeminiProvider extends ModelProvider {
 
   constructor(apiKey?: string, defaultModel = DEFAULT_GEMINI_MODEL) {
     super();
-    if (!apiKey && process.env.GOOGLE_CLOUD_PROJECT) {
+    const cleanApiKey = (apiKey === 'placeholder' || !apiKey) ? undefined : apiKey;
+    if (!cleanApiKey && process.env.GOOGLE_CLOUD_PROJECT) {
       this.ai = new GoogleGenAI({
         vertexai: true,
         project: process.env.GOOGLE_CLOUD_PROJECT,
         location: process.env.GOOGLE_CLOUD_REGION || 'us-central1',
       });
     } else {
-      this.ai = new GoogleGenAI(apiKey ? { apiKey } : {});
+      this.ai = new GoogleGenAI(cleanApiKey ? { apiKey: cleanApiKey } : {});
     }
     this.defaultModel = defaultModel;
     this.modelName = defaultModel;
