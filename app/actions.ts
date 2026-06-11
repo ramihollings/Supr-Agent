@@ -1,4 +1,4 @@
-﻿"use server"
+"use server"
 
 import dbClient from '@/lib/database/db_client';
 import {
@@ -543,7 +543,9 @@ export async function deleteMissionAction(missionId: string) {
   try {
     const id = z.string().min(1).max(160).parse(missionId);
     const groups = await dbClient.query<{ id: string }>(`SELECT id FROM Agent_Groups WHERE mission_id = ?`, [id]);
+    const sessions = await dbClient.query<{ id: string }>(`SELECT id FROM agent_sessions WHERE mission_id = ?`, [id]);
     const operations = [
+      ...sessions.map((session) => ({ sql: `DELETE FROM job_executions WHERE session_id = ?`, params: [session.id] })),
       ...groups.map((group) => ({ sql: `DELETE FROM Agent_Group_Members WHERE group_id = ?`, params: [group.id] })),
       { sql: `DELETE FROM Agent_Groups WHERE mission_id = ?`, params: [id] },
       { sql: `DELETE FROM Agent_Blueprints WHERE mission_id = ?`, params: [id] },
@@ -563,6 +565,11 @@ export async function deleteMissionAction(missionId: string) {
       { sql: `DELETE FROM Failure_Events WHERE mission_id = ?`, params: [id] },
       { sql: `DELETE FROM Tasks WHERE mission_id = ?`, params: [id] },
       { sql: `DELETE FROM Glidepaths WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM agent_sessions WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM learned_skill_drafts WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM outbound_messages WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM provider_route_decisions WHERE mission_id = ?`, params: [id] },
+      { sql: `DELETE FROM replan_decisions WHERE mission_id = ?`, params: [id] },
       { sql: `DELETE FROM Missions WHERE id = ?`, params: [id] },
     ];
     await dbClient.runTransaction(operations);
