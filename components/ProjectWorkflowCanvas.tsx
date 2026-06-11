@@ -180,7 +180,10 @@ export function ProjectWorkflowCanvas({
     for (const n of graph.nodes) {
       const prev = lastNodeMapRef.current.get(n.id);
       if (prev && prev.status !== n.status) {
-        pendingStatusChangesRef.current.push({ id: n.id, status: n.status });
+        const alreadyQueued = pendingStatusChangesRef.current.some(
+          (change) => change.id === n.id && change.status === n.status,
+        );
+        if (!alreadyQueued) pendingStatusChangesRef.current.push({ id: n.id, status: n.status });
       }
     }
     // Remove queue entries for nodes that no longer exist.
@@ -188,11 +191,17 @@ export function ProjectWorkflowCanvas({
     pendingStatusChangesRef.current = pendingStatusChangesRef.current.filter(
       (p) => liveIds.has(p.id),
     );
-    // Update the last-seen map to the latest incoming positions so
-    // the canvas can re-render positions in lock-step with
-    // statuses.
+    // Take new labels/positions immediately, but preserve the displayed
+    // status until the queue applies it. Replacing this with graph.nodes
+    // would visually skip every queued transition.
     lastNodeMapRef.current = incomingById;
-    setRenderedNodes(graph.nodes);
+    setRenderedNodes((previous) => {
+      const displayedById = new Map(previous.map((node) => [node.id, node]));
+      return graph.nodes.map((node) => ({
+        ...node,
+        status: displayedById.get(node.id)?.status ?? node.status,
+      }));
+    });
   }, [graph]);
 
   // Drainer: one node transition per `transitionMs`.
@@ -306,6 +315,32 @@ export function ProjectWorkflowCanvas({
   // Phase sub-graph expansion logic.
   // -------------------------------------------------------------------
   const phaseGroups = useMemo(() => graph?.phaseGroups || [], [graph?.phaseGroups]);
+  const progressSummary = useMemo(() => {
+    const terminalStatuses = new Set(['Done', 'completed', 'stored', 'approved']);
+    const failedStatuses = new Set(['Blocked', 'failed']);
+    const meaningfulNodes = renderedNodes.filter((node) => node.kind !== 'phase');
+    const done = meaningfulNodes.filter((node) => terminalStatuses.has(node.status)).length;
+    const failed = meaningfulNodes.filter((node) => failedStatuses.has(node.status)).length;
+    const total = meaningfulNodes.length;
+    const artifacts = renderedNodes.filter(
+      (node) => node.kind === 'artifact' && terminalStatuses.has(node.status),
+    );
+    const phasesDone = phaseGroups.filter((phase) => phase.status === 'Done').length;
+    const activePhase = phaseGroups.find((phase) => phase.status === 'Active');
+    const flowComplete = graph?.flowRun?.status === 'completed'
+      || (total > 0 && done === total)
+      || (phaseGroups.length > 0 && phasesDone === phaseGroups.length);
+    return {
+      total,
+      done,
+      failed,
+      artifacts,
+      phasesDone,
+      activePhase,
+      flowComplete,
+      percent: total > 0 ? Math.round((done / total) * 100) : 0,
+    };
+  }, [graph?.flowRun?.status, phaseGroups, renderedNodes]);
   const togglePhase = useCallback((phaseId: string) => {
     setExpandedPhases((prev) => {
       const next = new Set(prev);
@@ -385,6 +420,84 @@ export function ProjectWorkflowCanvas({
           </div>
         </div>
       </div>
+
+      {graph && graph.nodes.length > 0 && (
+        <div className="border-b-4 border-primary bg-background p-4 space-y-4" aria-live="polite">
+          <div className={`border-4 p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 ${
+            progressSummary.flowComplete
+              ? 'border-tertiary bg-tertiary/10'
+              : progressSummary.failed > 0
+                ? 'border-secondary bg-secondary/10'
+                : 'border-primary bg-primary/5'
+          }`}>
+            <div className="flex items-start gap-3">
+              <span className="material-symbols-outlined text-3xl text-primary" aria-hidden="true">
+                {progressSummary.flowComplete ? 'task_alt' : progressSummary.failed > 0 ? 'error' : 'pending_actions'}
+              </span>
+              <div>
+                <p className="font-headline font-black uppercase text-xl text-primary">
+                  {progressSummary.flowComplete
+                    ? 'Project work complete'
+                    : progressSummary.failed > 0
+                      ? 'Project needs attention'
+                      : progressSummary.activePhase
+                        ? `Working: ${progressSummary.activePhase.name}`
+                        : 'Project queued'}
+                </p>
+                <p className="font-body text-xs font-semibold text-on-surface-variant">
+                  {progressSummary.flowComplete
+                    ? `${progressSummary.artifacts.length} deliverable${progressSummary.artifacts.length === 1 ? '' : 's'} created and ready to review.`
+                    : `${progressSummary.done} of ${progressSummary.total} work items complete${progressSummary.failed > 0 ? `, ${progressSummary.failed} blocked or failed` : ''}.`}
+                </p>
+              </div>
+            </div>
+            <div className="min-w-[220px]">
+              <div className="flex justify-between font-mono text-[10px] font-bold uppercase mb-1">
+                <span>Overall completion</span>
+                <span>{progressSummary.percent}%</span>
+              </div>
+              <div className="h-4 border-2 border-primary bg-background overflow-hidden">
+                <div
+                  className={`h-full transition-[width] duration-700 ${progressSummary.flowComplete ? 'bg-tertiary' : 'bg-primary'}`}
+                  style={{ width: `${progressSummary.percent}%` }}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={progressSummary.percent}
+                />
+              </div>
+            </div>
+          </div>
+
+          {phaseGroups.length > 0 && (
+            <ol className="grid grid-cols-1 sm:grid-cols-5 gap-2" aria-label="Project phases">
+              {phaseGroups.map((phase, index) => (
+                <li
+                  key={`${phase.id}-summary`}
+                  className={`border-2 p-3 ${
+                    phase.status === 'Done'
+                      ? 'border-tertiary bg-tertiary/10'
+                      : phase.status === 'Active'
+                        ? 'border-primary bg-primary text-on-primary'
+                        : phase.status === 'Blocked' || phase.status === 'Gate_Pending'
+                          ? 'border-secondary bg-secondary/10'
+                          : 'border-outline-variant bg-surface-container'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[9px] font-bold uppercase">0{index + 1}</span>
+                    <span className="material-symbols-outlined text-sm" aria-hidden="true">
+                      {phase.status === 'Done' ? 'check_circle' : phase.status === 'Active' ? 'play_circle' : 'radio_button_unchecked'}
+                    </span>
+                  </div>
+                  <p className="font-headline font-black uppercase text-[11px] mt-2">{phase.name}</p>
+                  <p className="font-mono text-[8px] uppercase mt-1">{phase.status}</p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] flex-1 min-h-0">
         <div className="relative overflow-auto custom-scrollbar bg-surface-container-low border-b-4 xl:border-b-0 xl:border-r-4 border-primary">
