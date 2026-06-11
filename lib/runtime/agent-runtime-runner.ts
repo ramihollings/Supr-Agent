@@ -390,6 +390,9 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
             return { error: new Error(`Runtime exceeded max step budget (${maxSteps}) without final evidence.`) };
           }
 
+          // Slow down everything so the user can see actions and agent delegation in real-time
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+
           const raw = await withRuntimeTimeout(getModelResponse({
             action,
             context,
@@ -532,6 +535,8 @@ export async function runAgentRuntimeAction(input: AgentRuntimeRunInput & { flow
           return { response, step: state.step + 1 };
         })
         .addNode('tool', async (state) => {
+          // Slow down tool invocation so users see active progress and feedback
+          await new Promise((resolve) => setTimeout(resolve, 2000));
           const response = state.response;
           state.transcriptIds.push(await recordStep({
             missionId: action.missionId,

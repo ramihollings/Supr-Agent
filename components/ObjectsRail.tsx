@@ -106,16 +106,23 @@ export function ObjectsRail({
                     : "border-outline-variant bg-surface hover:border-primary"
                 }`}
               >
-                <div className="flex justify-between gap-3">
-                  <span className="font-body text-sm font-semibold truncate">{project.name}</span>
-                  <span className="font-mono text-[9px] uppercase text-secondary">{project.status}</span>
+                <div className="flex justify-between gap-3 items-center">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {((project.status as string) === 'Completed' || (project.status as string) === 'Done' || project.readinessScore === 100) && (
+                      <span className="material-symbols-outlined text-tertiary text-lg shrink-0" aria-hidden="true">check_circle</span>
+                    )}
+                    <span className="font-body text-sm font-semibold truncate">{project.name}</span>
+                  </div>
+                  <span className={`font-mono text-[9px] uppercase font-bold ${((project.status as string) === 'Completed' || (project.status as string) === 'Done') ? 'text-tertiary' : 'text-secondary'}`}>
+                    {project.status}
+                  </span>
                 </div>
                 <p className="font-body text-[10px] text-on-surface-variant line-clamp-2 mt-1">
                   {project.objective || "No objective yet."}
                 </p>
                 <div className="mt-2 h-2 bg-background border border-primary overflow-hidden rounded-sm">
                   <div
-                    className="h-full bg-secondary"
+                    className={`h-full ${((project.status as string) === 'Completed' || (project.status as string) === 'Done' || project.readinessScore === 100) ? 'bg-tertiary' : 'bg-secondary'}`}
                     style={{ width: `${project.readinessScore || 0}%` }}
                     aria-label={`Readiness ${project.readinessScore || 0}%`}
                   />
