@@ -890,6 +890,10 @@ export async function runProjectFlow(projectId: string) {
 
     await dbClient.execute(`UPDATE Tasks SET status = 'Active' WHERE id = ?`, [actionRow.task_id]);
     await logFlowEvent(projectId, 'agent_action', actionRow.agent_id || 'Agent', `Claimed work: ${actionRow.capability}`, actionRow.intent || '');
+    
+    // Slow down workflow to let the operator see the status transition to Active / agent delegation
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
     try {
       const execution = await runAgentRuntimeAction({
         actionId: actionRow.id,
@@ -899,6 +903,10 @@ export async function runProjectFlow(projectId: string) {
       if (execution.status === 'completed') {
         completed += 1;
         await recordAgentRun(flowRun.id, actionRow, 'completed', `Runtime completed ${actionRow.capability}`, execution.result);
+        
+        // Pacing delay after task completion so progress changes are clearly visible
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        
         const origin = await getOriginatingChannel(projectId);
         await messagingGateway.notify({
           source: origin?.source,
