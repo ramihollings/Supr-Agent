@@ -585,7 +585,14 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
     }
   ];
 
+  const agents = await dbClient.query<{ id: string; name: string }>(`SELECT id, name FROM Agents`);
+  const agentMap = new Map<string, string>();
+  for (const agent of agents) {
+    agentMap.set(agent.name.toLowerCase(), agent.id);
+  }
+
   for (const task of (missionData.tasks || [])) {
+    const ownerAgentId = task.agentName ? (agentMap.get(task.agentName.toLowerCase()) || null) : null;
     queries.push({
       sql: `INSERT INTO Tasks (id, mission_id, title, status, owner_agent_id, required_permission) VALUES (?, ?, ?, ?, ?, ?)`,
       params: [
@@ -593,7 +600,7 @@ export async function createMission(missionData: Omit<Mission, 'id'>): Promise<M
         newMissionId,
         task.title,
         task.status || 'Pending',
-        task.agentName || null,
+        ownerAgentId,
         'Observe'
       ]
     });
