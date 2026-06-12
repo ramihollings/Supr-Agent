@@ -41,6 +41,8 @@ Browser / Telegram
 
 ## 🚀 Live Demo
 
+**📺 Demo Video:** [Watch on YouTube](https://youtu.be/Vo7Noru200w)
+
 The app is deployed and running on Google Cloud:
 
 **URL:** `https://supr-agent-370633661485.us-central1.run.app`
@@ -48,6 +50,7 @@ The app is deployed and running on Google Cloud:
 Demo target repositories used in the scenario:
 - [`ramihollings/supr-demo-target-alpha`](https://github.com/ramihollings/supr-demo-target-alpha) — missing rate-limiting table
 - [`ramihollings/supr-demo-target-beta`](https://github.com/ramihollings/supr-demo-target-beta) — memory leak in worker
+
 
 ---
 
